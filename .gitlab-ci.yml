@@ -1,0 +1,32 @@
+stages:
+  - validate
+  - test
+  - build
+  - deploy
+
+default:
+  interruptible: true
+
+structure-check:
+  stage: validate
+  image: alpine:3.20
+  script:
+    - test -d client
+    - test -d backend
+    - test -d notification
+    - test -d collector
+    - test -d archiver
+    - test -d sparkjobs
+    - test -d infra
+    - test -d docs/contracts
+  rules:
+    - changes:
+        - "**/*"
+
+# 후속 작업
+# - client/**: Flutter test + Android/Web build
+# - backend/**: Spring test + image build/deploy
+# - collector/**: pytest + image build/deploy
+# - sparkjobs/**: PySpark check/test + job deploy
+# - notification/**: Spring test + image build/deploy
+# - infra/**: validate 후 수동 승인

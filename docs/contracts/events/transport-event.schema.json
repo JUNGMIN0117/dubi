@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ddubi.local/schemas/transport-event.schema.json",
+  "title": "TransportEvent",
+  "type": "object",
+  "required": ["eventId", "eventType", "source", "occurredAt", "collectedAt", "payload"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "region": { "type": "string" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "collectedAt": { "type": "string", "format": "date-time" },
+    "location": {
+      "type": "object",
+      "properties": {
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" }
+      }
+    },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

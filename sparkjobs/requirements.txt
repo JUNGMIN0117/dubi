@@ -1,0 +1,4 @@
+# SPARK_IMAGE를 확정할 때 클러스터와 동일한 버전으로 고정합니다.
+pyspark
+pyarrow
+pytest

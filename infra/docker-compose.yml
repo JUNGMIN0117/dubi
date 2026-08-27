@@ -1,0 +1,16 @@
+name: ddubi
+
+# 서비스 정의는 이미지 버전과 자원 제한 확정 후 추가합니다.
+services: {}
+
+networks:
+  ddubi-network:
+    name: ddubi-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  hdfs-namenode-data:
+  hdfs-datanode1-data:
+  hdfs-datanode2-data:

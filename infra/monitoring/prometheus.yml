@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  # Backend, Kafka, Spark, Redis, PostgreSQL, Node exporter 대상은
+  # Docker Compose 서비스와 서버 사설 IP가 확정된 뒤 추가합니다.

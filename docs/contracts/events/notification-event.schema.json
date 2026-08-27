@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ddubi.local/schemas/notification-event.schema.json",
+  "title": "NotificationEvent",
+  "type": "object",
+  "required": ["eventId", "userId", "notificationType", "scheduledAt", "payload"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "userId": { "type": "string", "minLength": 1 },
+    "notificationType": { "type": "string", "minLength": 1 },
+    "scheduledAt": { "type": "string", "format": "date-time" },
+    "deduplicationKey": { "type": "string" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

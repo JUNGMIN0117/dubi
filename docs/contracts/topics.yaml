@@ -1,0 +1,17 @@
+topics:
+  transport.raw:
+    description: 정규화 전후 교통 수집 이벤트
+    partitions: 3
+    retentionHours: 72
+  city.raw:
+    description: 날씨·행사·도로 돌발 이벤트
+    partitions: 3
+    retentionHours: 72
+  segment.status:
+    description: Spark가 계산한 구간별 최신 상태
+    partitions: 3
+    retentionHours: 24
+  notification.requested:
+    description: Backend가 발행하는 알림 요청
+    partitions: 3
+    retentionHours: 72

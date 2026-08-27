@@ -1,0 +1,1 @@
+"""Road traffic API collector."""

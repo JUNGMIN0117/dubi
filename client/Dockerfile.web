@@ -1,0 +1,9 @@
+ARG FLUTTER_IMAGE
+FROM ${FLUTTER_IMAGE} AS build
+WORKDIR /app
+COPY client/ .
+RUN flutter pub get && flutter build web --release
+
+FROM nginx:alpine
+COPY infra/nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/build/web /usr/share/nginx/html

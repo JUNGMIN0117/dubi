@@ -1,0 +1,4 @@
+confluent-kafka>=2.5,<3
+pyarrow>=17,<20
+pydantic>=2.8,<3
+pytest>=8,<9

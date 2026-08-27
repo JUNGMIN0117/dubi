@@ -1,0 +1,13 @@
+keys:
+  segmentStatus:
+    pattern: "segment:status:{segmentId}"
+    ttlSeconds: 300
+    description: Spark가 계산한 구간별 최신 상태
+  routeCandidates:
+    pattern: "route:candidates:{originHash}:{destinationHash}"
+    ttlSeconds: 600
+    description: 외부 길찾기 API 후보 경로 단기 캐시
+  notificationDedup:
+    pattern: "notification:dedup:{deduplicationKey}"
+    ttlSeconds: 86400
+    description: 동일 알림 중복 발송 방지

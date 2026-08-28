@@ -24,7 +24,7 @@ sparkjobs/    PySpark Streaming·Batch 작업
 backend/      사용자·일정·추천 API
 notification/ Kafka 알림 이벤트 소비 및 FCM 발송
 client/       Flutter Android·Web 공통 클라이언트
-docs/         아키텍처와 데이터 계약
+docs/         아키텍처와 데이터 계약 / TIL 파일 모음
 ```
 
 ## 데이터 흐름

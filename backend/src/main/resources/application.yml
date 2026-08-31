@@ -103,3 +103,13 @@ ddubi:
       public-transit-path: /v2/routing/publictraffic
       # 실제 값은 .env 또는 배포 환경변수로 넣고 저장소에는 절대 커밋하지 않는다.
       rest-api-key: ${KAKAO_REST_API_KEY:}
+      oauth:
+        # 카카오 로그인은 길찾기(dapi)와 호스트가 다르다.
+        #   kauth = 인가 코드를 액세스 토큰으로 교환
+        #   kapi  = 액세스 토큰으로 사용자 정보 조회
+        auth-url: https://kauth.kakao.com
+        api-url: https://kapi.kakao.com
+        # 같은 앱의 REST API 키다. 프론트가 로그인에 쓰는 앱과 동일해야 인가 코드가 교환된다.
+        rest-api-key: ${KAKAO_REST_API_KEY:}
+        # 콘솔 > 카카오 로그인 > 보안 에서 켰을 때만 필요하다. 안 켰으면 비워둔다.
+        client-secret: ${KAKAO_CLIENT_SECRET:}

@@ -35,9 +35,17 @@ import java.util.List;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    /** 인증 없이 열어두는 경로. internal API 는 여기 넣지 않는다(서비스 계정 전용). */
+    /**
+     * 인증 없이 열어두는 경로.
+     *
+     * /auth/** 를 통째로 열지 않는다 — logout 은 명세서상 "로그인 사용자" 전용이라
+     * 인증이 걸려야 한다. internal API 도 여기 넣지 않는다(서비스 계정 전용).
+     */
     private static final String[] PUBLIC_PATHS = {
-            "/api/v1/auth/**",
+            "/api/v1/auth/local/signup",
+            "/api/v1/auth/local/login",
+            "/api/v1/auth/oauth",
+            "/api/v1/auth/refresh",
             "/actuator/health",
             "/actuator/health/**",
             "/actuator/prometheus",

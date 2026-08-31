@@ -135,6 +135,10 @@ public class JwtTokenProvider {
         return parse(token).filter(payload -> payload.type() == expected);
     }
 
+    public Duration accessTokenValidity() {
+        return properties.accessTokenValidity();
+    }
+
     public Duration refreshTokenValidity() {
         return properties.refreshTokenValidity();
     }

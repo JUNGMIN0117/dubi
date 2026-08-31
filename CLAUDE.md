@@ -43,9 +43,10 @@ SSAFY 특화 프로젝트. 일정 기반으로 실시간 교통·날씨·행사�
 8. ~~기준선 배치~~ (batch/weather_baseline: 아카이브 → 격자·요일·시간대 기준선 → HDFS /ddubi/baseline/weather. 실행: `docker compose --profile batch --profile spark run --rm spark-batch sh submit.sh batch/weather_baseline.py`)
    - 구간(segment) 기준선은 같은 틀(common/archive_source + 집계 함수)로 만들되 segment_id 설계·transport 수집기가 먼저 필요
    - 배치 실행기는 스트리밍이 남긴 워커 메모리 안(480m)에서 돈다. 워커 메모리를 늘리면 BATCH_EXECUTOR_MEMORY 도 올린다
-9. **서버 이식** ← 다음(HTTPS 조기: Flutter는 평문 HTTP 차단, MySQL/Redis/Kafka 포트 비공개, 데이터노드 extra_hosts) → 10. GitLab CI → 11. 부하·확장 실험
+9. **서버 이식** ← 서버 준비되면(HTTPS 조기: Flutter는 평문 HTTP 차단, MySQL/Redis/Kafka 포트 비공개, 데이터노드 extra_hosts 필요)
+10. ~~GitLab CI~~ (2026-08-31 작성: validate 3종 + 컴포넌트별 pytest, 이미지 빌드는 dind 러너용 수동 잡. 실제 러너에서 첫 파이프라인 확인 필요) → 11. 부하·확장 실험
 - 순서 밖 미완: 수집기 bus/subway/traffic/event 구현, segment.status 계산 잡, Grafana 대시보드·exporter 스크랩, backend/notification/nginx compose 정의
-- 알고 있는 개선점(미착수): weather 수집기가 격자를 공유하는 구마다 같은 관측을 따로 발행(25회 중 11회 중복). 격자 14개만 호출하고 payload 에 districts 목록을 담는 쪽으로 변경 예정 — 수집기·Spark PAYLOAD_SCHEMA·redis-keys weatherLatest 를 함께 고쳐야 함
+- weather 수집기는 격자(14개) 단위로 호출하고 payload.districts 에 구 목록을 담는다(2026-08-31 개선). Spark 는 옛 형식(district 단수)도 배열로 승격해 읽는다
 - 팀 결정 대기: 좌표→segmentIds 변환 주체(수집기 vs Spark), Spark 가 provider↔segment 매핑을 읽는 방법, Kafka retention.bytes(1GiB/파티션) 조정, 스키마 버전 필드(schemaVersion) 추가 여부
 
 ## 작업 방식 규칙

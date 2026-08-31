@@ -17,6 +17,12 @@ spring:
       hibernate:
         format_sql: true
 
+# 로컬 전용 placeholder. 운영에서는 환경변수 JWT_SECRET 으로 주입한다.
+# HS256 이라 최소 32바이트여야 하며, 짧으면 기동이 실패한다.
+ddubi:
+  jwt:
+    secret: ${JWT_SECRET:ddubi-local-dev-only-secret-key-do-not-use-in-production}
+
 logging:
   level:
     com.ssafy.ddubi: DEBUG

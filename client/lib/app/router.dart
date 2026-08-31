@@ -1,47 +1,168 @@
-import 'package:ddubi/screens/auth/login_screen.dart';
-import 'package:ddubi/screens/home/home_screen.dart';
-import 'package:ddubi/screens/notification/notification_screen.dart';
-import 'package:ddubi/screens/recommendation/recommendation_detail_screen.dart';
-import 'package:ddubi/screens/schedule/schedule_detail_screen.dart';
-import 'package:ddubi/screens/schedule/schedule_form_screen.dart';
-import 'package:ddubi/screens/schedule/schedule_list_screen.dart';
-import 'package:ddubi/widgets/common/placeholder_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-final GoRouter appRouter = GoRouter(
-  initialLocation: '/home',
-  routes: [
-    GoRoute(path: '/', redirect: (context, state) => '/home'),
-    GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
-    GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
-    GoRoute(
-      path: '/schedules',
-      builder: (context, state) => const ScheduleListScreen(),
-      routes: [
-        GoRoute(
-          path: 'new',
-          builder: (context, state) => const ScheduleFormScreen(),
-        ),
-        GoRoute(
-          path: ':id',
-          builder: (context, state) =>
-              ScheduleDetailScreen(scheduleId: state.pathParameters['id']!),
-        ),
-      ],
-    ),
-    GoRoute(
-      path: '/recommendations/:id',
-      builder: (context, state) => RecommendationDetailScreen(
-        recommendationId: state.pathParameters['id']!,
+import '../core/constants/layout_constants.dart';
+import '../presentation/screens.dart';
+import '../providers/app_providers.dart';
+
+final appRouterProvider = Provider<GoRouter>((ref) {
+  final repository = ref.watch(ddubiRepositoryProvider);
+  final authRepository = ref.watch(authRepositoryProvider);
+
+  return GoRouter(
+    initialLocation: '/login',
+    routes: [
+      GoRoute(path: '/', redirect: (context, state) => '/login'),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) =>
+            LoginScreen(authRepository: authRepository),
       ),
+      ShellRoute(
+        builder: (context, state, child) =>
+            _ResponsiveNavigationShell(location: state.uri.path, child: child),
+        routes: [
+          GoRoute(
+            path: '/home',
+            builder: (context, state) => HomeScreen(repository: repository),
+          ),
+          GoRoute(
+            path: '/schedules',
+            builder: (context, state) =>
+                ScheduleListScreen(repository: repository),
+            routes: [
+              GoRoute(
+                path: 'new',
+                builder: (context, state) => ScheduleFormScreen(
+                  repository: repository,
+                  initialDate: state.extra as DateTime?,
+                ),
+              ),
+              GoRoute(
+                path: ':id',
+                builder: (context, state) => ScheduleDetailScreen(
+                  repository: repository,
+                  scheduleId: state.pathParameters['id']!,
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/recommendations/:id',
+            builder: (context, state) =>
+                RouteResultsScreen(repository: repository),
+          ),
+          GoRoute(
+            path: '/notifications',
+            builder: (context, state) => const NotificationsScreen(),
+          ),
+          GoRoute(
+            path: '/settings',
+            builder: (context, state) => SettingsScreen(repository: repository),
+          ),
+        ],
+      ),
+    ],
+    errorBuilder: (context, state) => Scaffold(
+      appBar: AppBar(title: const Text('페이지를 찾을 수 없어요')),
+      body: Center(child: Text(state.error?.toString() ?? '경로를 확인해주세요.')),
     ),
-    GoRoute(
-      path: '/notifications',
-      builder: (context, state) => const NotificationScreen(),
-    ),
-  ],
-  errorBuilder: (context, state) => PlaceholderScreen(
-    title: '페이지를 찾을 수 없어요',
-    message: state.error?.toString() ?? '요청한 경로를 확인해 주세요.',
-  ),
-);
+  );
+});
+
+class _ResponsiveNavigationShell extends StatelessWidget {
+  const _ResponsiveNavigationShell({
+    required this.location,
+    required this.child,
+  });
+
+  final String location;
+  final Widget child;
+
+  int get _selectedIndex {
+    if (location.startsWith('/schedules')) return 0;
+    if (location.startsWith('/recommendations')) return 1;
+    if (location.startsWith('/notifications')) return 3;
+    if (location.startsWith('/settings')) return 4;
+    return 2;
+  }
+
+  void _go(BuildContext context, int index) {
+    const locations = [
+      '/schedules',
+      '/recommendations/mock-recommendation-1',
+      '/home',
+      '/notifications',
+      '/settings',
+    ];
+    context.go(locations[index]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const destinations = [
+      NavigationDestination(
+        icon: Icon(Icons.calendar_today_outlined),
+        label: '일정',
+      ),
+      NavigationDestination(icon: Icon(Icons.route_outlined), label: '경로'),
+      NavigationDestination(icon: Icon(Icons.home_outlined), label: '홈'),
+      NavigationDestination(icon: Icon(Icons.notifications_none), label: '알림'),
+      NavigationDestination(icon: Icon(Icons.menu), label: '더보기'),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide =
+            constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
+        if (isWide) {
+          return Scaffold(
+            body: Row(
+              children: [
+                NavigationRail(
+                  selectedIndex: _selectedIndex,
+                  onDestinationSelected: (index) => _go(context, index),
+                  labelType: NavigationRailLabelType.all,
+                  destinations: const [
+                    NavigationRailDestination(
+                      icon: Icon(Icons.calendar_today_outlined),
+                      label: Text('일정'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.route_outlined),
+                      label: Text('경로'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.home_outlined),
+                      label: Text('홈'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.notifications_none),
+                      label: Text('알림'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.menu),
+                      label: Text('더보기'),
+                    ),
+                  ],
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(child: child),
+              ],
+            ),
+          );
+        }
+
+        return Scaffold(
+          body: child,
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _selectedIndex,
+            onDestinationSelected: (index) => _go(context, index),
+            destinations: destinations,
+          ),
+        );
+      },
+    );
+  }
+}

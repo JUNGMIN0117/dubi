@@ -1,4 +1,3 @@
-import 'package:ddubi/models/recommendation.dart';
 import 'package:dio/dio.dart';
 
 class RecommendationApi {
@@ -6,10 +5,6 @@ class RecommendationApi {
 
   final Dio _dio;
 
-  Future<Recommendation> getRecommendation(String id) async {
-    final response = await _dio.get<Map<String, dynamic>>(
-      '/recommendations/$id',
-    );
-    return Recommendation.fromJson(response.data!);
-  }
+  Future<Response<Map<String, dynamic>>> getRecommendation(String id) =>
+      _dio.get<Map<String, dynamic>>('/recommendations/$id');
 }

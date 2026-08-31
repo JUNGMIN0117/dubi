@@ -12,6 +12,11 @@
 .swiftpm/
 migrate_working_dir/
 
+# The repository root ignores runtime data directories. Flutter source files
+# under lib/data are application code and must remain trackable.
+!lib/data/
+!lib/data/**
+
 # IntelliJ related
 *.iml
 *.ipr

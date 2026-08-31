@@ -1,4 +1,3 @@
-import 'package:ddubi/models/schedule.dart';
 import 'package:dio/dio.dart';
 
 class ScheduleApi {
@@ -6,10 +5,6 @@ class ScheduleApi {
 
   final Dio _dio;
 
-  Future<List<Schedule>> getSchedules() async {
-    final response = await _dio.get<List<dynamic>>('/schedules');
-    return (response.data ?? const <dynamic>[])
-        .map((item) => Schedule.fromJson(item as Map<String, dynamic>))
-        .toList();
-  }
+  Future<Response<List<dynamic>>> getSchedules() =>
+      _dio.get<List<dynamic>>('/schedules');
 }

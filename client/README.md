@@ -1,11 +1,17 @@
-# Client
+# ddubi
 
-Flutter 하나로 Android 앱과 Web을 함께 개발합니다.
+A new Flutter project.
 
-Flutter 버전 확정 후 이 디렉터리에서 프로젝트를 생성합니다.
+## Getting Started
 
-```sh
-flutter create --project-name ddubi --org com.ssafy .
-```
+This project is a starting point for a Flutter application.
 
-`build/web`은 Nginx가 제공하는 빌드 산출물이며 Git에는 커밋하지 않습니다.
+A few resources to get you started if this is your first Flutter project:
+
+- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
+- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.

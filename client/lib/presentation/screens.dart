@@ -700,8 +700,14 @@ class RouteResultsScreen extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: RouteCard(
                     r,
-                    onTap: () =>
-                        _open(c, RouteMapScreen(repository: repository)),
+                    onTap: () => _open(
+                      c,
+                      RouteMapScreen(
+                        repository: repository,
+                        selectedRoute: r,
+                        condition: condition,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -910,114 +916,231 @@ String _formatArrival(DateTime value) =>
     '${value.year}.${value.month.toString().padLeft(2, '0')}.${value.day.toString().padLeft(2, '0')} '
     '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
 
-class RouteMapScreen extends StatelessWidget {
-  const RouteMapScreen({super.key, required this.repository});
+class RouteMapScreen extends StatefulWidget {
+  const RouteMapScreen({
+    super.key,
+    required this.repository,
+    this.selectedRoute,
+    this.condition,
+  });
+
   final DdubiRepository repository;
+  final RouteOption? selectedRoute;
+  final RouteSearchCondition? condition;
+
   @override
-  Widget build(BuildContext c) => AppPage(
+  State<RouteMapScreen> createState() => _RouteMapScreenState();
+}
+
+class _RouteMapScreenState extends State<RouteMapScreen> {
+  late final Future<List<RouteOption>> _routes;
+  late RouteKind _selectedKind;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedKind = widget.selectedRoute?.kind ?? RouteKind.recommended;
+    _routes = widget.repository.routes(condition: widget.condition);
+  }
+
+  @override
+  Widget build(BuildContext context) => AppPage(
     title: '전체 지도',
-    child: Column(
-      children: [
-        Expanded(
-          child: Stack(
-            children: [
-              Container(
-                color: const Color(0xFFEAF2EC),
-                child: CustomPaint(
-                  painter: _MapPainter(),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-              const Positioned(
-                left: 12,
-                top: 12,
-                child: InfoCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      StatusBadge(
-                        '도보',
-                        tone: Colors.grey,
-                        icon: Icons.more_horiz,
-                      ),
-                      StatusBadge(
-                        '버스',
-                        tone: DdubiColors.blue,
-                        icon: Icons.remove,
-                      ),
-                      StatusBadge(
-                        '지하철',
-                        tone: DdubiColors.green,
-                        icon: Icons.remove,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Positioned(
-                right: 14,
-                top: 120,
-                child: Column(
+    child: FutureBuilder<List<RouteOption>>(
+      future: _routes,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const DataLoadError(message: '지도 경로를 불러오지 못했어요.');
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final routes = snapshot.data!;
+        final selected = routes.firstWhere(
+          (route) => route.kind == _selectedKind,
+          orElse: () => routes.first,
+        );
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 760;
+            final map = _MockRouteMap(
+              routes: routes,
+              selectedKind: selected.kind,
+              departureLabel: widget.condition?.departurePlace ?? '역삼역 입구',
+              destinationLabel: widget.condition?.destinationPlace ?? '잠실야구장',
+              onSelected: (kind) => setState(() => _selectedKind = kind),
+            );
+            final detail = _RouteMapDetail(
+              route: selected,
+              repository: widget.repository,
+              departureLabel: widget.condition?.departurePlace ?? '역삼역 입구',
+              destinationLabel: widget.condition?.destinationPlace ?? '잠실야구장',
+            );
+            if (isWide) {
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
                   children: [
-                    CircleAvatar(child: Icon(Icons.my_location)),
-                    SizedBox(height: 8),
-                    CircleAvatar(child: Icon(Icons.add)),
-                    SizedBox(height: 4),
-                    CircleAvatar(child: Icon(Icons.remove)),
+                    Expanded(flex: 3, child: map),
+                    const SizedBox(width: 16),
+                    SizedBox(
+                      width: 360,
+                      child: SingleChildScrollView(child: detail),
+                    ),
                   ],
                 ),
+              );
+            }
+            return Column(
+              children: [
+                Expanded(flex: 5, child: map),
+                Flexible(
+                  flex: 4,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                    child: detail,
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ),
+  );
+}
+
+class _MockRouteMap extends StatelessWidget {
+  const _MockRouteMap({
+    required this.routes,
+    required this.selectedKind,
+    required this.departureLabel,
+    required this.destinationLabel,
+    required this.onSelected,
+  });
+
+  final List<RouteOption> routes;
+  final RouteKind selectedKind;
+  final String departureLabel;
+  final String destinationLabel;
+  final ValueChanged<RouteKind> onSelected;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(16),
+    child: LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        children: [
+          Positioned.fill(
+            child: ColoredBox(
+              color: const Color(0xFFEAF2EC),
+              child: CustomPaint(
+                painter: _MapPainter(selectedKind: selectedKind),
               ),
-            ],
+            ),
           ),
-        ),
-        InfoCard(
-          child: Column(
-            children: [
-              const Row(
-                children: [
-                  Text(
-                    '17:57 출발',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  Spacer(),
-                  Icon(Icons.arrow_forward),
-                  Spacer(),
-                  Text(
-                    '18:45 도착',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  Spacer(),
-                  Text(
-                    '15분 여유',
-                    style: TextStyle(
-                      color: DdubiColors.green,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-              const Divider(height: 25),
-              ...[
-                '17:57  출발 · 역삼역 입구',
-                '18:03  버스 탑승 · 271번',
-                '18:24  지하철 2호선 환승',
-                '18:45  잠실야구장 도착',
-              ].map(
-                (t) => ListTile(
-                  dense: true,
-                  leading: const Icon(
-                    Icons.circle,
-                    size: 12,
-                    color: DdubiColors.blue,
-                  ),
-                  title: Text(t),
+          Positioned(
+            left: 12,
+            right: 12,
+            top: 12,
+            child: Material(
+              color: Colors.white.withValues(alpha: .94),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: routes
+                      .map(
+                        (route) => ChoiceChip(
+                          label: Text(route.label),
+                          selected: route.kind == selectedKind,
+                          avatar: CircleAvatar(
+                            backgroundColor: _routeTone(route.kind),
+                            radius: 5,
+                          ),
+                          onSelected: (_) => onSelected(route.kind),
+                        ),
+                      )
+                      .toList(),
                 ),
               ),
-              PrimaryButton(
-                '이동 안내 시작',
-                onPressed: () => _open(c, MovingScreen(repository: repository)),
-              ),
-            ],
+            ),
+          ),
+          Positioned(
+            key: const Key('mapCurrentMarker'),
+            left: constraints.maxWidth * .42,
+            top: constraints.maxHeight * .54,
+            child: const _MapMarker(
+              label: '현재 위치 (Mock)',
+              icon: Icons.my_location,
+              tone: DdubiColors.blue,
+            ),
+          ),
+          Positioned(
+            key: const Key('mapDepartureMarker'),
+            left: 12,
+            bottom: 14,
+            child: _MapMarker(
+              label: '출발 · $departureLabel',
+              icon: Icons.trip_origin,
+              tone: DdubiColors.green,
+            ),
+          ),
+          Positioned(
+            key: const Key('mapDestinationMarker'),
+            right: 12,
+            top: constraints.maxHeight * .22,
+            child: _MapMarker(
+              label: '도착 · $destinationLabel',
+              icon: Icons.location_on,
+              tone: DdubiColors.red,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _MapMarker extends StatelessWidget {
+  const _MapMarker({
+    required this.label,
+    required this.icon,
+    required this.tone,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(maxWidth: 170),
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x24000000),
+          blurRadius: 8,
+          offset: Offset(0, 3),
+        ),
+      ],
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: tone, size: 18),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
           ),
         ),
       ],
@@ -1025,24 +1148,99 @@ class RouteMapScreen extends StatelessWidget {
   );
 }
 
+class _RouteMapDetail extends StatelessWidget {
+  const _RouteMapDetail({
+    required this.route,
+    required this.repository,
+    required this.departureLabel,
+    required this.destinationLabel,
+  });
+
+  final RouteOption route;
+  final DdubiRepository repository;
+  final String departureLabel;
+  final String destinationLabel;
+
+  @override
+  Widget build(BuildContext context) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        StatusBadge(
+          route.label,
+          tone: _routeTone(route.kind),
+          icon: Icons.route_outlined,
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          runSpacing: 8,
+          children: [
+            Text(
+              '${route.departure} 출발',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const Icon(Icons.arrow_forward, size: 18),
+            Text(
+              '${route.arrival} 도착',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            Text(
+              route.margin,
+              style: const TextStyle(
+                color: DdubiColors.green,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const Divider(height: 25),
+        Text(route.transport, style: Theme.of(context).textTheme.titleSmall),
+        Text('${route.detail} · ${route.fare}'),
+        const SizedBox(height: 10),
+        ...[
+          '${route.departure}  출발 · $departureLabel',
+          '이동 중  ${route.transport}',
+          '${route.arrival}  도착 · $destinationLabel',
+        ].map(
+          (text) => ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              Icons.circle,
+              size: 12,
+              color: _routeTone(route.kind),
+            ),
+            title: Text(text),
+          ),
+        ),
+        PrimaryButton(
+          '이동 안내 시작',
+          onPressed: () => _open(context, MovingScreen(repository: repository)),
+        ),
+      ],
+    ),
+  );
+}
+
+Color _routeTone(RouteKind kind) => switch (kind) {
+  RouteKind.recommended => DdubiColors.green,
+  RouteKind.fastest => DdubiColors.blue,
+  RouteKind.safest => const Color(0xFF7257E8),
+};
+
 class _MapPainter extends CustomPainter {
+  const _MapPainter({required this.selectedKind});
+
+  final RouteKind selectedKind;
+
   @override
   void paint(Canvas canvas, Size size) {
     final road = Paint()
       ..color = Colors.white
       ..strokeWidth = 18
       ..style = PaintingStyle.stroke;
-    final route = Paint()
-      ..color = DdubiColors.blue
-      ..strokeWidth = 7
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    final green = Paint()
-      ..color = DdubiColors.green
-      ..strokeWidth = 7
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    final path = Path()
+    final basePath = Path()
       ..moveTo(size.width * .2, size.height * .84)
       ..cubicTo(
         size.width * .55,
@@ -1060,25 +1258,54 @@ class _MapPainter extends CustomPainter {
         size.width * .75,
         size.height * .08,
       );
-    canvas.drawPath(path, road);
-    canvas.drawPath(path, route);
-    canvas.drawLine(
-      Offset(size.width * .58, size.height * .4),
-      Offset(size.width * .75, size.height * .08),
-      green,
-    );
-    for (final p in [
-      Offset(size.width * .2, size.height * .84),
-      Offset(size.width * .58, size.height * .4),
-      Offset(size.width * .75, size.height * .08),
-    ]) {
-      canvas.drawCircle(p, 10, Paint()..color = Colors.white);
-      canvas.drawCircle(p, 7, Paint()..color = DdubiColors.red);
+    canvas.drawPath(basePath, road);
+
+    for (final kind in RouteKind.values.where((kind) => kind != selectedKind)) {
+      _drawRoute(canvas, size, kind, selected: false);
     }
+    _drawRoute(canvas, size, selectedKind, selected: true);
+  }
+
+  void _drawRoute(
+    Canvas canvas,
+    Size size,
+    RouteKind kind, {
+    required bool selected,
+  }) {
+    final offset = switch (kind) {
+      RouteKind.recommended => 0.0,
+      RouteKind.fastest => -18.0,
+      RouteKind.safest => 18.0,
+    };
+    final path = Path()
+      ..moveTo(size.width * .2, size.height * .84)
+      ..cubicTo(
+        size.width * .55 + offset,
+        size.height * .72,
+        size.width * .18 + offset,
+        size.height * .5,
+        size.width * .58,
+        size.height * .4,
+      )
+      ..cubicTo(
+        size.width * .82 + offset,
+        size.height * .32,
+        size.width * .55 + offset,
+        size.height * .16,
+        size.width * .75,
+        size.height * .08,
+      );
+    final paint = Paint()
+      ..color = _routeTone(kind).withValues(alpha: selected ? 1 : .32)
+      ..strokeWidth = selected ? 8 : 5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(path, paint);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _MapPainter oldDelegate) =>
+      oldDelegate.selectedKind != selectedKind;
 }
 
 class DelayAlertScreen extends StatelessWidget {

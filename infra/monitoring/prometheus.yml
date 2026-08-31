@@ -7,5 +7,5 @@ scrape_configs:
     static_configs:
       - targets: ["prometheus:9090"]
 
-  # Backend, Kafka, Spark, Redis, PostgreSQL, Node exporter 대상은
+  # Backend, Kafka, Spark, Redis, MySQL, Node exporter 대상은
   # Docker Compose 서비스와 서버 사설 IP가 확정된 뒤 추가합니다.

@@ -34,7 +34,7 @@ def aggregate(weather: DataFrame, as_of: date, window_days: int) -> DataFrame:
     """
     keyed = weather.withColumn("dow", F.dayofweek("occurredAt")).withColumn("hour", F.hour("occurredAt"))
     obs = keyed.select(
-        "nx", "ny", "dow", "hour", "district",
+        "nx", "ny", "dow", "hour", "districts",
         F.col("observations")["T1H"].alias("t1h"),
         F.col("observations")["REH"].alias("reh"),
         F.col("observations")["WSD"].alias("wsd"),
@@ -43,7 +43,7 @@ def aggregate(weather: DataFrame, as_of: date, window_days: int) -> DataFrame:
     )
     return obs.groupBy("nx", "ny", "dow", "hour").agg(
         F.count(F.lit(1)).alias("samples"),
-        F.first("district").alias("district"),  # 같은 격자를 공유하는 구 중 하나 (참고용)
+        F.first("districts").alias("districts"),  # 이 격자를 공유하는 구 목록
         F.round(F.avg("t1h"), 1).alias("tempAvg"),
         F.round(F.min("t1h"), 1).alias("tempMin"),
         F.round(F.max("t1h"), 1).alias("tempMax"),

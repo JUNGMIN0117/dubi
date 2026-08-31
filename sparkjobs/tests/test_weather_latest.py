@@ -34,7 +34,7 @@ def _event(event_id: str, occurred: str, collected: str, nx: int, ny: int, temp:
         "occurredAt": occurred,
         "collectedAt": collected,
         "payload": {
-            "district": "종로구", "nx": nx, "ny": ny, "baseDate": "20260827", "baseTime": "0900",
+            "districts": ["종로구", "중구"], "nx": nx, "ny": ny, "baseDate": "20260827", "baseTime": "0900",
             "observations": {"T1H": temp, "REH": 60.0, "PTY": 0.0},
         },
     }
@@ -90,7 +90,23 @@ def test_to_redis_rows_matches_contract_key_and_json_value(spark):
     row = to_redis_rows(transform(events)).collect()[0]
     assert row[KEY_COL] == "weather:latest:60:127"
     value = json.loads(row[VALUE_COL])
-    assert value["district"] == "종로구"
+    assert value["districts"] == ["종로구", "중구"]
     assert value["observations"]["T1H"] == 27.3
     assert value["occurredAt"].startswith("2026-08-27T09:00:00")
     assert value["eventId"] == "e1"
+
+
+def test_transform_accepts_legacy_single_district_payload(spark):
+    # 2026-08-28 이전에 쌓인 옛 형식: districts 배열 대신 district 단수
+    legacy = {
+        "eventId": "old1", "eventType": "weather.observation", "source": "kma.ultra-srt-ncst",
+        "occurredAt": "2026-08-27T09:00:00+09:00", "collectedAt": "2026-08-27T09:10:00+09:00",
+        "payload": {"district": "종로구", "nx": 60, "ny": 127, "baseDate": "20260827", "baseTime": "0900",
+                    "observations": {"T1H": 25.0}},
+    }
+    raw = spark.createDataFrame(
+        [(b"60:127", json.dumps(legacy, ensure_ascii=False).encode(), 0, 0, datetime(2026, 8, 27, 9, 10))],
+        "key binary, value binary, partition int, offset long, timestamp timestamp",
+    )
+    out = transform(parse_envelope(raw)).collect()[0]
+    assert out.districts == ["종로구"]  # 단수 형식이 배열로 승격된다

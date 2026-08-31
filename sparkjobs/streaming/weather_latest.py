@@ -12,7 +12,7 @@ import sys
 
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
-from pyspark.sql.types import DoubleType, IntegerType, MapType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, DoubleType, IntegerType, MapType, StringType, StructField, StructType
 
 from common.kafka_source import read_events_stream
 from common.redis_sink import KEY_COL, VALUE_COL, write_with_ttl
@@ -25,9 +25,11 @@ REDIS_KEY_PREFIX = "weather:latest"
 TTL_SECONDS = 7200  # redis-keys.yaml weatherLatest.ttlSeconds
 TRIGGER = "10 seconds"
 
-# collector/src/sources/weather.py 가 만드는 payload
+# collector/src/sources/weather.py 가 만드는 payload.
+# districts(배열) 가 현재 형식, district(단수) 는 2026-08-28 이전에 쌓인 옛 형식과의 호환용.
 PAYLOAD_SCHEMA = StructType(
     [
+        StructField("districts", ArrayType(StringType()), True),
         StructField("district", StringType(), True),
         StructField("nx", IntegerType(), False),
         StructField("ny", IntegerType(), False),
@@ -47,7 +49,7 @@ def transform(events: DataFrame) -> DataFrame:
     )
     return weather.select(
         "eventId", "source", "occurredAt", "collectedAt",
-        F.col("p.district").alias("district"),
+        F.coalesce(F.col("p.districts"), F.array(F.col("p.district"))).alias("districts"),
         F.col("p.nx").alias("nx"),
         F.col("p.ny").alias("ny"),
         F.col("p.baseDate").alias("baseDate"),
@@ -68,7 +70,7 @@ def to_redis_rows(df: DataFrame) -> DataFrame:
         F.concat_ws(":", F.lit(REDIS_KEY_PREFIX), F.col("nx"), F.col("ny")).alias(KEY_COL),
         F.to_json(
             F.struct(
-                "district", "nx", "ny", "baseDate", "baseTime", "observations",
+                "districts", "nx", "ny", "baseDate", "baseTime", "observations",
                 "occurredAt", "collectedAt", "eventId", "source",
             )
         ).alias(VALUE_COL),

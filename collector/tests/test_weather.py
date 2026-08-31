@@ -55,6 +55,14 @@ def test_default_grid_points_cover_25_districts():
     assert ("강남구", 61, 126) in points
 
 
+def test_group_by_grid_merges_shared_grids():
+    grids = weather.group_by_grid(weather.parse_grid_points(weather.DEFAULT_GRID_POINTS))
+    assert len(grids) == 14  # 서울 25개 구가 공유하는 고유 격자 수
+    by_grid = {(nx, ny): districts for nx, ny, districts in grids}
+    assert by_grid[(60, 127)] == ["종로구", "중구"]
+    assert by_grid[(58, 126)] == ["양천구", "강서구", "영등포구"]
+
+
 def test_grid_points_format_error():
     with pytest.raises(ConfigError):
         weather.parse_grid_points("강남구:61")
@@ -91,9 +99,31 @@ def test_fetch_builds_city_records_with_mock_transport():
     assert calls[0]["dataType"] == "JSON"
     assert records[0].key == "60:127"
     assert records[0].event_type == "weather.observation"
-    assert records[0].payload["district"] == "종로구"
+    assert records[0].payload["districts"] == ["종로구"]
     assert records[0].payload["observations"]["T1H"] == 27.3
     assert records[0].occurred_at.tzinfo is not None
+
+
+def test_fetch_calls_shared_grid_once_with_district_list():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(dict(request.url.params))
+        return httpx.Response(200, json=KMA_OK)
+
+    settings = Settings(
+        source="weather", kafka_bootstrap_servers="kafka:9092",
+        api_keys={"DATA_GO_KR_API_KEY": "test-key"},
+        extra={"WEATHER_GRID_POINTS": "종로구:60:127,중구:60:127,용산구:60:126"},
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        records = weather.fetch(settings, client)
+
+    assert len(calls) == 2  # 격자 2개 → 호출 2번 (구 3개여도)
+    assert len(records) == 2
+    by_key = {r.key: r for r in records}
+    assert by_key["60:127"].payload["districts"] == ["종로구", "중구"]
+    assert by_key["60:126"].payload["districts"] == ["용산구"]
 
 
 def test_fetch_without_key_raises_config_error():

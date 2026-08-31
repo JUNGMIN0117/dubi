@@ -7,8 +7,9 @@
 응답 JSON 형식은 두 곳이 같다.
 
 - 매 정시 관측값이 약 10분 뒤에 공개되므로 base_time 은 (현재 - 40분) 의 정시를 쓴다.
-- 서울 25개 구 격자(nx, ny)를 순회한다. WEATHER_GRID_POINTS="이름:nx:ny,..." 로 바꿀 수 있다.
-- 기본 10분 주기 × 25지점 = 하루 3,600 회 (data.go.kr 개발계정 일 10,000 회 한도 안)
+- 서울 25개 구가 격자 14개를 공유하므로 API 는 격자당 1회만 부르고, payload.districts 에 그 격자의 구 목록을 담는다.
+  WEATHER_GRID_POINTS="이름:nx:ny,..." (구 단위) 는 그대로 두고 내부에서 격자로 묶는다.
+- 기본 10분 주기 × 14격자 = 하루 2,016 회 (data.go.kr 개발계정 일 10,000 회 한도 안)
 """
 
 from __future__ import annotations
@@ -73,6 +74,16 @@ def parse_grid_points(raw: str) -> list[tuple[str, int, int]]:
     return points
 
 
+def group_by_grid(points: list[tuple[str, int, int]]) -> list[tuple[int, int, list[str]]]:
+    """구 단위 목록을 격자 단위 (nx, ny, 구 목록) 로 묶는다. 같은 격자는 API 를 한 번만 부른다."""
+    grids: dict[tuple[int, int], list[str]] = {}
+    for name, nx, ny in points:
+        districts = grids.setdefault((nx, ny), [])
+        if name not in districts:
+            districts.append(name)
+    return [(nx, ny, districts) for (nx, ny), districts in grids.items()]
+
+
 def parse_response(body: dict[str, Any]) -> dict[str, float]:
     """응답 JSON → {category: 값}. 정상 코드가 아니면 ValueError."""
     header = body.get("response", {}).get("header", {})
@@ -99,13 +110,13 @@ def select_endpoint(settings: Settings) -> tuple[str, str, str]:
 
 def fetch(settings: Settings, client: httpx.Client) -> list[Record]:
     api_url, key_param, service_key = select_endpoint(settings)
-    points = parse_grid_points(settings.extra.get("WEATHER_GRID_POINTS", DEFAULT_GRID_POINTS))
+    grids = group_by_grid(parse_grid_points(settings.extra.get("WEATHER_GRID_POINTS", DEFAULT_GRID_POINTS)))
     base = base_datetime(now_kst())
     base_date, base_time = base.strftime("%Y%m%d"), base.strftime("%H%M")
 
     records: list[Record] = []
     failures = 0
-    for district, nx, ny in points:
+    for nx, ny, districts in grids:
         params = {
             key_param: service_key,
             "pageNo": 1,
@@ -129,11 +140,11 @@ def fetch(settings: Settings, client: httpx.Client) -> list[Record]:
             observations = parse_response(body)
         except httpx.HTTPError as exc:
             failures += 1
-            log.warning("%s (nx=%s ny=%s) 수집 실패: %s", district, nx, ny, type(exc).__name__)
+            log.warning("%s (nx=%s ny=%s) 수집 실패: %s", ",".join(districts), nx, ny, type(exc).__name__)
             continue
         except ValueError as exc:
             failures += 1
-            log.warning("%s (nx=%s ny=%s) 수집 실패: %s", district, nx, ny, exc)
+            log.warning("%s (nx=%s ny=%s) 수집 실패: %s", ",".join(districts), nx, ny, exc)
             continue
 
         records.append(
@@ -142,7 +153,7 @@ def fetch(settings: Settings, client: httpx.Client) -> list[Record]:
                 event_type="weather.observation",
                 occurred_at=base,
                 payload={
-                    "district": district,
+                    "districts": districts,
                     "nx": nx,
                     "ny": ny,
                     "baseDate": base_date,
@@ -153,9 +164,9 @@ def fetch(settings: Settings, client: httpx.Client) -> list[Record]:
         )
 
     if failures and not records:
-        raise RuntimeError(f"기상청 수집 전부 실패 ({failures}/{len(points)} 지점)")
+        raise RuntimeError(f"기상청 수집 전부 실패 ({failures}/{len(grids)} 격자)")
     if failures:
-        log.warning("기상청 일부 실패 %d/%d 지점", failures, len(points))
+        log.warning("기상청 일부 실패 %d/%d 격자", failures, len(grids))
     return records
 
 

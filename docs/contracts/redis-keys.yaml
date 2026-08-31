@@ -11,8 +11,8 @@ keys:
   weatherLatest:
     pattern: "weather:latest:{nx}:{ny}"
     ttlSeconds: 7200
-    description: Spark(streaming/weather_latest)가 격자별로 정리한 기상청 초단기실황 최신값
-    valueExample: '{"district":"종로구","nx":60,"ny":127,"baseDate":"20260827","baseTime":"0900","observations":{"T1H":27.3,"REH":64.0},"occurredAt":"2026-08-27T09:00:00.000+09:00","collectedAt":"2026-08-27T09:10:00.000+09:00","eventId":"...","source":"kma.ultra-srt-ncst"}'
+    description: Spark(streaming/weather_latest)가 격자별로 정리한 기상청 초단기실황 최신값. districts 는 이 격자를 공유하는 구 목록
+    valueExample: '{"districts":["종로구","중구"],"nx":60,"ny":127,"baseDate":"20260827","baseTime":"0900","observations":{"T1H":27.3,"REH":64.0},"occurredAt":"2026-08-27T09:00:00.000+09:00","collectedAt":"2026-08-27T09:10:00.000+09:00","eventId":"...","source":"kma.ultra-srt-ncst"}'
   routeCandidates:
     pattern: "route:candidates:{originHash}:{destinationHash}"
     ttlSeconds: 600

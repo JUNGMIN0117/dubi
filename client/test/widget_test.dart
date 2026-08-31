@@ -121,4 +121,29 @@ void main() {
     expect(saved.any((schedule) => schedule.time == '14:30'), isTrue);
     expect(saved.any((schedule) => schedule.departurePlace == '회사'), isTrue);
   });
+
+  testWidgets('경로 조건을 입력하면 Mock 추천 결과로 이동한다', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    final router = container.read(appRouterProvider);
+    router.go('/recommendations');
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('routeDepartureField')), '강남역');
+    await tester.enterText(
+      find.byKey(const Key('routeDestinationField')),
+      '여의도역',
+    );
+    await tester.tap(find.text('추천 경로 찾기'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('추천 결과'), findsOneWidget);
+    expect(find.textContaining('강남역  →  여의도역'), findsOneWidget);
+    expect(find.text('추천 경로'), findsOneWidget);
+    expect(find.text('조건 수정'), findsOneWidget);
+  });
 }

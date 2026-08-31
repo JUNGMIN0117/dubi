@@ -1,5 +1,17 @@
 enum RouteKind { recommended, fastest, safest }
 
+class RouteSearchCondition {
+  const RouteSearchCondition({
+    required this.departurePlace,
+    required this.destinationPlace,
+    required this.desiredArrivalAt,
+  });
+
+  final String departurePlace;
+  final String destinationPlace;
+  final DateTime desiredArrivalAt;
+}
+
 class Schedule {
   const Schedule({
     required this.id,
@@ -37,5 +49,5 @@ abstract interface class DdubiRepository {
   Future<List<Schedule>> schedules();
   Future<Schedule?> scheduleById(String id);
   Future<void> addSchedule(Schedule schedule);
-  Future<List<RouteOption>> routes();
+  Future<List<RouteOption>> routes({RouteSearchCondition? condition});
 }

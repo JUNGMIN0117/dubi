@@ -95,5 +95,6 @@ class MockDdubiRepository implements DdubiRepository {
   Future<void> addSchedule(Schedule schedule) async =>
       _addedSchedules.add(schedule);
   @override
-  Future<List<RouteOption>> routes() async => routeData;
+  Future<List<RouteOption>> routes({RouteSearchCondition? condition}) async =>
+      routeData;
 }

@@ -662,8 +662,14 @@ class ScheduleDetailScreen extends StatelessWidget {
 }
 
 class RouteResultsScreen extends StatelessWidget {
-  const RouteResultsScreen({super.key, required this.repository, this.go});
+  const RouteResultsScreen({
+    super.key,
+    required this.repository,
+    this.condition,
+    this.go,
+  });
   final DdubiRepository repository;
+  final RouteSearchCondition? condition;
   final ValueChanged<int>? go;
   @override
   Widget build(BuildContext c) => AppPage(
@@ -672,7 +678,7 @@ class RouteResultsScreen extends StatelessWidget {
     onNav: go,
     actions: const [IconButton(onPressed: null, icon: Icon(Icons.refresh))],
     child: FutureBuilder<List<RouteOption>>(
-      future: repository.routes(),
+      future: repository.routes(condition: condition),
       builder: (c, s) {
         if (s.hasError) {
           return const DataLoadError(message: '추천 경로를 불러오지 못했어요.');
@@ -680,11 +686,15 @@ class RouteResultsScreen extends StatelessWidget {
         return ListView(
           padding: _pad,
           children: [
-            const TtubeeGuideCard('이 경로가 지금 가장 안정적이에요!', compact: true),
-            const SizedBox(height: 12),
+            if (condition != null) ...[
+              _RouteSearchSummary(condition: condition!),
+              const SizedBox(height: 12),
+            ],
             if (!s.hasData)
               const Center(child: CircularProgressIndicator())
-            else
+            else ...[
+              const TtubeeGuideCard('이 경로가 지금 가장 안정적이에요!', compact: true),
+              const SizedBox(height: 12),
               ...s.data!.map(
                 (r) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -695,6 +705,7 @@ class RouteResultsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+            ],
             const InfoCard(
               color: Color(0xFFF4F8FF),
               child: Column(
@@ -718,6 +729,186 @@ class RouteResultsScreen extends StatelessWidget {
     ),
   );
 }
+
+class RouteSearchScreen extends StatefulWidget {
+  const RouteSearchScreen({super.key, required this.repository});
+
+  final DdubiRepository repository;
+
+  @override
+  State<RouteSearchScreen> createState() => _RouteSearchScreenState();
+}
+
+class _RouteSearchScreenState extends State<RouteSearchScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _departure = TextEditingController(text: '집');
+  final _destination = TextEditingController(text: 'SSAFY 서울캠퍼스');
+  late DateTime _desiredArrivalAt;
+  late final TextEditingController _arrival;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _desiredArrivalAt = DateTime(now.year, now.month, now.day + 1, 10);
+    _arrival = TextEditingController(text: _formatArrival(_desiredArrivalAt));
+  }
+
+  @override
+  void dispose() {
+    _departure.dispose();
+    _destination.dispose();
+    _arrival.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '경로 찾기',
+    child: Form(
+      key: _formKey,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 760;
+          return ListView(
+            padding: _pad,
+            children: [
+              const TtubeeGuideCard(
+                '언제 어디까지 가야 하는지 알려주세요.\n뚜비가 알맞은 경로를 찾아드릴게요!',
+                compact: true,
+              ),
+              const SizedBox(height: 16),
+              InfoCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '이동 조건',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 16),
+                    if (isWide)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _placeField(true)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _placeField(false)),
+                        ],
+                      )
+                    else ...[
+                      _placeField(true),
+                      const SizedBox(height: 12),
+                      _placeField(false),
+                    ],
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      key: const Key('routeArrivalField'),
+                      controller: _arrival,
+                      readOnly: true,
+                      onTap: _pickArrival,
+                      decoration: const InputDecoration(
+                        labelText: '도착 희망시간',
+                        prefixIcon: Icon(Icons.schedule_outlined),
+                        suffixIcon: Icon(Icons.edit_calendar_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    PrimaryButton('추천 경로 찾기', onPressed: _search),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
+
+  Widget _placeField(bool departure) {
+    final controller = departure ? _departure : _destination;
+    return TextFormField(
+      key: Key(departure ? 'routeDepartureField' : 'routeDestinationField'),
+      controller: controller,
+      textInputAction: departure ? TextInputAction.next : TextInputAction.done,
+      validator: (value) => (value ?? '').trim().isEmpty ? '장소를 입력해주세요.' : null,
+      decoration: InputDecoration(
+        labelText: departure ? '출발지' : '도착지',
+        prefixIcon: Icon(
+          departure ? Icons.my_location_outlined : Icons.location_on_outlined,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickArrival() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _desiredArrivalAt,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_desiredArrivalAt),
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      _desiredArrivalAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      _arrival.text = _formatArrival(_desiredArrivalAt);
+    });
+  }
+
+  void _search() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final condition = RouteSearchCondition(
+      departurePlace: _departure.text.trim(),
+      destinationPlace: _destination.text.trim(),
+      desiredArrivalAt: _desiredArrivalAt,
+    );
+    context.push('/recommendations/mock-recommendation-1', extra: condition);
+  }
+}
+
+class _RouteSearchSummary extends StatelessWidget {
+  const _RouteSearchSummary({required this.condition});
+
+  final RouteSearchCondition condition;
+
+  @override
+  Widget build(BuildContext context) => InfoCard(
+    color: const Color(0xFFF4F8FF),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${condition.departurePlace}  →  ${condition.destinationPlace}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        Text('${_formatArrival(condition.desiredArrivalAt)}까지 도착'),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () => context.pop(),
+            child: const Text('조건 수정'),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _formatArrival(DateTime value) =>
+    '${value.year}.${value.month.toString().padLeft(2, '0')}.${value.day.toString().padLeft(2, '0')} '
+    '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
 
 class RouteMapScreen extends StatelessWidget {
   const RouteMapScreen({super.key, required this.repository});

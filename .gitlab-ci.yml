@@ -60,11 +60,8 @@ contracts-validate:
   image: python:3.11-slim
   script:
     - pip install --quiet pyyaml
-    - python -c "
-      import yaml, json, glob;
-      [yaml.safe_load(open(f, encoding='utf-8')) for f in glob.glob('docs/contracts/*.yaml')];
-      [json.load(open(f, encoding='utf-8')) for f in glob.glob('docs/contracts/events/*.json')];
-      print('contracts OK')"
+    # 한 줄 유지: 여러 줄로 접으면 YAML 이 앞에 공백을 붙여 python -c 가 IndentationError 로 죽는다
+    - python -c "import yaml, json, glob; [yaml.safe_load(open(f, encoding='utf-8')) for f in glob.glob('docs/contracts/*.yaml')]; [json.load(open(f, encoding='utf-8')) for f in glob.glob('docs/contracts/events/*.json')]; print('contracts OK')"
   rules:
     - changes:
         - docs/contracts/**/*

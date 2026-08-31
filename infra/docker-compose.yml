@@ -443,13 +443,18 @@ services:
     <<: *hdfs
     container_name: hdfs-datanode2
     hostname: hdfs-datanode2
+    # 서버2 전용 프로필. 서버1의 hdfs 프로필(namenode+datanode1)에 딸려가지 않게 분리했다.
+    # 로컬(한 대)에서 복제 2를 채우려면 --profile hdfs --profile hdfs2 둘 다 켠다
+    profiles: ["hdfs2"]
     command: ["hdfs", "datanode"]
     volumes:
       - ./hdfs/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
       - ./hdfs/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
       - hdfs-datanode2-data:/hadoop/dfs/data
     depends_on:
-      - hdfs-namenode
+      hdfs-namenode:
+        condition: service_started
+        required: false   # hdfs2 단독 기동 시 namenode 정의가 비활성이어도 깨지지 않게
 
   # =========================================================================
   # monitoring : Prometheus / Grafana / kafka-exporter [서버2], node-exporter [양쪽]
@@ -493,7 +498,8 @@ services:
     <<: *common
     image: danielqsj/kafka-exporter:${KAFKA_EXPORTER_VERSION:-v1.8.0}
     container_name: kafka-exporter
-    profiles: ["monitoring"]
+    # Kafka 와 같은 서버(서버1)에서 exporters 프로필로 띄운다. Prometheus(서버2)가 9308 을 원격 스크랩
+    profiles: ["exporters"]
     mem_limit: 128m
     command:
       - --kafka.server=${KAFKA_BOOTSTRAP_SERVERS}
@@ -504,7 +510,7 @@ services:
     <<: *common
     image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.8.2}
     container_name: node-exporter
-    profiles: ["monitoring"]
+    profiles: ["monitoring", "exporters"]   # 서버1은 exporters, 서버2는 monitoring 으로 양쪽 다 뜬다
     mem_limit: 128m
     pid: host
     command:

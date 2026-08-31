@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/constants/layout_constants.dart';
+import '../domain/models.dart';
 import '../presentation/screens.dart';
 import '../providers/app_providers.dart';
 
@@ -49,9 +50,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(
-            path: '/recommendations/:id',
+            path: '/recommendations',
             builder: (context, state) =>
-                RouteResultsScreen(repository: repository),
+                RouteSearchScreen(repository: repository),
+          ),
+          GoRoute(
+            path: '/recommendations/:id',
+            builder: (context, state) => RouteResultsScreen(
+              repository: repository,
+              condition: state.extra is RouteSearchCondition
+                  ? state.extra! as RouteSearchCondition
+                  : null,
+            ),
           ),
           GoRoute(
             path: '/notifications',
@@ -91,7 +101,7 @@ class _ResponsiveNavigationShell extends StatelessWidget {
   void _go(BuildContext context, int index) {
     const locations = [
       '/schedules',
-      '/recommendations/mock-recommendation-1',
+      '/recommendations',
       '/home',
       '/notifications',
       '/settings',

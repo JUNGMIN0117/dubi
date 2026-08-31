@@ -2,6 +2,8 @@ import 'package:ddubi/app.dart';
 import 'package:ddubi/app/router.dart';
 import 'package:ddubi/data/mock_repository.dart';
 import 'package:ddubi/domain/auth.dart';
+import 'package:ddubi/domain/models.dart';
+import 'package:ddubi/presentation/screens.dart';
 import 'package:ddubi/providers/app_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -145,5 +147,35 @@ void main() {
     expect(find.textContaining('강남역  →  여의도역'), findsOneWidget);
     expect(find.text('추천 경로'), findsOneWidget);
     expect(find.text('조건 수정'), findsOneWidget);
+  });
+
+  testWidgets('Mock 지도에서 현재 위치와 출발지·도착지 및 후보를 구분한다', (tester) async {
+    final repository = MockDdubiRepository();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RouteMapScreen(
+          repository: repository,
+          selectedRoute: MockDdubiRepository.routeData.first,
+          condition: RouteSearchCondition(
+            departurePlace: '강남역',
+            destinationPlace: '여의도역',
+            desiredArrivalAt: DateTime(2026, 9, 1, 10),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('mapCurrentMarker')), findsOneWidget);
+    expect(find.byKey(const Key('mapDepartureMarker')), findsOneWidget);
+    expect(find.byKey(const Key('mapDestinationMarker')), findsOneWidget);
+    expect(find.text('현재 위치 (Mock)'), findsOneWidget);
+    expect(find.text('출발 · 강남역'), findsOneWidget);
+    expect(find.text('도착 · 여의도역'), findsOneWidget);
+    expect(find.byType(ChoiceChip), findsNWidgets(3));
+
+    await tester.tap(find.text('가장 빠른 경로'));
+    await tester.pump();
+    expect(find.text('17:51 출발'), findsOneWidget);
   });
 }

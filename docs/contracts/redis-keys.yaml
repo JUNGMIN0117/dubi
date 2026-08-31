@@ -5,7 +5,7 @@ keys:
   segmentStatus:
     pattern: "segment:status:{segmentId}"
     ttlSeconds: 300
-    description: Spark가 계산한 구간별 최신 상태. Backend 는 이 키와 MySQL schedule_segment 를 조인해 영향받는 일정만 재계산한다
+    description: Spark가 계산한 구간별 최신 상태. Backend 는 이 키와 MySQL route_segment 를 조인해 영향받는 일정만 재계산한다
     schema: events/segment-status.schema.json
     valueExample: '{"segmentId":"seg-000123","status":"delayed","delaySeconds":420,"confidence":0.8,"causes":[{"eventId":"...","eventType":"road.incident","source":"seoul.topis"}],"computedAt":"2026-08-27T09:10:00+09:00","validUntil":"2026-08-27T09:15:00+09:00","source":"spark.segment-status"}'
   weatherLatest:

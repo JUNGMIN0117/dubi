@@ -9,6 +9,7 @@ import '../data/mock_repository.dart';
 import '../domain/auth.dart';
 import '../domain/models.dart';
 import 'auth_screens.dart';
+import 'micro_animations.dart';
 import 'widgets.dart';
 
 void _open(BuildContext c, Widget page) =>
@@ -33,22 +34,9 @@ class LoginScreen extends StatelessWidget {
             child: Column(
               children: [
                 const Spacer(),
-                TweenAnimationBuilder<double>(
-                  duration: const Duration(milliseconds: 650),
-                  curve: Curves.easeOutBack,
-                  tween: Tween(begin: .82, end: 1),
-                  builder: (_, value, child) => Opacity(
-                    opacity: value.clamp(0, 1),
-                    child: Transform.scale(scale: value, child: child),
-                  ),
-                  child: SizedBox(
-                    height: 120,
-                    child: Image.asset(
-                      'assets/images/ttubee-guide.png',
-                      fit: BoxFit.contain,
-                      semanticLabel: '반갑게 인사하는 뚜비',
-                    ),
-                  ),
+                const TtubeeEntrance(
+                  asset: 'assets/images/ttubee/welcome.png',
+                  semanticLabel: '반갑게 인사하는 뚜비',
                 ),
                 const SizedBox(height: 8),
                 Text('뚜비', style: Theme.of(c).textTheme.headlineLarge),
@@ -312,9 +300,28 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
             if (!s.hasData)
               const Center(child: CircularProgressIndicator())
             else if (selectedSchedules.isEmpty)
-              const TtubeeGuideCard(
-                '선택한 날짜에는 일정이 없어요.\n새로운 일정을 추가해볼까요?',
-                compact: true,
+              InfoCard(
+                color: const Color(0xFFF4FCFA),
+                child: Column(
+                  children: [
+                    const TtubeeIdle(
+                      asset: 'assets/images/ttubee/empty-schedule.png',
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '아직 등록된 일정이 없어요.',
+                      style: Theme.of(c).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('뚜비에게 중요한 일정을 알려주세요!'),
+                    const SizedBox(height: 14),
+                    FilledButton.icon(
+                      onPressed: () => _add(c),
+                      icon: const Icon(Icons.add),
+                      label: const Text('일정 등록하기'),
+                    ),
+                  ],
+                ),
               )
             else
               ...selectedSchedules.map(
@@ -696,7 +703,16 @@ class RouteResultsScreen extends StatelessWidget {
             if (!s.hasData)
               const Center(child: CircularProgressIndicator())
             else ...[
-              const TtubeeGuideCard('이 경로가 지금 가장 안정적이에요!', compact: true),
+              const TtubeeGuideCard(
+                '이 경로가 지금 가장 안정적이에요!',
+                compact: true,
+                character: TtubeeEntrance(
+                  asset: 'assets/images/ttubee/route-guide.png',
+                  height: 62,
+                  fromRight: true,
+                  semanticLabel: '지도를 든 뚜비',
+                ),
+              ),
               const SizedBox(height: 12),
               ...s.data!.map(
                 (r) => Padding(
@@ -1481,7 +1497,7 @@ class MovingScreen extends StatelessWidget {
         const TtubeeGuideCard(
           '지금 출발하면 딱 좋아요!',
           compact: true,
-          asset: 'assets/images/ttubee-moving.png',
+          character: TtubeeRunning(asset: 'assets/images/ttubee/running.png'),
         ),
         const SizedBox(height: 12),
         InfoCard(
@@ -1540,7 +1556,13 @@ class ArrivalScreen extends StatelessWidget {
     child: ListView(
       padding: _pad,
       children: [
-        const TtubeeGuideCard('제시간에 도착했어요!\n오늘 이동도 정말 잘했어요.'),
+        const TtubeeGuideCard(
+          '제시간에 도착했어요!\n오늘 이동도 정말 잘했어요.',
+          character: TtubeeCelebrate(
+            asset: 'assets/images/ttubee/celebrate.png',
+            height: 82,
+          ),
+        ),
         const SizedBox(height: 18),
         const Icon(Icons.check_circle, color: Color(0xFF12B89A), size: 70),
         Center(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../domain/auth.dart';
 import 'widgets.dart';
+import 'micro_animations.dart';
 
 class SocialAuthScreen extends StatelessWidget {
   const SocialAuthScreen({
@@ -424,30 +425,19 @@ class _SignUpScreenState extends State<SignUpScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 58,
-                  height: 58,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFE3FAF6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.check_rounded,
-                    color: DdubiColors.blue,
-                    size: 38,
-                  ),
+                const TtubeeCelebrate(
+                  asset: 'assets/images/ttubee/celebrate.png',
+                  height: 124,
                 ),
                 const SizedBox(height: 8),
-                Image.asset('assets/images/ttubee-guide.png', height: 105),
-                const SizedBox(height: 8),
                 Text(
-                  '회원가입이 완료되었어요!',
+                  '회원가입 완료!',
                   textAlign: TextAlign.center,
                   style: Theme.of(dialogContext).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  '이제 뚜비와 함께 일정을\n편하게 관리해보세요.',
+                  '이제 뚜비와 함께\n늦지 않는 하루를 시작해볼까요?',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),

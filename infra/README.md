@@ -34,11 +34,13 @@
 | `core` | kafka, kafka-ui | 가장 먼저 띄운다 |
 | `data` | mysql, redis | |
 | `collect` | collector-bus/subway/traffic/weather/event | 지금은 weather만 구현됨 → `collector-weather`만 지정해서 띄운다 |
-| `hdfs` | hdfs-namenode, hdfs-datanode1, hdfs-datanode2 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
+| `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
+| `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather | |
 | `batch` | spark-batch | 일회성 실행기. `run --rm`으로만 쓴다 |
 | `archive` | archiver | |
-| `monitoring` | prometheus, grafana, kafka-exporter, node-exporter | 대시보드·스크랩 대상은 아직 비어 있음 |
+| `monitoring` | prometheus, grafana, node-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
+| `exporters` | node-exporter, kafka-exporter | 서버1 몫 (kafka-exporter 는 Kafka 옆에 있어야 함) |
 
 ## 새 PC에서 처음 시작하기 (로컬 개발)
 
@@ -72,7 +74,7 @@
    ```
    docker compose --profile core --profile collect run --rm -e COLLECTOR_RUN_ONCE=true collector-weather
    ```
-   - 로그에 `cycle ok records=25`가 나오면 Kafka까지 들어간 것입니다.
+   - 로그에 `cycle ok records=14`가 나오면 Kafka까지 들어간 것입니다 (서울 25개 구가 공유하는 격자 14개 단위로 호출).
    - Kafka UI: http://localhost:8085 → Topics → city.raw
    - Spark 드라이버: `docker logs spark-streaming-weather --tail 5` 에서 `batch=N grids=14`
    - Redis: `docker compose --profile data exec redis redis-cli -a <REDIS_PASSWORD> KEYS "weather:latest:*"` → 격자 14개
@@ -119,4 +121,25 @@ SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
 
 - Spark 워커 메모리(1536m)를 스트리밍 실행기(1g)와 배치 실행기(480m)가 나눠 씁니다. 배치가 자원을 못 받으면 마스터 UI(http://localhost:8080)에서 WAITING으로 보입니다. 워커 메모리를 늘리면 `BATCH_EXECUTOR_MEMORY`도 함께 올립니다.
 - Spark 이미지의 파이썬은 3.8입니다. sparkjobs 코드는 3.8 문법을 지켜야 합니다.
-- weather 수집기는 격자를 공유하는 구마다 같은 관측을 따로 발행합니다(25회 중 11회 중복). 격자 단위로 바꾸는 개선이 예정되어 있습니다.
+
+## 서버 배포·운영 (2026-08-31 이식 완료)
+
+- 서버1(데이터)=j15e202a.p.ssafy.io(172.26.15.35), 서버2(서비스)=j15e202.p.ssafy.io(172.26.6.220)
+- 서버에서는 기본 compose 에 서버별 오버레이를 겹쳐 실행합니다 (HDFS 상호 호스트명 해석 + 데이터노드 포트 공개):
+  ```
+  # 서버1
+  docker compose -f docker-compose.yml -f docker-compose.server1.yml --profile <core|collect|spark|batch|archive|hdfs|exporters> up -d
+  # 서버2
+  docker compose -f docker-compose.yml -f docker-compose.server2.yml --profile <data|hdfs2|monitoring> up -d
+  ```
+- `.env` 는 깃에 없으므로 scp 로만 배포합니다. `SERVER1_PRIVATE_IP`/`SERVER2_PRIVATE_IP` 가 반드시 설정되어야 하고(오버레이 필수 변수), `REDIS_HOST` 는 서버2 사설 IP 를 가리킵니다.
+- **방화벽**: 도커는 ufw 를 우회하므로 `scripts/firewall.sh` 가 iptables DOCKER-USER 체인에 "상대 서버 허용 + 그 외 외부 차단"을 적용합니다.
+  ```
+  sudo sh scripts/firewall.sh <상대서버_사설IP>        # 서버2에서 nginx 도입 후에는 --web 추가 (80/443 공개)
+  sudo netfilter-persistent save                        # 재부팅 유지
+  ```
+- **관리 화면은 SSH 터널로**: 방화벽 이후 Grafana(3000, 서버2)·kafka-ui(8085, 서버1)·HDFS UI(9870, 서버1)는 외부 차단 상태입니다.
+  ```
+  ssh -i <pem> -L 3000:localhost:3000 ubuntu@j15e202.p.ssafy.io   # 켜둔 채 브라우저에서 localhost:3000
+  ```
+- **GitLab 러너는 서버2의 단독 컨테이너**(gitlab-runner, docker executor, privileged)로 돌고 있습니다. compose 소속이 아니며, `docker compose down` 의 영향을 받지 않습니다.

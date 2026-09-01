@@ -4,6 +4,7 @@ import 'package:ddubi/data/mock_repository.dart';
 import 'package:ddubi/core/theme.dart';
 import 'package:ddubi/domain/auth.dart';
 import 'package:ddubi/domain/models.dart';
+import 'package:ddubi/presentation/auth_screens.dart';
 import 'package:ddubi/presentation/screens.dart';
 import 'package:ddubi/providers/app_providers.dart';
 import 'package:flutter/material.dart';
@@ -79,6 +80,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('네이버 로그인'), findsOneWidget);
     expect(find.text('개발용 네이버 인증 완료'), findsOneWidget);
+  });
+
+  testWidgets('기존 이메일 계정을 확인한 뒤 소셜 계정을 연동한다', (tester) async {
+    final repository = MockAuthRepository();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AccountLinkPromptScreen(
+          provider: '카카오',
+          email: 'member@ddubi.app',
+          repository: repository,
+          onLinked: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('이미 가입된 이메일이 있어요'), findsOneWidget);
+    expect(find.text('member@ddubi.app'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('startEmailLinkButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('이메일 계정 확인'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('linkPasswordField')),
+      'password123',
+    );
+    await tester.tap(find.byKey(const Key('completeEmailLinkButton')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(find.text('계정 연동이 완료됐어요!'), findsOneWidget);
+    expect(find.byKey(const Key('linkedAccountHomeButton')), findsOneWidget);
   });
 
   testWidgets('앱 전체에서 스크롤 끝 늘어남 효과를 사용하지 않는다', (tester) async {
@@ -191,9 +224,35 @@ void main() {
     expect(find.text('출발 · 강남역'), findsOneWidget);
     expect(find.text('도착 · 여의도역'), findsOneWidget);
     expect(find.byType(ChoiceChip), findsNWidgets(3));
+    expect(find.byKey(const Key('mapEntireRouteButton')), findsOneWidget);
+    expect(find.byKey(const Key('mapCurrentLocationButton')), findsOneWidget);
 
     await tester.tap(find.text('가장 빠른 경로'));
     await tester.pump();
     expect(find.text('17:51 출발'), findsOneWidget);
+  });
+
+  testWidgets('출발 안내 후 이동 중 상태로 전환한다', (tester) async {
+    final repository = MockDdubiRepository();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MovingScreen(
+          repository: repository,
+          route: MockDdubiRepository.routeData.first,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('출발 안내'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('출발했어요'), 300);
+    expect(find.text('출발했어요'), findsOneWidget);
+
+    await tester.tap(find.text('출발했어요'));
+    await tester.pump();
+
+    expect(find.text('이동 중'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('도착했어요'), 300);
+    expect(find.text('도착했어요'), findsOneWidget);
   });
 }

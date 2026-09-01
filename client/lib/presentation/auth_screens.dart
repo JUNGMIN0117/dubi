@@ -10,9 +10,11 @@ class SocialAuthScreen extends StatelessWidget {
     super.key,
     required this.provider,
     required this.onAuthenticated,
+    required this.repository,
   });
   final String provider;
   final VoidCallback onAuthenticated;
+  final AuthRepository repository;
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +67,17 @@ class SocialAuthScreen extends StatelessWidget {
                               : DdubiColors.border,
                         ),
                       ),
-                      onPressed: onAuthenticated,
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AccountLinkPromptScreen(
+                            provider: provider,
+                            email: 'member@ddubi.app',
+                            repository: repository,
+                            onLinked: onAuthenticated,
+                          ),
+                        ),
+                      ),
                       child: Text(
                         '개발용 $provider 인증 완료',
                         style: const TextStyle(fontWeight: FontWeight.w800),
@@ -85,6 +97,282 @@ class SocialAuthScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class AccountLinkPromptScreen extends StatelessWidget {
+  const AccountLinkPromptScreen({
+    super.key,
+    required this.provider,
+    required this.email,
+    required this.repository,
+    required this.onLinked,
+  });
+
+  final String provider;
+  final String email;
+  final AuthRepository repository;
+  final VoidCallback onLinked;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('계정 연동')),
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              const Icon(
+                Icons.link_rounded,
+                size: 72,
+                color: DdubiColors.green,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                '이미 가입된 이메일이 있어요',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '$provider에서 확인된 이메일과 같은 뚜비 계정을 찾았어요.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              InfoCard(
+                color: const Color(0xFFF0FAF7),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.email_outlined),
+                  ),
+                  title: const Text('기존 이메일 계정'),
+                  subtitle: Text(email),
+                  trailing: const StatusBadge('연동 가능'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '계정을 연동하면 이메일 또는 소셜 로그인 중 어떤 방법을 사용해도 같은 일정과 설정을 이용할 수 있어요.',
+              ),
+              const SizedBox(height: 28),
+              FilledButton(
+                key: const Key('startEmailLinkButton'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EmailAccountLinkScreen(
+                      provider: provider,
+                      email: email,
+                      repository: repository,
+                      onLinked: onLinked,
+                    ),
+                  ),
+                ),
+                child: const Text('이메일 계정 확인하고 연동하기'),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('지금은 연동하지 않기'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class EmailAccountLinkScreen extends StatefulWidget {
+  const EmailAccountLinkScreen({
+    super.key,
+    required this.provider,
+    required this.email,
+    required this.repository,
+    required this.onLinked,
+  });
+
+  final String provider;
+  final String email;
+  final AuthRepository repository;
+  final VoidCallback onLinked;
+
+  @override
+  State<EmailAccountLinkScreen> createState() => _EmailAccountLinkScreenState();
+}
+
+class _EmailAccountLinkScreenState extends State<EmailAccountLinkScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _password = TextEditingController();
+  bool _obscure = true;
+  bool _loading = false;
+  String? _serverError;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('이메일 계정 확인')),
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                const TtubeeGuideCard(
+                  '기존 이메일 계정이 본인 계정인지 확인할게요.',
+                  compact: true,
+                ),
+                const SizedBox(height: 20),
+                TextFormField(
+                  key: const Key('linkEmailField'),
+                  initialValue: widget.email,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: '이메일',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const Key('linkPasswordField'),
+                  controller: _password,
+                  obscureText: _obscure,
+                  validator: validatePassword,
+                  decoration: InputDecoration(
+                    labelText: '기존 계정 비밀번호',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                      icon: Icon(
+                        _obscure
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                    ),
+                  ),
+                ),
+                if (_serverError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      _serverError!,
+                      style: const TextStyle(color: DdubiColors.red),
+                    ),
+                  ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  key: const Key('completeEmailLinkButton'),
+                  onPressed: _loading ? null : _submit,
+                  child: _loading
+                      ? const SizedBox.square(
+                          dimension: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('확인하고 계정 연동'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Future<void> _submit() async {
+    setState(() => _serverError = null);
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _loading = true);
+    try {
+      await widget.repository.login(
+        email: widget.email,
+        password: _password.text,
+      );
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AccountLinkCompleteScreen(
+            provider: widget.provider,
+            email: widget.email,
+            onContinue: widget.onLinked,
+          ),
+        ),
+      );
+    } on AuthException {
+      if (mounted) {
+        setState(() => _serverError = '기존 이메일 계정의 비밀번호를 확인해주세요.');
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+}
+
+class AccountLinkCompleteScreen extends StatelessWidget {
+  const AccountLinkCompleteScreen({
+    super.key,
+    required this.provider,
+    required this.email,
+    required this.onContinue,
+  });
+
+  final String provider;
+  final String email;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('계정 연동 완료')),
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.check_circle,
+                  size: 88,
+                  color: DdubiColors.green,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  '계정 연동이 완료됐어요!',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '$provider 또는 $email로\n같은 뚜비 계정을 이용할 수 있어요.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key('linkedAccountHomeButton'),
+                    onPressed: onContinue,
+                    child: const Text('홈으로 이동'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class EmailLoginScreen extends StatefulWidget {

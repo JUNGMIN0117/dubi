@@ -111,6 +111,7 @@ class LoginScreen extends StatelessWidget {
     c,
     SocialAuthScreen(
       provider: provider,
+      repository: authRepository,
       onAuthenticated: () => _completeLogin(c),
     ),
   );
@@ -1029,7 +1030,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   );
 }
 
-class _RouteMapView extends StatelessWidget {
+class _RouteMapView extends StatefulWidget {
   const _RouteMapView({
     required this.routes,
     required this.selectedKind,
@@ -1044,12 +1045,35 @@ class _RouteMapView extends StatelessWidget {
   final String destinationLabel;
   final ValueChanged<RouteKind> onSelected;
 
+  @override
+  State<_RouteMapView> createState() => _RouteMapViewState();
+}
+
+class _RouteMapViewState extends State<_RouteMapView> {
+  KakaoMapController? _mapController;
+
   static const _departure = LatLng(latitude: 37.5089, longitude: 127.0631);
   static const _current = LatLng(latitude: 37.5045, longitude: 127.0490);
   static const _destination = LatLng(latitude: 37.5006, longitude: 127.0364);
   static const _center = LatLng(latitude: 37.5048, longitude: 127.0498);
+  static const _cameraAnimation = CameraAnimation(
+    duration: 450,
+    autoElevation: true,
+    isConsecutive: false,
+  );
 
-  Future<void> _addMockMarkers(KakaoMapController controller) async {
+  int get _entireRouteLevel => kIsWeb ? 5 : 13;
+
+  @override
+  void didUpdateWidget(covariant _RouteMapView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedKind != widget.selectedKind) {
+      _showEntireRoute();
+    }
+  }
+
+  Future<void> _onMapCreated(KakaoMapController controller) async {
+    _mapController = controller;
     try {
       if (!kIsWeb) {
         await controller.addMarkerLayer(
@@ -1065,8 +1089,47 @@ class _RouteMapView extends StatelessWidget {
           MarkerOption(id: 'destination', latLng: _destination, text: '도착'),
         ],
       );
+      await _showEntireRoute();
     } catch (error) {
       debugPrint('Kakao Maps marker setup failed: $error');
+    }
+  }
+
+  Future<void> _showEntireRoute() =>
+      _moveCamera(position: _center, zoomLevel: _entireRouteLevel);
+
+  Future<void> _showCurrentLocation() async {
+    final controller = _mapController;
+    if (controller == null) return;
+    try {
+      final currentZoomLevel = await controller.getZoomLevel();
+      if (currentZoomLevel == null) return;
+      await _moveCamera(position: _current, zoomLevel: currentZoomLevel);
+    } catch (error) {
+      debugPrint('Kakao Maps zoom level lookup failed: $error');
+    }
+  }
+
+  Future<void> _moveCamera({
+    required LatLng position,
+    required int zoomLevel,
+  }) async {
+    final controller = _mapController;
+    if (controller == null) return;
+    try {
+      await controller.moveCamera(
+        cameraUpdate: CameraUpdate(position: position, zoomLevel: zoomLevel),
+        animation: _cameraAnimation,
+      );
+    } catch (error) {
+      debugPrint('Kakao Maps camera move failed: $error');
+    }
+  }
+
+  void _handleRouteSelected(RouteKind kind) {
+    widget.onSelected(kind);
+    if (kind == widget.selectedKind) {
+      _showEntireRoute();
     }
   }
 
@@ -1080,13 +1143,13 @@ class _RouteMapView extends StatelessWidget {
             child: KakaoMapConfig.isReady
                 ? KakaoMap(
                     initialPosition: _center,
-                    initialLevel: kIsWeb ? 5 : 15,
-                    onMapCreated: _addMockMarkers,
+                    initialLevel: _entireRouteLevel,
+                    onMapCreated: _onMapCreated,
                   )
                 : ColoredBox(
                     color: const Color(0xFFEAF2EC),
                     child: CustomPaint(
-                      painter: _MapPainter(selectedKind: selectedKind),
+                      painter: _MapPainter(selectedKind: widget.selectedKind),
                     ),
                   ),
           ),
@@ -1102,16 +1165,16 @@ class _RouteMapView extends StatelessWidget {
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: routes
+                  children: widget.routes
                       .map(
                         (route) => ChoiceChip(
                           label: Text(route.label),
-                          selected: route.kind == selectedKind,
+                          selected: route.kind == widget.selectedKind,
                           avatar: CircleAvatar(
                             backgroundColor: _routeTone(route.kind),
                             radius: 5,
                           ),
-                          onSelected: (_) => onSelected(route.kind),
+                          onSelected: (_) => _handleRouteSelected(route.kind),
                         ),
                       )
                       .toList(),
@@ -1135,7 +1198,7 @@ class _RouteMapView extends StatelessWidget {
               left: 12,
               bottom: 14,
               child: _MapMarker(
-                label: '출발 · $departureLabel',
+                label: '출발 · ${widget.departureLabel}',
                 icon: Icons.trip_origin,
                 tone: DdubiColors.green,
               ),
@@ -1145,7 +1208,7 @@ class _RouteMapView extends StatelessWidget {
               right: 12,
               top: constraints.maxHeight * .22,
               child: _MapMarker(
-                label: '도착 · $destinationLabel',
+                label: '도착 · ${widget.destinationLabel}',
                 icon: Icons.location_on,
                 tone: DdubiColors.red,
               ),
@@ -1154,7 +1217,34 @@ class _RouteMapView extends StatelessWidget {
           Positioned(
             right: 12,
             bottom: 12,
-            child: _MapModeBadge(isKakaoMap: KakaoMapConfig.isReady),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton.small(
+                  key: const Key('mapEntireRouteButton'),
+                  heroTag: 'map-entire-route',
+                  tooltip: '전체 경로 보기',
+                  onPressed: KakaoMapConfig.isReady ? _showEntireRoute : null,
+                  backgroundColor: Colors.white,
+                  foregroundColor: DdubiColors.blue,
+                  child: const Icon(Icons.route),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(
+                  key: const Key('mapCurrentLocationButton'),
+                  heroTag: 'map-current-location',
+                  tooltip: '현재 위치로 이동',
+                  onPressed: KakaoMapConfig.isReady
+                      ? _showCurrentLocation
+                      : null,
+                  backgroundColor: Colors.white,
+                  foregroundColor: DdubiColors.blue,
+                  child: const Icon(Icons.my_location),
+                ),
+                const SizedBox(height: 8),
+                _MapModeBadge(isKakaoMap: KakaoMapConfig.isReady),
+              ],
+            ),
           ),
         ],
       ),
@@ -1294,7 +1384,10 @@ class _RouteMapDetail extends StatelessWidget {
         ),
         PrimaryButton(
           '이동 안내 시작',
-          onPressed: () => _open(context, MovingScreen(repository: repository)),
+          onPressed: () => _open(
+            context,
+            MovingScreen(repository: repository, route: route),
+          ),
         ),
       ],
     ),
@@ -1482,69 +1575,162 @@ class SpacerBox extends StatelessWidget {
   Widget build(BuildContext context) => const SizedBox(height: 24);
 }
 
-class MovingScreen extends StatelessWidget {
-  const MovingScreen({super.key, required this.repository});
+class MovingScreen extends StatefulWidget {
+  const MovingScreen({super.key, required this.repository, this.route});
+
   final DdubiRepository repository;
+
+  final RouteOption? route;
+
   @override
-  Widget build(BuildContext c) => AppPage(
-    title: '출발 · 이동 중',
+  State<MovingScreen> createState() => _MovingScreenState();
+}
+
+class _MovingScreenState extends State<MovingScreen> {
+  bool _hasDeparted = false;
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: _hasDeparted ? '이동 중' : '출발 안내',
     actions: const [
       IconButton(onPressed: null, icon: Icon(Icons.notifications_none)),
     ],
     child: ListView(
       padding: _pad,
-      children: [
-        const TtubeeGuideCard(
-          '지금 출발하면 딱 좋아요!',
-          compact: true,
-          character: TtubeeRunning(asset: 'assets/images/ttubee/running.png'),
-        ),
-        const SizedBox(height: 12),
-        InfoCard(
-          color: const Color(0xFFF0FAF7),
-          child: Column(
-            children: [
-              const CircleAvatar(
-                radius: 32,
-                backgroundColor: Colors.white,
-                child: Icon(
-                  Icons.directions_walk,
-                  size: 36,
-                  color: DdubiColors.navy,
-                ),
-              ),
-              const SizedBox(height: 15),
-              Text('지금 출발하세요', style: Theme.of(c).textTheme.titleLarge),
-              const Text('여유 있게 이동하면 제시간 도착해요.'),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        const InfoCard(
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: CircleAvatar(child: Icon(Icons.directions_walk)),
-            title: Text('다음 단계'),
-            subtitle: Text('강남역까지 도보 6분\n450m'),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const InfoCard(
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.check_circle, color: DdubiColors.green),
-            title: Text('현재 지연 상태'),
-            subtitle: StatusBadge('지연 위험 낮음 · 제시간 도착 예상'),
-          ),
-        ),
-        const SizedBox(height: 28),
-        PrimaryButton(
-          '출발 안내 시작',
-          onPressed: () => _open(c, ArrivalScreen(repository: repository)),
-        ),
-      ],
+      children: _hasDeparted
+          ? _movingContent(context)
+          : _departureContent(context),
     ),
   );
+
+  List<Widget> _departureContent(BuildContext context) => [
+    const TtubeeGuideCard(
+      '지금 출발하면 딱 좋아요!',
+      compact: true,
+      character: TtubeeRunning(asset: 'assets/images/ttubee/running.png'),
+    ),
+    const SizedBox(height: 12),
+    InfoCard(
+      color: const Color(0xFFF0FAF7),
+      child: Column(
+        children: [
+          const CircleAvatar(
+            radius: 32,
+            backgroundColor: Colors.white,
+            child: Icon(
+              Icons.directions_walk,
+              size: 36,
+              color: DdubiColors.navy,
+            ),
+          ),
+          const SizedBox(height: 15),
+          Text('지금 출발하세요', style: Theme.of(context).textTheme.titleLarge),
+          const Text('여유 있게 이동하면 제시간 도착해요.'),
+        ],
+      ),
+    ),
+    const SizedBox(height: 12),
+    const InfoCard(
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: CircleAvatar(child: Icon(Icons.directions_walk)),
+        title: Text('첫 번째 단계'),
+        subtitle: Text('강남역까지 도보 6분\n450m'),
+      ),
+    ),
+    const SizedBox(height: 12),
+    const InfoCard(
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.check_circle, color: DdubiColors.green),
+        title: Text('현재 지연 상태'),
+        subtitle: StatusBadge('지연 위험 낮음 · 제시간 도착 예상'),
+      ),
+    ),
+    const SizedBox(height: 28),
+    PrimaryButton(
+      '출발했어요',
+      onPressed: () => setState(() => _hasDeparted = true),
+    ),
+  ];
+
+  List<Widget> _movingContent(BuildContext context) {
+    final route = widget.route;
+    final transport = route?.transport ?? '지하철 2호선';
+    final arrival = route?.arrival ?? '18:45';
+    return [
+      const TtubeeGuideCard(
+        '목적지까지 뚜비가 함께할게요!',
+        compact: true,
+        character: TtubeeRunning(asset: 'assets/images/ttubee/running.png'),
+      ),
+      const SizedBox(height: 12),
+      InfoCard(
+        color: const Color(0xFFF0FAF7),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const StatusBadge(
+              '현재 이동 단계',
+              tone: DdubiColors.green,
+              icon: Icons.directions_walk,
+            ),
+            const SizedBox(height: 12),
+            Text('강남역으로 이동 중', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            const Text('도보 6분 · 450m'),
+            const SizedBox(height: 14),
+            const LinearProgressIndicator(value: .18),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      InfoCard(
+        child: Row(
+          children: [
+            const Icon(Icons.schedule, color: DdubiColors.blue),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('예상 도착'),
+                  Text(
+                    '$arrival · 제시간 도착 예상',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      InfoCard(
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const CircleAvatar(child: Icon(Icons.subway)),
+          title: const Text('다음 단계'),
+          subtitle: Text('강남역에서 $transport 탑승'),
+        ),
+      ),
+      const SizedBox(height: 12),
+      const InfoCard(
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.check_circle, color: DdubiColors.green),
+          title: Text('현재 지연 상태'),
+          subtitle: StatusBadge('지연 위험 낮음 · 제시간 도착 예상'),
+        ),
+      ),
+      const SizedBox(height: 28),
+      PrimaryButton(
+        '도착했어요',
+        onPressed: () =>
+            _open(context, ArrivalScreen(repository: widget.repository)),
+      ),
+    ];
+  }
 }
 
 class ArrivalScreen extends StatelessWidget {

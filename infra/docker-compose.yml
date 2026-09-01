@@ -357,6 +357,9 @@ services:
       BASELINE_INPUT_URI: ${BASELINE_INPUT_URI}
       BASELINE_OUTPUT_URI: ${BASELINE_OUTPUT_URI}
       BASELINE_WINDOW_DAYS: ${BASELINE_WINDOW_DAYS:-28}
+      # 기준선 업로드 API (비우면 업로드 생략 — 구간 기준선 배치에서 사용 예정)
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       # 스트리밍 실행기(1g x2)가 워커 메모리(1536m x2)를 먼저 쓰고 있어, 배치는 남는 몫(≈500m) 안에서 돈다.
       # 더 크게 잡으면 자원을 못 받아 무한 대기하고, Spark 최소값(450m) 보다 작으면 시작을 거부한다. 워커 메모리를 늘리면 함께 올린다.
       SPARK_EXECUTOR_MEMORY: ${BATCH_EXECUTOR_MEMORY:-480m}

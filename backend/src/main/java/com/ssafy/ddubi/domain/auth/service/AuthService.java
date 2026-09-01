@@ -93,7 +93,7 @@ public class AuthService {
                 .build());
         userAuthRepository.save(UserAuth.ofLocal(user, passwordEncoder.encode(request.password())));
 
-        return issueTokens(user, request.deviceId());
+        return issueTokens(user, request.deviceId(), AuthProvider.LOCAL);
     }
 
     // ------------------------------------------------------------------
@@ -109,7 +109,7 @@ public class AuthService {
             // 존재하지 않는 계정과 같은 응답을 준다 — 어느 이메일이 가입돼 있는지 흘리지 않는다.
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "이메일 또는 비밀번호가 일치하지 않습니다.");
         }
-        return issueTokens(auth.getUser(), request.deviceId());
+        return issueTokens(auth.getUser(), request.deviceId(), AuthProvider.LOCAL);
     }
 
     /**
@@ -142,7 +142,7 @@ public class AuthService {
         Optional<UserAuth> linked =
                 userAuthRepository.findByProviderAndProviderUserId(request.provider(), info.providerUserId());
         if (linked.isPresent()) {
-            return new OAuthResult(issueTokens(linked.get().getUser(), request.deviceId()), false);
+            return new OAuthResult(issueTokens(linked.get().getUser(), request.deviceId(), request.provider()), false);
         }
 
         // ② 같은 이메일의 기존 계정 — user 를 새로 만들지 않고 인증 수단만 추가(계정 통합)
@@ -153,7 +153,7 @@ public class AuthService {
                 userAuthRepository.save(
                         UserAuth.ofSocial(user, request.provider(), info.providerUserId()));
                 log.info("계정 통합 — userId={} 에 {} 인증 수단 추가", user.getId(), request.provider());
-                return new OAuthResult(issueTokens(user, request.deviceId()), false);
+                return new OAuthResult(issueTokens(user, request.deviceId(), request.provider()), false);
             }
         } else {
             // 이메일이 없으면 통합 판단 자체가 불가능하다. 별도 계정이 생기는 것은 정상 동작이다.
@@ -166,7 +166,7 @@ public class AuthService {
                 .nickname(resolveNickname(info))
                 .build());
         userAuthRepository.save(UserAuth.ofSocial(user, request.provider(), info.providerUserId()));
-        return new OAuthResult(issueTokens(user, request.deviceId()), true);
+        return new OAuthResult(issueTokens(user, request.deviceId(), request.provider()), true);
     }
 
     private String resolveNickname(OAuthUserInfo info) {
@@ -206,7 +206,7 @@ public class AuthService {
 
         User user = userRepository.findById(payload.userId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-        return issueTokens(user, payload.deviceId());
+        return issueTokensOnly(payload.userId(), payload.deviceId());
     }
 
     // ------------------------------------------------------------------
@@ -231,28 +231,49 @@ public class AuthService {
     // 공통
     // ------------------------------------------------------------------
 
-    private AuthTokenResponse issueTokens(User user, String requestedDeviceId) {
-        // 클라이언트가 기기 식별자를 안 주면 서버가 발급하고 응답에 돌려준다.
-        // 이후 재발급·로그아웃에서 같은 값을 써야 세션이 맞는다.
-        String deviceId = StringUtils.hasText(requestedDeviceId)
-                ? requestedDeviceId
-                : UUID.randomUUID().toString();
+    /** 가입·로그인 — 토큰 + deviceId + user(이번에 쓴 provider 포함). */
+    private AuthTokenResponse issueTokens(User user, String requestedDeviceId, AuthProvider usedProvider) {
+        String deviceId = resolveDeviceId(requestedDeviceId);
+        var issued = issue(user.getId(), deviceId);
 
-        String accessToken = tokenProvider.createAccessToken(user.getId());
-        var refresh = tokenProvider.createRefreshToken(user.getId(), deviceId);
-
-        // 저장은 발급 직후 — 이 시점 이후 이전 토큰은 재사용으로 판정된다(회전).
-        refreshTokenStore.save(user.getId(), deviceId, refresh.tokenId(),
-                tokenProvider.refreshTokenValidity());
-
-        List<AuthProvider> providers = userAuthRepository.findProvidersByUserId(user.getId());
-
-        return AuthTokenResponse.of(
-                accessToken,
-                refresh.token(),
+        return AuthTokenResponse.withUser(
+                issued.accessToken(),
+                issued.refreshToken(),
                 tokenProvider.accessTokenValidity().toSeconds(),
                 tokenProvider.refreshTokenValidity().toSeconds(),
                 deviceId,
-                AuthUserResponse.of(user, providers));
+                AuthUserResponse.of(user, usedProvider));
+    }
+
+    /** 재발급 — 명세서 AUTH-004 에는 user·deviceId 가 없다. */
+    private AuthTokenResponse issueTokensOnly(Long userId, String deviceId) {
+        var issued = issue(userId, deviceId);
+        return AuthTokenResponse.tokensOnly(
+                issued.accessToken(),
+                issued.refreshToken(),
+                tokenProvider.accessTokenValidity().toSeconds(),
+                tokenProvider.refreshTokenValidity().toSeconds());
+    }
+
+    /**
+     * 클라이언트가 기기 식별자를 안 주면 서버가 발급한다.
+     * 이후 재발급·로그아웃에서 같은 값을 써야 세션이 맞으므로 응답에 돌려준다.
+     */
+    private String resolveDeviceId(String requestedDeviceId) {
+        return StringUtils.hasText(requestedDeviceId)
+                ? requestedDeviceId
+                : UUID.randomUUID().toString();
+    }
+
+    private IssuedPair issue(Long userId, String deviceId) {
+        String accessToken = tokenProvider.createAccessToken(userId);
+        var refresh = tokenProvider.createRefreshToken(userId, deviceId);
+        // 저장은 발급 직후 — 이 시점 이후 이전 토큰은 재사용으로 판정된다(회전).
+        refreshTokenStore.save(userId, deviceId, refresh.tokenId(),
+                tokenProvider.refreshTokenValidity());
+        return new IssuedPair(accessToken, refresh.token());
+    }
+
+    private record IssuedPair(String accessToken, String refreshToken) {
     }
 }

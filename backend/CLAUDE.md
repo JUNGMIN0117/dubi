@@ -177,9 +177,15 @@ FK: user 하위 전부 `ON DELETE CASCADE`, notification의 schedule_id/recommen
 ### 6.3 엔드포인트 (internal — 서비스 계정/관리자 전용, 사용자 JWT 거부)
 BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spark 배치, 단위 초), DETECT-001~003 `/internal/detections`, SEG-001 `/internal/segments/states/query`(Redis 일괄 조회), RECALC-001/002 `/internal/recalculations`(202+jobId, 작업 상태는 Redis), OPS/HEALTH `/internal/ops/*`.
 
-### 6.4 명세서 원문 대비 확정 변경사항 (ERD v2 반영 — 코드에서는 아래가 정답)
-1. 회원가입 = `user` + `user_auth(LOCAL, password_hash)` 생성. password_hash는 user 테이블에 없다.
-2. 응답의 `user.provider` 단일값 → `providers: ["LOCAL","KAKAO"]` 배열.
+### 6.4 ERD v2 반영 메모 (⚠️ 정본은 Notion API 명세서다)
+
+> **정본 우선순위: Notion「DDUBI_APP_API」명세서 v2.1.1 > 이 문서.**
+> 아래 항목은 ERD와 맞추려고 적어둔 메모이고, **명세서와 충돌하면 명세서를 따른다.**
+> 실제로 2번이 틀린 것으로 확인되어 되돌렸다(2026-08-31). 나머지 항목도 코드로 옮기기 전에
+> 명세서 원문을 먼저 확인할 것.
+
+1. 회원가입 = `user` + `user_auth(LOCAL, password_hash)` 생성. password_hash는 user 테이블에 없다. *(ERD 사실 — 명세서와 충돌 없음)*
+2. ~~응답의 `user.provider` 단일값 → `providers` 배열~~ → **철회.** 명세서대로 `provider` **단일값**이다. 계정에 LOCAL·KAKAO가 함께 붙어 있어도 **이번 요청에서 인증에 사용한 수단** 하나만 담는다.
 3. `GET /users/me` 응답에서 `withdrawnAt` 제거(컬럼 없음).
 4. `DELETE /users/me` = 하드 삭제 CASCADE. `ALREADY_WITHDRAWN` 개념 없음.
 5. `PATCH /users/me` 지원 필드 확장: nickname, notifyLeadMin(0~180), alarmEnabled, historyConsent, **briefingTime(HH:mm:ss|null), mobilityNote(≤100자), transportPrefs([{mode,preference}])**.

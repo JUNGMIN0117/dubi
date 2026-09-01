@@ -134,7 +134,7 @@ sparkjobs-test:
     DOCKER_TLS_CERTDIR: ""
     DOCKER_HOST: "tcp://docker:2375"
   rules:
-    - if: $CI_COMMIT_BRANCH == "developer" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
       allow_failure: true
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -171,9 +171,9 @@ spark-image:
     - apk add --no-cache openssh-client
     - chmod 600 "$DEPLOY_SSH_KEY"
   rules:
-    # 배포 기준 브랜치는 developer (팀 브랜치 전략: 기능 -> developer 통합 -> master 릴리스).
-    # developer 가 보호 브랜치여야 Protected 변수(DEPLOY_SSH_KEY)가 주입된다
-    - if: $CI_COMMIT_BRANCH == "developer"
+    # 배포 기준 브랜치는 develop (팀 브랜치 전략: 기능 -> develop 통합 -> master 릴리스).
+    # develop 이 보호 브랜치여야 Protected 변수(DEPLOY_SSH_KEY)가 주입된다
+    - if: $CI_COMMIT_BRANCH == "develop"
       when: manual
       allow_failure: true   # 안 눌러도 파이프라인은 성공으로 끝난다
 

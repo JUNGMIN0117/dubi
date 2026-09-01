@@ -13,11 +13,22 @@ keys:
     pattern: "segment:status:{segmentId}"
     ttlSeconds: 300
     owner: spark
+    schema: events/segment-status.schema.json # 분산 담당 초안 — 아래 description 대로 확정 전
     description: >-
       Spark가 계산한 구간별 최신 상태. 백엔드는 재평가 시 읽기만 한다.
       값 스키마·직렬화 형식은 분산 담당 확정 대기 —
       백엔드는 어댑터 인터페이스(SegmentStateReader)로 격리한다.
       값이 없거나 stale 이면 baseline_serving 폴백 + confidence=LOW.
+    valueExample: '{"segmentId":"seg-000123","status":"delayed","delaySeconds":420,"confidence":0.8,"causes":[{"eventId":"...","eventType":"road.incident","source":"seoul.topis"}],"computedAt":"2026-08-27T09:10:00+09:00","validUntil":"2026-08-27T09:15:00+09:00","source":"spark.segment-status"}'
+
+  weatherLatest:
+    pattern: "weather:latest:{nx}:{ny}"
+    ttlSeconds: 7200
+    owner: spark
+    description: >-
+      Spark(streaming/weather_latest)가 격자별로 정리한 기상청 초단기실황 최신값.
+      districts 는 이 격자를 공유하는 구 목록. 서버에서 가동 중.
+    valueExample: '{"districts":["종로구","중구"],"nx":60,"ny":127,"baseDate":"20260827","baseTime":"0900","observations":{"T1H":27.3,"REH":64.0},"occurredAt":"2026-08-27T09:00:00.000+09:00","collectedAt":"2026-08-27T09:10:00.000+09:00","eventId":"...","source":"kma.ultra-srt-ncst"}'
 
   # --- 백엔드 소유 ----------------------------------------------------
   authRefresh:

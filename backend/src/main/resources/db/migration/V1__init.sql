@@ -339,7 +339,7 @@ CREATE TABLE report_detail (
 CREATE TABLE baseline_serving (
     id             BIGINT      NOT NULL AUTO_INCREMENT,
     segment_id     VARCHAR(50) NOT NULL COMMENT 'route_segment·Redis 와 동일 체계',
-    dow            TINYINT     NOT NULL COMMENT '요일 1~7 (월=1)',
+    dow            TINYINT     NOT NULL COMMENT '요일 1~7. 일=1, 토=7 (Spark dayofweek 기준). Java LocalDate 는 월=1 이므로 변환 필요',
     hour_slot      TINYINT     NOT NULL COMMENT '시간대 0~23',
     weather_bucket ENUM('DRY','RAIN','SNOW') NOT NULL,
     p50            INT         NOT NULL COMMENT '단위: 초',

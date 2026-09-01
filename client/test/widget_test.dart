@@ -6,6 +6,7 @@ import 'package:ddubi/domain/auth.dart';
 import 'package:ddubi/domain/models.dart';
 import 'package:ddubi/presentation/auth_screens.dart';
 import 'package:ddubi/presentation/screens.dart';
+import 'package:ddubi/presentation/widgets.dart';
 import 'package:ddubi/providers/app_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -136,8 +137,60 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(NavigationRail), findsOneWidget);
+    expect(
+      tester.widget<NavigationRail>(find.byType(NavigationRail)).extended,
+      isTrue,
+    );
+    expect(find.text('뚜비'), findsOneWidget);
     expect(find.text('09:00 팀 회의'), findsOneWidget);
     expect(find.text('강남역 인근'), findsOneWidget);
+  });
+
+  testWidgets('Web Home은 대시보드와 3열 추천 경로를 표시한다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    container.read(appRouterProvider).go('/home');
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('webHomeDashboard')), findsOneWidget);
+    expect(find.byKey(const Key('webHomeRouteGrid')), findsOneWidget);
+    expect(find.text('오늘의 이동'), findsOneWidget);
+    expect(find.text('도착 예정'), findsOneWidget);
+    expect(find.byType(RouteCard), findsNWidgets(3));
+  });
+
+  testWidgets('일정 화면은 너비에 따라 모바일과 Web 구성을 나눈다', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+    container.read(appRouterProvider).go('/schedules');
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('mobileScheduleLayout')), findsOneWidget);
+    expect(find.byKey(const Key('webScheduleLayout')), findsNothing);
+
+    tester.view.physicalSize = const Size(1200, 900);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('webScheduleLayout')), findsOneWidget);
+    expect(find.byKey(const Key('mobileScheduleLayout')), findsNothing);
+    expect(find.text('날짜를 선택해 일정을 확인하세요.'), findsOneWidget);
   });
 
   testWidgets('일정 등록 화면의 입력값이 Mock 저장소에 저장된다', (tester) async {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
 
+import '../core/constants/layout_constants.dart';
 import '../core/maps/kakao_map_config.dart';
 import '../core/theme.dart';
 import '../data/mock_repository.dart';
@@ -162,79 +163,192 @@ class HomeScreen extends StatelessWidget {
         }
         if (!s.hasData) return const Center(child: CircularProgressIndicator());
         final routes = s.data!;
-        return ListView(
-          padding: _pad,
-          children: [
-            InfoCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '19:30',
-                              style: Theme.of(c).textTheme.headlineLarge,
-                            ),
-                            Text(
-                              '잠실야구장',
-                              style: Theme.of(c).textTheme.titleLarge,
-                            ),
-                            const SizedBox(height: 6),
-                            const StatusBadge('지금은 정상'),
-                          ],
-                        ),
-                      ),
-                      const Icon(
-                        Icons.stadium_outlined,
-                        size: 58,
-                        color: DdubiColors.blue,
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 28),
-                  const Text('추천 출발 시간', style: TextStyle(fontSize: 12)),
-                  Row(
-                    children: [
-                      Text(
-                        '17:57',
-                        style: Theme.of(c).textTheme.headlineMedium
-                            ?.copyWith(color: DdubiColors.blue),
-                      ),
-                      const Spacer(),
-                      OutlinedButton(
-                        onPressed: () => c.push('/schedules/schedule-baseball'),
-                        child: const Text('상세 보기'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            const TtubeeGuideCard('17:57에 출발하면 안전해요!\n아직 준비할 시간이 충분해요.'),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 230,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: routes.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
-                itemBuilder: (_, i) => RouteCard(
-                  routes[i],
-                  compact: true,
-                  onTap: () => c.push('/recommendations/mock-recommendation-1'),
-                ),
-              ),
-            ),
-          ],
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide =
+                constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
+            return isWide
+                ? _WebHomeContent(routes: routes)
+                : _MobileHomeContent(routes: routes);
+          },
         );
       },
     ),
+  );
+}
+
+class _MobileHomeContent extends StatelessWidget {
+  const _MobileHomeContent({required this.routes});
+
+  final List<RouteOption> routes;
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: _pad,
+    children: [
+      const _HomeScheduleCard(),
+      const SizedBox(height: 12),
+      const TtubeeGuideCard('17:57에 출발하면 안전해요!\n아직 준비할 시간이 충분해요.'),
+      const SizedBox(height: 16),
+      SizedBox(
+        height: 230,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: routes.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (_, i) => RouteCard(
+            routes[i],
+            compact: true,
+            onTap: () => context.push('/recommendations/mock-recommendation-1'),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+class _WebHomeContent extends StatelessWidget {
+  const _WebHomeContent({required this.routes});
+
+  final List<RouteOption> routes;
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    key: const Key('webHomeDashboard'),
+    padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+    children: [
+      Text('오늘의 이동', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 4),
+      Text(
+        '다음 일정과 추천 경로를 한눈에 확인하세요.',
+        style: Theme.of(context).textTheme.bodyMedium
+            ?.copyWith(color: const Color(0xFF667085)),
+      ),
+      const SizedBox(height: 18),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Expanded(flex: 3, child: _HomeScheduleCard()),
+          const SizedBox(width: 16),
+          Expanded(
+            flex: 2,
+            child: Column(
+              children: [
+                const TtubeeGuideCard(
+                  '17:57에 출발하면 안전해요!\n아직 준비할 시간이 충분해요.',
+                  compact: true,
+                ),
+                const SizedBox(height: 12),
+                InfoCard(
+                  child: Row(
+                    children: const [
+                      Expanded(child: _HomeMetric('도착 예정', '18:45')),
+                      Expanded(child: _HomeMetric('이동 시간', '48분')),
+                      Expanded(child: _HomeMetric('여유 시간', '15분')),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 28),
+      SectionHeader(
+        '추천 경로',
+        trailing: Text(
+          '${routes.length}개의 경로를 비교해보세요',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+      const SizedBox(height: 12),
+      GridView.builder(
+        key: const Key('webHomeRouteGrid'),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: routes.length,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 12,
+          mainAxisExtent: 220,
+        ),
+        itemBuilder: (_, i) => RouteCard(
+          routes[i],
+          compact: true,
+          fillWidth: true,
+          onTap: () => context.push('/recommendations/mock-recommendation-1'),
+        ),
+      ),
+    ],
+  );
+}
+
+class _HomeScheduleCard extends StatelessWidget {
+  const _HomeScheduleCard();
+
+  @override
+  Widget build(BuildContext context) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '19:30',
+                    style: Theme.of(context).textTheme.headlineLarge,
+                  ),
+                  Text('잠실야구장', style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 6),
+                  const StatusBadge('지금은 정상'),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.stadium_outlined,
+              size: 58,
+              color: DdubiColors.blue,
+            ),
+          ],
+        ),
+        const Divider(height: 28),
+        const Text('추천 출발 시간', style: TextStyle(fontSize: 12)),
+        Row(
+          children: [
+            Text(
+              '17:57',
+              style: Theme.of(context).textTheme.headlineMedium
+                  ?.copyWith(color: DdubiColors.blue),
+            ),
+            const Spacer(),
+            OutlinedButton(
+              onPressed: () => context.push('/schedules/schedule-baseball'),
+              child: const Text('상세 보기'),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+class _HomeMetric extends StatelessWidget {
+  const _HomeMetric(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Text(label, style: Theme.of(context).textTheme.bodySmall),
+      const SizedBox(height: 5),
+      Text(value, style: Theme.of(context).textTheme.titleMedium),
+    ],
   );
 }
 
@@ -280,70 +394,183 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
                   item.date.day == selectedDate.day,
             )
             .toList();
-        return ListView(
-          padding: _pad,
-          children: [
-            MonthlyCalendar(
-              selectedDate: selectedDate,
-              schedules: schedules,
-              onSelected: (date) => setState(() => selectedDate = date),
-            ),
-            const SizedBox(height: 18),
-            SectionHeader(
-              '${selectedDate.month}월 ${selectedDate.day}일 일정',
-              trailing: TextButton.icon(
-                onPressed: () => _add(c),
-                icon: const Icon(Icons.add),
-                label: const Text('일정 추가'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (!s.hasData)
-              const Center(child: CircularProgressIndicator())
-            else if (selectedSchedules.isEmpty)
-              InfoCard(
-                color: const Color(0xFFF4FCFA),
-                child: Column(
+        final calendar = MonthlyCalendar(
+          selectedDate: selectedDate,
+          schedules: schedules,
+          onSelected: (date) => setState(() => selectedDate = date),
+        );
+        final dayPanel = _ScheduleDayPanel(
+          selectedDate: selectedDate,
+          schedules: selectedSchedules,
+          isLoading: !s.hasData,
+          onAdd: () => _add(c),
+        );
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide =
+                constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
+            if (isWide) {
+              return SingleChildScrollView(
+                key: const Key('webScheduleLayout'),
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const TtubeeIdle(
-                      asset: 'assets/images/ttubee/empty-schedule.png',
+                    Expanded(
+                      child: MonthlyCalendar(
+                        selectedDate: selectedDate,
+                        schedules: schedules,
+                        expanded: true,
+                        onSelected: (date) =>
+                            setState(() => selectedDate = date),
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '아직 등록된 일정이 없어요.',
-                      style: Theme.of(c).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    const Text('뚜비에게 중요한 일정을 알려주세요!'),
-                    const SizedBox(height: 14),
-                    FilledButton.icon(
-                      onPressed: () => _add(c),
-                      icon: const Icon(Icons.add),
-                      label: const Text('일정 등록하기'),
-                    ),
+                    const SizedBox(width: 20),
+                    SizedBox(width: 340, child: dayPanel),
                   ],
                 ),
-              )
-            else
-              ...selectedSchedules.map(
-                (v) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.location_on_outlined,
-                    color: DdubiColors.blue,
-                  ),
-                  title: Text(
-                    '${v.time}  ${v.title}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(v.place),
-                  trailing: Text(v.dateLabel),
-                  onTap: () => c.push('/schedules/${v.id}'),
-                ),
-              ),
-          ],
+              );
+            }
+            return ListView(
+              key: const Key('mobileScheduleLayout'),
+              padding: _pad,
+              children: [calendar, const SizedBox(height: 18), dayPanel],
+            );
+          },
         );
       },
+    ),
+  );
+}
+
+class _ScheduleDayPanel extends StatelessWidget {
+  const _ScheduleDayPanel({
+    required this.selectedDate,
+    required this.schedules,
+    required this.isLoading,
+    required this.onAdd,
+  });
+
+  final DateTime selectedDate;
+  final List<Schedule> schedules;
+  final bool isLoading;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SectionHeader(
+        '${selectedDate.month}월 ${selectedDate.day}일 일정',
+        trailing: TextButton.icon(
+          onPressed: onAdd,
+          icon: const Icon(Icons.add),
+          label: const Text('일정 추가'),
+        ),
+      ),
+      const SizedBox(height: 8),
+      if (isLoading)
+        const Center(child: CircularProgressIndicator())
+      else if (schedules.isEmpty)
+        InfoCard(
+          color: const Color(0xFFF4FCFA),
+          child: Column(
+            children: [
+              const TtubeeIdle(
+                asset: 'assets/images/ttubee/empty-schedule.png',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '아직 등록된 일정이 없어요.',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              const Text('뚜비에게 중요한 일정을 알려주세요!'),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add),
+                label: const Text('일정 등록하기'),
+              ),
+            ],
+          ),
+        )
+      else
+        ...schedules.map(
+          (schedule) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _ScheduleSummaryCard(schedule: schedule),
+          ),
+        ),
+    ],
+  );
+}
+
+class _ScheduleSummaryCard extends StatelessWidget {
+  const _ScheduleSummaryCard({required this.schedule});
+
+  final Schedule schedule;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => context.push('/schedules/${schedule.id}'),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 58,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: DdubiColors.blue.withValues(alpha: .1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                schedule.time,
+                style: const TextStyle(
+                  color: DdubiColors.blue,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    schedule.title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        size: 15,
+                        color: Color(0xFF667085),
+                      ),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          schedule.place,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Color(0xFF98A2B3)),
+          ],
+        ),
+      ),
     ),
   );
 }

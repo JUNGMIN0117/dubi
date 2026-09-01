@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/constants/layout_constants.dart';
 import '../core/theme.dart';
 import '../domain/models.dart';
 
@@ -141,9 +142,16 @@ class StatusBadge extends StatelessWidget {
 }
 
 class RouteCard extends StatelessWidget {
-  const RouteCard(this.route, {super.key, this.compact = false, this.onTap});
+  const RouteCard(
+    this.route, {
+    super.key,
+    this.compact = false,
+    this.fillWidth = false,
+    this.onTap,
+  });
   final RouteOption route;
   final bool compact;
+  final bool fillWidth;
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext c) {
@@ -156,7 +164,7 @@ class RouteCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Container(
-        width: compact ? 150 : double.infinity,
+        width: compact && !fillWidth ? 150 : double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           border: Border.all(color: tone),
@@ -246,10 +254,12 @@ class MonthlyCalendar extends StatelessWidget {
     required this.selectedDate,
     required this.schedules,
     required this.onSelected,
+    this.expanded = false,
   });
   final DateTime selectedDate;
   final List<Schedule> schedules;
   final ValueChanged<DateTime> onSelected;
+  final bool expanded;
 
   bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
@@ -257,116 +267,180 @@ class MonthlyCalendar extends StatelessWidget {
   Widget build(BuildContext context) {
     final month = DateTime(selectedDate.year, selectedDate.month);
     final firstOffset = month.weekday % 7;
-    final days = DateTime(month.year, month.month + 1, 0).day;
+    final gridStart = month.subtract(Duration(days: firstOffset));
     final today = DateTime.now();
     return InfoCard(
       child: Column(
         children: [
           Row(
             children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${month.year}년 ${month.month}월',
+                      style: expanded
+                          ? Theme.of(context).textTheme.headlineMedium
+                          : Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (expanded) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        '날짜를 선택해 일정을 확인하세요.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => onSelected(today),
+                child: const Text('오늘'),
+              ),
               IconButton(
                 onPressed: () =>
                     onSelected(DateTime(month.year, month.month - 1, 1)),
                 icon: const Icon(Icons.chevron_left),
-              ),
-              Expanded(
-                child: Text(
-                  '${month.year}년 ${month.month}월',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                tooltip: '이전 달',
               ),
               IconButton(
                 onPressed: () =>
                     onSelected(DateTime(month.year, month.month + 1, 1)),
                 icon: const Icon(Icons.chevron_right),
+                tooltip: '다음 달',
               ),
             ],
           ),
-          Row(
-            children: [
-              for (final label in ['일', '월', '화', '수', '목', '금', '토'])
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
+          SizedBox(height: expanded ? 20 : 12),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            decoration: BoxDecoration(
+              color: DdubiColors.surface,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                for (var index = 0; index < 7; index++)
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        const ['일', '월', '화', '수', '목', '금', '토'][index],
+                        style: TextStyle(
+                          color: index == 0
+                              ? DdubiColors.red
+                              : index == 6
+                              ? const Color(0xFF2377E8)
+                              : const Color(0xFF667085),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: 42,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
-              mainAxisExtent: 43,
+              mainAxisExtent: expanded ? 68 : 48,
             ),
             itemBuilder: (_, index) {
-              final day = index - firstOffset + 1;
-              if (day < 1 || day > days) return const SizedBox.shrink();
-              final date = DateTime(month.year, month.month, day);
+              final date = gridStart.add(Duration(days: index));
+              final inMonth = date.month == month.month;
               final selected = _sameDay(date, selectedDate),
                   isToday = _sameDay(date, today);
               final count = schedules
                   .where((item) => _sameDay(item.date, date))
                   .length;
-              return InkWell(
-                onTap: () => onSelected(date),
-                borderRadius: BorderRadius.circular(12),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 31,
-                      height: 28,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: selected ? DdubiColors.blue : null,
-                        border: isToday && !selected
-                            ? Border.all(color: DdubiColors.blue)
-                            : null,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '$day',
-                        style: TextStyle(
-                          color: selected ? Colors.white : DdubiColors.navy,
-                          fontWeight: isToday
-                              ? FontWeight.w800
-                              : FontWeight.w500,
-                        ),
-                      ),
+              return Padding(
+                padding: const EdgeInsets.all(2),
+                child: InkWell(
+                  onTap: () => onSelected(date),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: expanded ? 8 : 2,
+                      vertical: expanded ? 7 : 5,
                     ),
-                    SizedBox(
-                      height: 4,
-                      child: count == 0
-                          ? null
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(
-                                count.clamp(1, 3),
-                                (_) => Container(
-                                  width: 4,
-                                  height: 4,
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 1,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? DdubiColors.blue
+                          : isToday
+                          ? DdubiColors.blue.withValues(alpha: .08)
+                          : null,
+                      border: isToday && !selected
+                          ? Border.all(
+                              color: DdubiColors.blue.withValues(alpha: .55),
+                            )
+                          : null,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: expanded
+                          ? CrossAxisAlignment.start
+                          : CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          '${date.day}',
+                          style: TextStyle(
+                            color: selected
+                                ? Colors.white
+                                : inMonth
+                                ? DdubiColors.navy
+                                : const Color(0xFFB7C0CC),
+                            fontWeight: isToday || selected
+                                ? FontWeight.w800
+                                : FontWeight.w500,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (count > 0)
+                          expanded
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
                                   ),
-                                  decoration: const BoxDecoration(
-                                    color: DdubiColors.orange,
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? Colors.white.withValues(alpha: .22)
+                                        : DdubiColors.orange.withValues(
+                                            alpha: .12,
+                                          ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '일정 $count',
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : DdubiColors.orange,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  width: 5,
+                                  height: 5,
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? Colors.white
+                                        : DdubiColors.orange,
                                     shape: BoxShape.circle,
                                   ),
-                                ),
-                              ),
-                            ),
+                                )
+                        else
+                          const SizedBox(height: 5),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               );
             },
@@ -395,7 +469,15 @@ class AppPage extends StatelessWidget {
   final Widget? fab;
   @override
   Widget build(BuildContext c) => Scaffold(
+    backgroundColor:
+        MediaQuery.sizeOf(c).width >= LayoutConstants.wideScreenBreakpoint
+        ? DdubiColors.surface
+        : Colors.white,
     appBar: AppBar(
+      backgroundColor:
+          MediaQuery.sizeOf(c).width >= LayoutConstants.wideScreenBreakpoint
+          ? DdubiColors.surface
+          : Colors.white,
       title: Text(title, style: Theme.of(c).textTheme.titleMedium),
       centerTitle: false,
       actions: actions,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/constants/layout_constants.dart';
+import '../core/theme.dart';
 import '../domain/models.dart';
 import '../presentation/screens.dart';
 import '../providers/app_providers.dart';
@@ -127,13 +128,47 @@ class _ResponsiveNavigationShell extends StatelessWidget {
         final isWide =
             constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
         if (isWide) {
+          final useExtendedRail = constraints.maxWidth >= 1100;
           return Scaffold(
             body: Row(
               children: [
                 NavigationRail(
+                  extended: useExtendedRail,
+                  minExtendedWidth: 190,
+                  backgroundColor: DdubiColors.surface,
                   selectedIndex: _selectedIndex,
                   onDestinationSelected: (index) => _go(context, index),
-                  labelType: NavigationRailLabelType.all,
+                  labelType: useExtendedRail
+                      ? NavigationRailLabelType.none
+                      : NavigationRailLabelType.all,
+                  leading: useExtendedRail
+                      ? Padding(
+                          padding: const EdgeInsets.only(bottom: 18),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: const BoxDecoration(
+                                  color: DdubiColors.blue,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.directions_walk,
+                                  color: Colors.white,
+                                  size: 21,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                '뚜비',
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ],
+                          ),
+                        )
+                      : null,
                   destinations: const [
                     NavigationRailDestination(
                       icon: Icon(Icons.calendar_today_outlined),

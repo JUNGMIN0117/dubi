@@ -39,6 +39,16 @@ keys:
       리프레시 토큰 세션(해시). 회전 시 즉시 교체하고,
       재사용이 감지되면 해당 기기 세션 전체를 폐기한다.
 
+  revokedAccessToken:
+    pattern: "auth:revoked:{userId}"
+    ttlSeconds: 3600 # 액세스 토큰 유효기간과 동일
+    owner: backend
+    description: >-
+      즉시 무효화해야 하는 사용자. JWT 는 발급 후 취소가 안 되므로,
+      탈퇴하거나 리프레시 재사용이 감지되면 여기에 넣고 인증 필터가 매 요청 확인한다.
+      TTL 이 액세스 토큰 유효기간과 같아 그 뒤에는 자동으로 사라진다.
+      재로그인하면 삭제된다.
+
   idempotency:
     pattern: "idem:{userId}:{path}:{key}"
     ttlSeconds: 86400 # 24h

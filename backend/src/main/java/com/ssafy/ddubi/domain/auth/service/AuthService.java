@@ -18,6 +18,7 @@ import com.ssafy.ddubi.domain.user.repository.UserRepository;
 import com.ssafy.ddubi.global.exception.BusinessException;
 import com.ssafy.ddubi.global.exception.ErrorCode;
 import com.ssafy.ddubi.global.security.JwtTokenProvider;
+import com.ssafy.ddubi.global.security.RevokedAccessTokenStore;
 import com.ssafy.ddubi.global.security.TokenPayload;
 import com.ssafy.ddubi.global.security.TokenType;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
     private final RefreshTokenStore refreshTokenStore;
+    private final RevokedAccessTokenStore revokedStore;
     private final Map<AuthProvider, OAuthClient> oauthClients = new EnumMap<>(AuthProvider.class);
 
     public AuthService(UserRepository userRepository,
@@ -63,6 +65,7 @@ public class AuthService {
                        PasswordEncoder passwordEncoder,
                        JwtTokenProvider tokenProvider,
                        RefreshTokenStore refreshTokenStore,
+                       RevokedAccessTokenStore revokedStore,
                        List<OAuthClient> clients) {
         this.userRepository = userRepository;
         this.userAuthRepository = userAuthRepository;
@@ -70,6 +73,7 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
         this.tokenProvider = tokenProvider;
         this.refreshTokenStore = refreshTokenStore;
+        this.revokedStore = revokedStore;
         clients.forEach(c -> this.oauthClients.put(c.provider(), c));
     }
 
@@ -199,6 +203,8 @@ public class AuthService {
             // 이미 회전된 옛 토큰이 다시 왔다 = 토큰이 두 곳에서 쓰이고 있다.
             // 공격자와 정상 사용자를 함께 로그아웃시키는 편이 탈취 상태를 방치하는 것보다 낫다.
             long revoked = refreshTokenStore.revokeAll(payload.userId());
+            // 세션만 지우면 이미 발급된 액세스 토큰이 60분간 살아 있다. 함께 차단한다.
+            revokedStore.revoke(payload.userId());
             log.warn("리프레시 재사용 감지 — userId={}, 세션 {}건 폐기", payload.userId(), revoked);
             throw new BusinessException(ErrorCode.UNAUTHORIZED,
                     "보안을 위해 모든 기기에서 로그아웃되었습니다. 다시 로그인해 주세요.");
@@ -266,6 +272,9 @@ public class AuthService {
     }
 
     private IssuedPair issue(Long userId, String deviceId) {
+        // 정상 로그인·재발급은 무효화 표시를 푼다. 재사용 감지로 막힌 사용자가
+        // 다시 로그인하면 정상 사용자로 돌아와야 한다.
+        revokedStore.clear(userId);
         String accessToken = tokenProvider.createAccessToken(userId);
         var refresh = tokenProvider.createRefreshToken(userId, deviceId);
         // 저장은 발급 직후 — 이 시점 이후 이전 토큰은 재사용으로 판정된다(회전).

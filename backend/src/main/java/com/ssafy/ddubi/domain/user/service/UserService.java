@@ -10,6 +10,7 @@ import com.ssafy.ddubi.domain.user.entity.User;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
 import com.ssafy.ddubi.global.exception.BusinessException;
 import com.ssafy.ddubi.global.exception.ErrorCode;
+import com.ssafy.ddubi.global.security.RevokedAccessTokenStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -29,15 +30,18 @@ public class UserService {
     private final UserAuthRepository userAuthRepository;
     private final RefreshTokenStore refreshTokenStore;
     private final PasswordEncoder passwordEncoder;
+    private final RevokedAccessTokenStore revokedStore;
 
     public UserService(UserRepository userRepository,
                        UserAuthRepository userAuthRepository,
                        RefreshTokenStore refreshTokenStore,
-                       PasswordEncoder passwordEncoder) {
+                       PasswordEncoder passwordEncoder,
+                       RevokedAccessTokenStore revokedStore) {
         this.userRepository = userRepository;
         this.userAuthRepository = userAuthRepository;
         this.refreshTokenStore = refreshTokenStore;
         this.passwordEncoder = passwordEncoder;
+        this.revokedStore = revokedStore;
     }
 
     @Transactional(readOnly = true)
@@ -85,6 +89,9 @@ public class UserService {
 
         // Redis 세션을 먼저 지운다. DB 삭제가 먼저면 그 사이 리프레시로 토큰이 재발급될 수 있다.
         refreshTokenStore.revokeAll(userId);
+        // 이미 발급된 액세스 토큰은 만료 전까지 서명이 유효하다. 즉시 차단하지 않으면
+        // 사라진 user_id 로 INSERT 를 시도해 FK 위반이 난다.
+        revokedStore.revoke(userId);
         userRepository.delete(user);
 
         // reason 은 보관하지 않는다 — 탈퇴자 관련 데이터를 남기지 않기로 한 팀 합의 때문이다.

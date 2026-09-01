@@ -1,6 +1,7 @@
 import 'package:ddubi/app.dart';
 import 'package:ddubi/app/router.dart';
 import 'package:ddubi/data/mock_repository.dart';
+import 'package:ddubi/core/theme.dart';
 import 'package:ddubi/domain/auth.dart';
 import 'package:ddubi/domain/models.dart';
 import 'package:ddubi/presentation/screens.dart';
@@ -34,6 +35,8 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     expect(find.text('뚜비'), findsOneWidget);
     expect(find.textContaining('카카오로 시작하기'), findsOneWidget);
+    expect(find.textContaining('네이버로 시작하기'), findsOneWidget);
+    expect(find.textContaining('Apple로 시작하기'), findsNothing);
     expect(find.textContaining('이메일로 시작하기'), findsOneWidget);
     await tester.tap(find.textContaining('이메일로 시작하기'));
     await tester.pumpAndSettle();
@@ -68,6 +71,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('카카오 로그인'), findsOneWidget);
     expect(find.text('개발용 카카오 인증 완료'), findsOneWidget);
+  });
+
+  testWidgets('네이버 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.tap(find.textContaining('네이버로 시작하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('네이버 로그인'), findsOneWidget);
+    expect(find.text('개발용 네이버 인증 완료'), findsOneWidget);
+  });
+
+  testWidgets('앱 전체에서 스크롤 끝 늘어남 효과를 사용하지 않는다', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app.scrollBehavior, isA<DdubiScrollBehavior>());
   });
 
   testWidgets('Web 너비에서는 직접 경로와 NavigationRail을 사용한다', (tester) async {
@@ -169,6 +186,7 @@ void main() {
     expect(find.byKey(const Key('mapCurrentMarker')), findsOneWidget);
     expect(find.byKey(const Key('mapDepartureMarker')), findsOneWidget);
     expect(find.byKey(const Key('mapDestinationMarker')), findsOneWidget);
+    expect(find.text('Mock 지도 · Kakao 키 미설정'), findsOneWidget);
     expect(find.text('현재 위치 (Mock)'), findsOneWidget);
     expect(find.text('출발 · 강남역'), findsOneWidget);
     expect(find.text('도착 · 여의도역'), findsOneWidget);

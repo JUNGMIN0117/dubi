@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
 
+import '../core/maps/kakao_map_config.dart';
 import '../core/theme.dart';
 import '../data/mock_repository.dart';
 import '../domain/auth.dart';
@@ -71,10 +74,10 @@ class LoginScreen extends StatelessWidget {
                 ),
                 _login(
                   c,
-                  '●  Apple로 시작하기',
+                  'N  네이버로 시작하기',
+                  const Color(0xFF03C75A),
                   Colors.white,
-                  Colors.black,
-                  () => _social(c, 'Apple'),
+                  () => _social(c, '네이버'),
                 ),
                 _login(
                   c,
@@ -963,7 +966,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         return LayoutBuilder(
           builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 760;
-            final map = _MockRouteMap(
+            final map = _RouteMapView(
               routes: routes,
               selectedKind: selected.kind,
               departureLabel: widget.condition?.departurePlace ?? '역삼역 입구',
@@ -1010,8 +1013,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   );
 }
 
-class _MockRouteMap extends StatelessWidget {
-  const _MockRouteMap({
+class _RouteMapView extends StatelessWidget {
+  const _RouteMapView({
     required this.routes,
     required this.selectedKind,
     required this.departureLabel,
@@ -1025,6 +1028,32 @@ class _MockRouteMap extends StatelessWidget {
   final String destinationLabel;
   final ValueChanged<RouteKind> onSelected;
 
+  static const _departure = LatLng(latitude: 37.5089, longitude: 127.0631);
+  static const _current = LatLng(latitude: 37.5045, longitude: 127.0490);
+  static const _destination = LatLng(latitude: 37.5006, longitude: 127.0364);
+  static const _center = LatLng(latitude: 37.5048, longitude: 127.0498);
+
+  Future<void> _addMockMarkers(KakaoMapController controller) async {
+    try {
+      if (!kIsWeb) {
+        await controller.addMarkerLayer(
+          layerId: KakaoMapController.defaultLabelLayerId,
+          zOrder: 1000,
+          clickable: false,
+        );
+      }
+      await controller.addMarkers(
+        markerOptions: [
+          MarkerOption(id: 'departure', latLng: _departure, text: '출발'),
+          MarkerOption(id: 'current', latLng: _current, text: '현재 위치'),
+          MarkerOption(id: 'destination', latLng: _destination, text: '도착'),
+        ],
+      );
+    } catch (error) {
+      debugPrint('Kakao Maps marker setup failed: $error');
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(16),
@@ -1032,12 +1061,18 @@ class _MockRouteMap extends StatelessWidget {
       builder: (context, constraints) => Stack(
         children: [
           Positioned.fill(
-            child: ColoredBox(
-              color: const Color(0xFFEAF2EC),
-              child: CustomPaint(
-                painter: _MapPainter(selectedKind: selectedKind),
-              ),
-            ),
+            child: KakaoMapConfig.isReady
+                ? KakaoMap(
+                    initialPosition: _center,
+                    initialLevel: kIsWeb ? 5 : 15,
+                    onMapCreated: _addMockMarkers,
+                  )
+                : ColoredBox(
+                    color: const Color(0xFFEAF2EC),
+                    child: CustomPaint(
+                      painter: _MapPainter(selectedKind: selectedKind),
+                    ),
+                  ),
           ),
           Positioned(
             left: 12,
@@ -1068,38 +1103,65 @@ class _MockRouteMap extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(
-            key: const Key('mapCurrentMarker'),
-            left: constraints.maxWidth * .42,
-            top: constraints.maxHeight * .54,
-            child: const _MapMarker(
-              label: '현재 위치 (Mock)',
-              icon: Icons.my_location,
-              tone: DdubiColors.blue,
+          if (!KakaoMapConfig.isReady) ...[
+            Positioned(
+              key: const Key('mapCurrentMarker'),
+              left: constraints.maxWidth * .42,
+              top: constraints.maxHeight * .54,
+              child: const _MapMarker(
+                label: '현재 위치 (Mock)',
+                icon: Icons.my_location,
+                tone: DdubiColors.blue,
+              ),
             ),
-          ),
-          Positioned(
-            key: const Key('mapDepartureMarker'),
-            left: 12,
-            bottom: 14,
-            child: _MapMarker(
-              label: '출발 · $departureLabel',
-              icon: Icons.trip_origin,
-              tone: DdubiColors.green,
+            Positioned(
+              key: const Key('mapDepartureMarker'),
+              left: 12,
+              bottom: 14,
+              child: _MapMarker(
+                label: '출발 · $departureLabel',
+                icon: Icons.trip_origin,
+                tone: DdubiColors.green,
+              ),
             ),
-          ),
+            Positioned(
+              key: const Key('mapDestinationMarker'),
+              right: 12,
+              top: constraints.maxHeight * .22,
+              child: _MapMarker(
+                label: '도착 · $destinationLabel',
+                icon: Icons.location_on,
+                tone: DdubiColors.red,
+              ),
+            ),
+          ],
           Positioned(
-            key: const Key('mapDestinationMarker'),
             right: 12,
-            top: constraints.maxHeight * .22,
-            child: _MapMarker(
-              label: '도착 · $destinationLabel',
-              icon: Icons.location_on,
-              tone: DdubiColors.red,
-            ),
+            bottom: 12,
+            child: _MapModeBadge(isKakaoMap: KakaoMapConfig.isReady),
           ),
         ],
       ),
+    ),
+  );
+}
+
+class _MapModeBadge extends StatelessWidget {
+  const _MapModeBadge({required this.isKakaoMap});
+
+  final bool isKakaoMap;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('mapModeBadge'),
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: .92),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(
+      isKakaoMap ? 'Kakao Map · Mock 좌표' : 'Mock 지도 · Kakao 키 미설정',
+      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
     ),
   );
 }

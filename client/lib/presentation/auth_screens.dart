@@ -16,6 +16,17 @@ class SocialAuthScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isKakao = provider == '카카오';
+    final isNaver = provider == '네이버';
+    final buttonBackground = isKakao
+        ? const Color(0xFFFFD600)
+        : isNaver
+        ? const Color(0xFF03C75A)
+        : Colors.white;
+    final buttonForeground = isKakao
+        ? Colors.black
+        : isNaver
+        ? Colors.white
+        : DdubiColors.navy;
     return Scaffold(
       appBar: AppBar(title: Text('$provider 로그인')),
       body: SafeArea(
@@ -45,15 +56,11 @@ class SocialAuthScreen extends StatelessWidget {
                     height: 52,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: isKakao
-                            ? const Color(0xFFFFD600)
-                            : Colors.white,
-                        foregroundColor: isKakao
-                            ? Colors.black
-                            : DdubiColors.navy,
+                        backgroundColor: buttonBackground,
+                        foregroundColor: buttonForeground,
                         side: BorderSide(
-                          color: isKakao
-                              ? const Color(0xFFFFD600)
+                          color: isKakao || isNaver
+                              ? buttonBackground
                               : DdubiColors.border,
                         ),
                       ),

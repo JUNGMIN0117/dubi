@@ -1,5 +1,23 @@
 # DDUBI Client
 
+## Kakao Maps
+
+지도 앱 키는 저장소에 커밋하지 않고 `--dart-define`으로 전달합니다. 키가 없거나 초기화에 실패하면 기존 Mock 지도가 표시됩니다.
+
+Android는 Kakao Developers에 패키지명 `com.ssafy.ddubi`를 등록한 뒤 Native App Key로 실행합니다.
+
+```sh
+flutter run -d <android-device-id> --dart-define=KAKAO_NATIVE_APP_KEY=<native-app-key>
+```
+
+Web은 Kakao Developers에 실행 도메인을 등록한 뒤 JavaScript Key로 실행합니다. 로컬 개발 포트는 팀에서 동일하게 사용할 수 있도록 `3001`을 권장합니다.
+
+```sh
+flutter run -d chrome --web-port=3001 --dart-define=KAKAO_JAVASCRIPT_KEY=<javascript-key>
+```
+
+현재 출발·현재·도착 마커는 화면 확인용 강남권 Mock 좌표입니다. 백엔드 경로 API에 좌표와 경로 형상이 추가되면 `lib/presentation/screens.dart`의 `_RouteMapView`에서 교체합니다.
+
 Flutter 코드 하나로 Android 앱과 Web을 함께 개발합니다.
 
 ## 실행

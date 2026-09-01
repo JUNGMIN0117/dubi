@@ -22,7 +22,7 @@ import java.util.UUID;
 /**
  * JWT 발급·검증.
  *
- * Access 60분 / Refresh 14일(CLAUDE.md 3장 확정). Refresh 는 Redis 에 저장해 회전시키므로
+ * Access 60분 / Refresh 14일(BACKEND_CONVENTION.md 3장 확정). Refresh 는 Redis 에 저장해 회전시키므로
  * deviceId 와 jti 를 함께 담는다 — 회전 시 저장된 jti 와 다르면 재사용으로 보고
  * 해당 기기 세션 전체를 폐기한다(7장 계약).
  */

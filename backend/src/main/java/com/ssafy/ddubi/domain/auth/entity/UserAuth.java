@@ -21,7 +21,7 @@ import lombok.NoArgsConstructor;
  * 로그인 수단. 한 계정에 여러 개가 붙을 수 있다(일반 + 카카오).
  *
  * 계정 통합의 구현체다 — 같은 이메일로 소셜 로그인하면 새 user 를 만들지 않고
- * 기존 user 에 provider 행만 추가한다(CLAUDE.md 도메인 규칙 3).
+ * 기존 user 에 provider 행만 추가한다(BACKEND_CONVENTION.md 도메인 규칙 3).
  *
  * 제약:
  *  - UNIQUE(provider, provider_user_id): 한 카카오 계정이 두 user 에 붙는 것 방지.

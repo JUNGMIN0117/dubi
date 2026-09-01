@@ -1,7 +1,7 @@
 -- =====================================================================
 -- 뚜비(DDUBI) 서비스 DB 스키마 — ERD_master (구 ERD v2)
 -- =====================================================================
--- 원천: Notion「ERD_master」(mermaid) + 「ERD 설명서」 + backend/CLAUDE.md
+-- 원천: Notion「ERD_master」(mermaid) + 「ERD 설명서」 + backend/BACKEND_CONVENTION.md
 -- 대상: MySQL 8.0+ / InnoDB / utf8mb4
 -- 소유: 백엔드(서비스) — 단, 15~17번 테이블은 분산 담당 소유(아래 주석 참조)
 --
@@ -188,7 +188,7 @@ CREATE TABLE route_request (
 --    [서비스 계층 보장 1] schedule_id 는 route_request.schedule_id 와 항상 같아야 한다
 --                        (성능 목적 비정규화. DB로 강제 불가)
 --    [서비스 계층 보장 2] 한 schedule 에 is_selected=TRUE 는 최대 1건
---                        (CLAUDE.md 규칙 6. PUT .../selection 트랜잭션에서 나머지 FALSE)
+--                        (BACKEND_CONVENTION.md 규칙 6. PUT .../selection 트랜잭션에서 나머지 FALSE)
 --    ※ 팀 합의 시 아래로 DB 강제 가능(별도 마이그레이션 안건):
 --        selected_schedule_id BIGINT GENERATED ALWAYS AS (IF(is_selected, schedule_id, NULL)) VIRTUAL,
 --        UNIQUE KEY UK_ROUTE_SELECTED (selected_schedule_id)

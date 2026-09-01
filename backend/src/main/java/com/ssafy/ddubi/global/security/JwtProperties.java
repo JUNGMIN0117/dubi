@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.time.Duration;
 
 /**
- * ddubi.jwt.* 바인딩. 값은 환경변수로 주입하고 코드에 두지 않는다(CLAUDE.md 9장).
+ * ddubi.jwt.* 바인딩. 값은 환경변수로 주입하고 코드에 두지 않는다(BACKEND_CONVENTION.md 9장).
  *
  * @param secret                HS256 서명 키. 최소 32바이트여야 한다
  * @param accessTokenValidity   Access 토큰 유효기간 (확정: 60분)

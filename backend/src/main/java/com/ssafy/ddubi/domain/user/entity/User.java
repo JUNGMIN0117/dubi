@@ -20,7 +20,7 @@ import java.time.LocalTime;
  *
  * 인증 수단은 {@code user_auth} 로 분리되어 있어 여기에는 로그인 방법과 무관한 속성만 둔다.
  * 탈퇴는 이 행을 DELETE 하는 것이고, 하위 데이터는 DB 의 ON DELETE CASCADE 가 지운다
- * (JPA cascade 를 걸지 않는다 — CLAUDE.md 3.1장 규칙 12).
+ * (JPA cascade 를 걸지 않는다 — BACKEND_CONVENTION.md 3.1장 규칙 12).
  */
 @Entity
 @Table(name = "user")

@@ -84,7 +84,7 @@ UNIQUE KEY UK_BASELINE_KEY (segment_id, dow, hour_slot, weather_bucket, data_ver
 "200": '{"accepted": 5000, "dataVersion": "2026-09-01"}'
 ```
 
-뚜비는 **모든 API 응답을 공통 형식으로 감쌉니다**(API 명세서 v2.1.1 §2, CLAUDE.md 3.1 규칙 2).
+뚜비는 **모든 API 응답을 공통 형식으로 감쌉니다**(API 명세서 v2.1.1 §2, BACKEND_CONVENTION.md 3.1 규칙 2).
 
 ```json
 {
@@ -112,7 +112,7 @@ UNIQUE KEY UK_BASELINE_KEY (segment_id, dow, hour_slot, weather_bucket, data_ver
 
 ### 3-2. `pipeline_config` 소유권 표기와 신선도 키
 
-`activate` 가 `pipeline_config.baseline_active_version` 을 씁니다. 그런데 ERD 와 CLAUDE.md 에는 **"소유: 분산 담당"** 으로 되어 있습니다. 이제 **Spring 이 쓰는 테이블**이므로 백엔드가 표기를 고치겠습니다.
+`activate` 가 `pipeline_config.baseline_active_version` 을 씁니다. 그런데 ERD 와 BACKEND_CONVENTION.md 에는 **"소유: 분산 담당"** 으로 되어 있습니다. 이제 **Spring 이 쓰는 테이블**이므로 백엔드가 표기를 고치겠습니다.
 
 추가로, 계약에 **"마지막 활성화 시각"을 어디 저장할지가 없습니다.** `pipeline_config` 에 키를 하나 더 두는 것을 제안합니다.
 
@@ -141,7 +141,7 @@ baseline_last_activated_at  = 2026-09-01T04:12:00
 회의록 3번 규칙(검증 게이트 · 활성화 분리 · 삭제 규칙 · 신선도 기록 · 인증)은 그대로 따릅니다. 아래는 우리 쪽 구현 메모입니다.
 
 - **네이티브 bulk upsert 사용.** JPA `saveAll()` 은 5000행에 5000 쿼리가 나가고 UNIQUE 충돌 시 갱신도 못 합니다. multi-row `INSERT ... ON DUPLICATE KEY UPDATE` 로 처리합니다
-- **`/internal` 전용 SecurityFilterChain 분리.** 현재 체인은 JWT 기반입니다. `X-DDUBI-API-KEY` 로 인증하는 체인을 앞에 두고 **사용자 JWT 는 거부**합니다(CLAUDE.md 6.3)
+- **`/internal` 전용 SecurityFilterChain 분리.** 현재 체인은 JWT 기반입니다. `X-DDUBI-API-KEY` 로 인증하는 체인을 앞에 두고 **사용자 JWT 는 거부**합니다(BACKEND_CONVENTION.md 6.3)
 - **`baselineType` 값 검증.** 지금은 `segment` 만 허용하고, 모르는 값은 400
 - **`/internal` 은 `/api/v1` 아래가 아닙니다.** nginx 가 현재 `/api/` 만 백엔드로 넘기므로 `/internal/` location 이 따로 필요합니다 — 서버 이식 때 반영 부탁드립니다. 로컬 개발에서는 8080 직접 호출로 진행합니다
 

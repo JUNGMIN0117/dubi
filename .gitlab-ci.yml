@@ -1,12 +1,31 @@
+# DDUBI CI
+# - MR 파이프라인 우선. MR 이 없는 브랜치 푸시는 브랜치 파이프라인으로 돈다 (중복 실행 방지)
+# - 각 컴포넌트는 관련 파일이 바뀔 때만 테스트한다 (rules: changes)
+# - sparkjobs 는 클러스터 이미지(apache/spark 3.5.3)와 같은 Python 3.8 로 테스트해 문법 호환까지 확인한다
+# - 이미지 빌드는 dind(privileged) 러너가 필요해 수동 잡으로 둔다. 배포는 서버 이식(9단계) 후 추가
+
 stages:
   - validate
   - test
   - build
   - deploy
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
 default:
   interruptible: true
 
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
 structure-check:
   stage: validate
   image: alpine:3.20
@@ -23,10 +42,161 @@ structure-check:
     - changes:
         - "**/*"
 
+# compose 문법·변수 참조 검증 (데몬 불필요: config 는 파싱만 한다)
+compose-validate:
+  stage: validate
+  image: docker:27-cli
+  script:
+    - cd infra
+    - cp .env.example .env
+    - docker compose --profile core --profile collect --profile data --profile spark
+      --profile batch --profile archive --profile hdfs --profile hdfs2 --profile monitoring
+      --profile exporters config -q
+    # 서버 오버레이 검증 (IP 는 필수 변수라 더미 값 주입)
+    - export SERVER1_PRIVATE_IP=10.0.0.1 SERVER2_PRIVATE_IP=10.0.0.2
+    - docker compose -f docker-compose.yml -f docker-compose.server1.yml --profile hdfs --profile spark --profile archive config -q
+    - docker compose -f docker-compose.yml -f docker-compose.server2.yml --profile data --profile hdfs2 config -q
+  rules:
+    - changes:
+        - infra/**/*
+
+# 계약 파일 파싱 검증 (YAML/JSON 이 깨진 채 병합되는 것 방지)
+contracts-validate:
+  stage: validate
+  image: python:3.11-slim
+  script:
+    - pip install --quiet pyyaml
+    # 한 줄 유지: 여러 줄로 접으면 YAML 이 앞에 공백을 붙여 python -c 가 IndentationError 로 죽는다
+    - python -c "import yaml, json, glob; [yaml.safe_load(open(f, encoding='utf-8')) for f in glob.glob('docs/contracts/*.yaml')]; [json.load(open(f, encoding='utf-8')) for f in glob.glob('docs/contracts/events/*.json')]; print('contracts OK')"
+  rules:
+    - changes:
+        - docs/contracts/**/*
+
+# ---------------------------------------------------------------------------
+# test
+# ---------------------------------------------------------------------------
+collector-test:
+  stage: test
+  image: python:3.11-slim
+  cache:
+    key:
+      files: [collector/requirements.txt]
+    paths: [.cache/pip]
+  script:
+    - pip install -r collector/requirements.txt
+    - cd collector && python -m pytest -q
+  rules:
+    - changes:
+        - collector/**/*
+        - docs/contracts/events/*.json   # 계약-모델 일치 테스트가 이 파일들을 읽는다
+
+archiver-test:
+  stage: test
+  image: python:3.11-slim
+  cache:
+    key:
+      files: [archiver/requirements.txt]
+    paths: [.cache/pip]
+  script:
+    - pip install -r archiver/requirements.txt
+    - cd archiver && python -m pytest -q
+  rules:
+    - changes:
+        - archiver/**/*
+
+sparkjobs-test:
+  stage: test
+  image: python:3.8-slim   # 클러스터(apache/spark:3.5.3-python3)와 같은 파이썬 버전
+  cache:
+    key:
+      files: [sparkjobs/requirements-dev.txt]
+    paths: [.cache/pip]
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends default-jre-headless > /dev/null
+  script:
+    - pip install -r sparkjobs/requirements-dev.txt
+    - cd sparkjobs && python -m pytest -q
+  rules:
+    - changes:
+        - sparkjobs/**/*
+
+# ---------------------------------------------------------------------------
+# build (수동): 이미지 빌드 검증. dind(privileged) 러너 필요
+#  - SSAFY GitLab 은 컨테이너 저장소가 없어(CI_REGISTRY 미제공) push 는 하지 않는다.
+#    배포는 서버가 클론 후 직접 빌드하는 방식 유지. 여기서는 Dockerfile 빌드 가능 여부만 검증
+#  - TLS 없이 2375 로 붙는다 (인증서 공유 볼륨 불필요)
+# ---------------------------------------------------------------------------
+.build-image:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: "tcp://docker:2375"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+
+collector-image:
+  extends: .build-image
+  script:
+    - docker build -f collector/Dockerfile -t "ddubi/collector:ci-$CI_COMMIT_SHORT_SHA" .
+
+archiver-image:
+  extends: .build-image
+  script:
+    - docker build -f archiver/Dockerfile -t "ddubi/archiver:ci-$CI_COMMIT_SHORT_SHA" .
+
+spark-image:
+  extends: .build-image
+  script:
+    - docker build -f infra/spark/Dockerfile --build-arg SPARK_IMAGE=apache/spark:3.5.3-python3
+      -t "ddubi/spark:ci-$CI_COMMIT_SHORT_SHA" .
+
+# ---------------------------------------------------------------------------
+# deploy (수동 승인): 러너(서버2)가 SSH 로 각 서버에 접속해 git pull + compose up
+#  - master 에서만 버튼이 생긴다. 검증·테스트 통과 후 사람이 눌러야 배포된다
+#  - 준비물: CI/CD 변수 DEPLOY_SSH_KEY(File, Protected) = 서버2의 ~/.ssh/ddubi_deploy 개인키.
+#    공개키는 양 서버 authorized_keys 에 from="서버2 IP" 제한으로 등록되어 있다
+#  - 서버의 git pull 은 읽기 전용 Deploy Token 이 박힌 HTTPS 리모트를 쓴다 (GitLab SSH 포트 차단됨)
+# ---------------------------------------------------------------------------
+.deploy:
+  stage: deploy
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache openssh-client
+    - chmod 600 "$DEPLOY_SSH_KEY"
+  rules:
+    # 배포 기준 브랜치는 develop (팀 브랜치 전략: 기능 -> develop 통합 -> master 릴리스).
+    # develop 이 보호 브랜치여야 Protected 변수(DEPLOY_SSH_KEY)가 주입된다
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: manual
+      allow_failure: true   # 안 눌러도 파이프라인은 성공으로 끝난다
+
+deploy-server1:
+  extends: .deploy
+  environment: { name: server1-data }
+  script:
+    - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.15.35
+      "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
+       && cd infra && docker compose -f docker-compose.yml -f docker-compose.server1.yml
+       --profile core --profile collect --profile spark --profile archive --profile hdfs --profile exporters
+       up -d --build"
+
+deploy-server2:
+  extends: .deploy
+  environment: { name: server2-service }
+  script:
+    - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220
+      "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
+       && cd infra && docker compose -f docker-compose.yml -f docker-compose.server2.yml
+       --profile data --profile hdfs2 --profile monitoring
+       up -d --build"
+
 # 후속 작업
 # - client/**: Flutter test + Android/Web build
-# - backend/**: Spring test + image build/deploy
-# - collector/**: pytest + image build/deploy
-# - sparkjobs/**: PySpark check/test + job deploy
-# - notification/**: Spring test + image build/deploy
-# - infra/**: validate 후 수동 승인
+# - backend/**, notification/**: Spring test + image build (배포 프로필에 추가)

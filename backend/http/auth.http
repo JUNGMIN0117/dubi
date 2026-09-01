@@ -281,6 +281,10 @@ Content-Type: application/json
 }
 
 ### 구글 소셜 로그인 — GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 필요
+# ⚠️ 콜백 URL 에서 code= 값만 잘라 쓴다. 뒤에 붙은 &scope=... &authuser=... 를 함께
+#    넣으면 제공자가 거절한다.
+# ⚠️ %2F 같은 URL 인코딩은 풀어서 넣는다(%2F → /). 그대로 두면 한 번 더 인코딩돼 깨진다.
+#    예) ...?code=4%2F0ATsMZq...&scope=email  →  4/0ATsMZq...
 # 인가 URL (브라우저에서 열어 code 를 받는다):
 #   https://accounts.google.com/o/oauth2/v2/auth
 #     ?client_id={GOOGLE_CLIENT_ID}
@@ -297,7 +301,9 @@ Content-Type: application/json
 }
 
 ### 네이버 소셜 로그인 — NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 필요
-# ⚠️ state 가 필수다. 인가 URL 에 쓴 값과 같은 값을 그대로 넣어야 한다.
+# ⚠️ code= 값만 자른다. 뒤의 &state=... 를 code 에 붙이지 말 것.
+# ⚠️ state 는 별도 필드에 넣되, 인가 URL 에 쓴 값과 같아야 한다.
+#    네이버는 실패해도 코드가 소진되므로 틀리면 인가 URL 부터 다시 받아야 한다.
 # 인가 URL:
 #   https://nid.naver.com/oauth2.0/authorize
 #     ?client_id={NAVER_CLIENT_ID}

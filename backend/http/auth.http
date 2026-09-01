@@ -279,3 +279,70 @@ Content-Type: application/json
   "redirectUri": "http://localhost:3001/oauth/kakao",
   "deviceId": "{{deviceId}}"
 }
+
+### 구글 소셜 로그인 — GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 필요
+# 인가 URL (브라우저에서 열어 code 를 받는다):
+#   https://accounts.google.com/o/oauth2/v2/auth
+#     ?client_id={GOOGLE_CLIENT_ID}
+#     &redirect_uri=http://localhost:3001/oauth/google
+#     &response_type=code&scope=openid%20email%20profile
+POST {{host}}/api/v1/auth/oauth
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "authorizationCode": "여기에-구글-인가코드",
+  "redirectUri": "http://localhost:3001/oauth/google",
+  "deviceId": "{{deviceId}}"
+}
+
+### 네이버 소셜 로그인 — NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 필요
+# ⚠️ state 가 필수다. 인가 URL 에 쓴 값과 같은 값을 그대로 넣어야 한다.
+# 인가 URL:
+#   https://nid.naver.com/oauth2.0/authorize
+#     ?client_id={NAVER_CLIENT_ID}
+#     &redirect_uri=http://localhost:3001/oauth/naver
+#     &response_type=code&state=ddubi-test-state
+POST {{host}}/api/v1/auth/oauth
+Content-Type: application/json
+
+{
+  "provider": "NAVER",
+  "authorizationCode": "여기에-네이버-인가코드",
+  "redirectUri": "http://localhost:3001/oauth/naver",
+  "state": "ddubi-test-state",
+  "deviceId": "{{deviceId}}"
+}
+
+### 네이버인데 state 를 빼면 — 400 INVALID_REQUEST
+POST {{host}}/api/v1/auth/oauth
+Content-Type: application/json
+
+{
+  "provider": "NAVER",
+  "authorizationCode": "dummy",
+  "redirectUri": "http://localhost:3001/oauth/naver",
+  "deviceId": "{{deviceId}}"
+}
+
+> {%
+    client.test("400 — state 없이는 네이버를 호출조차 하지 않는다", function () {
+        client.assert(response.status === 400);
+    });
+%}
+
+### 지원하지 않는 provider — 400 (ENUM 밖의 값)
+POST {{host}}/api/v1/auth/oauth
+Content-Type: application/json
+
+{
+  "provider": "APPLE",
+  "authorizationCode": "dummy",
+  "redirectUri": "http://localhost:3001/oauth/apple"
+}
+
+> {%
+    client.test("400 — ENUM 에 없는 값", function () {
+        client.assert(response.status === 400);
+    });
+%}

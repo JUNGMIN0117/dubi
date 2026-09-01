@@ -60,10 +60,10 @@ class WithdrawIntegrationTest extends IntegrationTestSupport {
     /** LOCAL + KAKAO 인증 수단과 기기 토큰까지 붙은 계정을 만든다. */
     private Long givenFullyPopulatedUser() {
         authService.signupLocal(new LocalSignupRequest(EMAIL, PASSWORD, "탈퇴대상", "dev-1"));
-        given(kakaoOAuthClient.fetchUserInfo(any(), any()))
+        given(kakaoOAuthClient.fetchUserInfo(any()))
                 .willReturn(new OAuthUserInfo("kakao-1", EMAIL, "카카오"));
         authService.loginOAuth(new OAuthLoginRequest(
-                AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", "dev-2"));
+                AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", null, "dev-2"));
 
         Long userId = userRepository.findByEmail(EMAIL).orElseThrow().getId();
         deviceTokenService.register(userId,
@@ -156,10 +156,10 @@ class WithdrawIntegrationTest extends IntegrationTestSupport {
     @Test
     @DisplayName("소셜 전용 계정은 비밀번호 없이 탈퇴할 수 있다")
     void allowsWithdrawWithoutPasswordForSocialOnlyUser() {
-        given(kakaoOAuthClient.fetchUserInfo(any(), any()))
+        given(kakaoOAuthClient.fetchUserInfo(any()))
                 .willReturn(new OAuthUserInfo("kakao-2", "social@ddubi.com", "소셜전용"));
         Long userId = authService.loginOAuth(new OAuthLoginRequest(
-                AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", "dev-1"))
+                AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", null, "dev-1"))
                 .tokens().user().id();
 
         userService.withdraw(userId, new UserWithdrawRequest(null, "WITHDRAW", null));

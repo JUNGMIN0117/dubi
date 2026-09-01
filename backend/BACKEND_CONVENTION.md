@@ -136,7 +136,7 @@ docker compose -f backend/docker-compose.dev.yml up -d
 | 그룹 | 테이블 | 핵심 |
 | --- | --- | --- |
 | 회원 | `user` | email(UNIQUE, 통합 키, NULL 허용), nickname, mobility_note, notify_lead_min(기본 30), briefing_time, is_alarm, history_consented_at |
-| | `user_auth` | user 1:N. provider ENUM(LOCAL,KAKAO,GOOGLE,NAVER — v1 구현은 LOCAL+KAKAO), provider_user_id, password_hash(LOCAL만). UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider) |
+| | `user_auth` | user 1:N. provider ENUM(LOCAL,KAKAO,GOOGLE,NAVER — 4종 모두 구현), provider_user_id, password_hash(LOCAL만). UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider) |
 | | `user_transport_pref` | mode ENUM(BUS,SUBWAY) × preference ENUM(PREFER,AVOID), UNIQUE(user_id,mode) |
 | | `place` | 즐겨찾는 장소. 일정과 FK 관계 없음(스냅샷 원칙) |
 | | `device_token` | fcm_token UNIQUE(토큰 기준 upsert, 마지막 로그인 사용자가 주인), platform, is_valid |

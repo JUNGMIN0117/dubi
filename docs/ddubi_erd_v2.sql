@@ -49,7 +49,7 @@ CREATE TABLE `user` (
 CREATE TABLE user_auth (
     id               BIGINT       NOT NULL AUTO_INCREMENT,
     user_id          BIGINT       NOT NULL,
-    provider         ENUM('LOCAL','KAKAO','GOOGLE','NAVER') NOT NULL COMMENT 'v1 구현 범위는 LOCAL + KAKAO',
+    provider         ENUM('LOCAL','KAKAO','GOOGLE','NAVER') NOT NULL COMMENT '로그인 수단 4종. SSAFY·APPLE 은 팀 합의로 제외',
     provider_user_id VARCHAR(100) NULL     COMMENT '소셜 외부 고유 ID(카카오 회원번호 등). LOCAL은 NULL',
     password_hash    VARCHAR(255) NULL     COMMENT 'bcrypt 해시. LOCAL 행에만 값 존재',
     created_at       DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),

@@ -32,6 +32,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 /**
@@ -101,7 +102,7 @@ public class AuthService {
             boolean hasLocal = userAuthRepository.existsByUserIdAndProvider(existing.getId(), AuthProvider.LOCAL);
             throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE, hasLocal
                     ? "이미 가입된 이메일입니다."
-                    : "이미 소셜 로그인으로 가입된 이메일입니다. 카카오로 로그인해 주세요.");
+                    : "이미 소셜 로그인으로 가입된 이메일입니다. " + socialGuide(existing.getId()));
         });
 
         User user = userRepository.save(User.builder()
@@ -134,12 +135,30 @@ public class AuthService {
      * "비밀번호가 틀렸다"고만 하면 사용자가 영원히 로그인하지 못한다(규칙 3).
      */
     private BusinessException localLoginFailure(String email) {
-        boolean socialOnly = userRepository.findByEmail(email)
+        Optional<User> found = userRepository.findByEmail(email);
+        boolean socialOnly = found
                 .map(u -> !userAuthRepository.existsByUserIdAndProvider(u.getId(), AuthProvider.LOCAL))
                 .orElse(false);
         return new BusinessException(ErrorCode.UNAUTHORIZED, socialOnly
-                ? "소셜 로그인으로 가입된 계정입니다. 카카오로 로그인해 주세요."
+                ? "소셜 로그인으로 가입된 계정입니다. " + socialGuide(found.get().getId())
                 : "이메일 또는 비밀번호가 일치하지 않습니다.");
+    }
+
+    /**
+     * 그 계정에 실제로 붙어 있는 소셜 수단을 이름으로 안내한다.
+     *
+     * 제공자를 고정 문구로 박으면 구글로 가입한 사용자에게 카카오를 안내하게 된다.
+     * 안내가 틀리면 사용자는 맞는 버튼을 못 찾고 계정에 영영 못 들어간다.
+     */
+    private String socialGuide(Long userId) {
+        String names = userAuthRepository.findAllByUserId(userId).stream()
+                .map(UserAuth::getProvider)
+                .filter(p -> !p.isLocal())
+                .map(AuthProvider::displayName)
+                .collect(Collectors.joining("·"));
+        return StringUtils.hasText(names)
+                ? names + "로 로그인해 주세요."
+                : "소셜 로그인을 이용해 주세요.";
     }
 
     // ------------------------------------------------------------------
@@ -150,7 +169,7 @@ public class AuthService {
     @Transactional
     public OAuthResult loginOAuth(OAuthLoginRequest request) {
         OAuthClient client = clientFor(request.provider());
-        OAuthUserInfo info = client.fetchUserInfo(request.authorizationCode(), request.redirectUri());
+        OAuthUserInfo info = client.fetchUserInfo(request.toExchange());
 
         // ① 이미 연결된 소셜 계정 — 그냥 로그인
         Optional<UserAuth> linked =

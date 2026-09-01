@@ -40,12 +40,12 @@ class AccountMergeIntegrationTest extends IntegrationTestSupport {
     private UserAuthRepository userAuthRepository;
 
     private void givenKakaoReturns(String providerUserId, String email, String nickname) {
-        given(kakaoOAuthClient.fetchUserInfo(any(), any()))
+        given(kakaoOAuthClient.fetchUserInfo(any()))
                 .willReturn(new OAuthUserInfo(providerUserId, email, nickname));
     }
 
     private OAuthLoginRequest kakaoLogin() {
-        return new OAuthLoginRequest(AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", "dev-1");
+        return new OAuthLoginRequest(AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", null, "dev-1");
     }
 
     private void signupLocal(String email, String nickname) {

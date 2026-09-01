@@ -113,3 +113,19 @@ ddubi:
         rest-api-key: ${KAKAO_REST_API_KEY:}
         # 콘솔 > 카카오 로그인 > 보안 에서 켰을 때만 필요하다. 안 켰으면 비워둔다.
         client-secret: ${KAKAO_CLIENT_SECRET:}
+    google:
+      oauth:
+        # 토큰 교환과 사용자 조회의 호스트가 다르다.
+        auth-url: https://oauth2.googleapis.com
+        api-url: https://www.googleapis.com
+        # GCP 콘솔 > API 및 서비스 > 사용자 인증 정보 > OAuth 2.0 클라이언트 ID(웹 애플리케이션).
+        client-id: ${GOOGLE_CLIENT_ID:}
+        # 구글은 웹 애플리케이션 유형에서 시크릿이 항상 필수다(카카오와 달리 선택이 아니다).
+        client-secret: ${GOOGLE_CLIENT_SECRET:}
+    naver:
+      oauth:
+        auth-url: https://nid.naver.com
+        api-url: https://openapi.naver.com
+        # 네이버 개발자센터 > 애플리케이션 > 내 애플리케이션.
+        client-id: ${NAVER_CLIENT_ID:}
+        client-secret: ${NAVER_CLIENT_SECRET:}

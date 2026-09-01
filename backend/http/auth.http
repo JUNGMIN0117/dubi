@@ -275,7 +275,7 @@ Content-Type: application/json
 
 {
   "provider": "KAKAO",
-  "authorizationCode": "여기에_인가코드",
-  "redirectUri": "http://localhost:3000/oauth/kakao",
+  "authorizationCode": "BYfZT5vnufhNKOJgUVJXXHekIpEhhZWwG6EuTUuIZRf6oW8ShLFaMwAAAAQKFyIgAAABoFqq5FfgLMgnBn6ZSw",
+  "redirectUri": "http://localhost:3001/oauth/kakao",
   "deviceId": "{{deviceId}}"
 }

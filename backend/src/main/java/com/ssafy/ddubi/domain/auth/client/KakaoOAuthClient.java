@@ -1,6 +1,7 @@
 package com.ssafy.ddubi.domain.auth.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
 import com.ssafy.ddubi.global.exception.BusinessException;
 import com.ssafy.ddubi.global.exception.ErrorCode;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -34,11 +36,13 @@ public class KakaoOAuthClient implements OAuthClient {
     private static final String TOKEN_PATH = "/oauth/token";
     private static final String USER_INFO_PATH = "/v2/user/me";
 
+    private final ObjectMapper objectMapper;
     private final RestClient authClient;
     private final RestClient apiClient;
     private final KakaoOAuthProperties properties;
 
-    public KakaoOAuthClient(RestClient.Builder builder, KakaoOAuthProperties properties) {
+    public KakaoOAuthClient(RestClient.Builder builder, ObjectMapper objectMapper, KakaoOAuthProperties properties) {
+        this.objectMapper = objectMapper;
         this.authClient = builder.clone().baseUrl(properties.authUrl()).build();
         this.apiClient = builder.clone().baseUrl(properties.apiUrl()).build();
         this.properties = properties;
@@ -87,12 +91,32 @@ public class KakaoOAuthClient implements OAuthClient {
                     .body(form)
                     .retrieve()
                     .body(JsonNode.class);
-        } catch (RestClientException e) {
-            // 인가 코드는 1회용이고 짧게 만료된다. 재사용·만료·redirect_uri 불일치가 대부분이라
-            // 서버 오류가 아닌 인증 실패로 다룬다. 카카오 응답 본문은 코드가 들어 있어 남기지 않는다.
-            log.warn("카카오 토큰 교환 실패: {}", e.getClass().getSimpleName());
+        } catch (HttpStatusCodeException e) {
+            // 카카오가 준 실패 사유를 그대로 남긴다. error_code(KOE320 등) 없이는
+            // 만료인지, redirect_uri 불일치인지, client_secret 누락인지 구분할 수 없다.
+            log.warn("카카오 토큰 교환 실패 [{}] {}", e.getStatusCode(), kakaoError(e));
             throw new BusinessException(ErrorCode.UNAUTHORIZED,
                     "카카오 인가 코드가 유효하지 않거나 만료되었습니다.");
+        } catch (RestClientException e) {
+            log.warn("카카오 토큰 교환 통신 실패: {}", e.getClass().getSimpleName());
+            throw new BusinessException(ErrorCode.UNAUTHORIZED,
+                    "카카오 로그인에 실패했습니다.");
+        }
+    }
+
+    /**
+     * 카카오 오류 응답에서 진단에 필요한 필드만 뽑는다.
+     * 본문을 통째로 찍지 않는 이유: error_description 에 인가 코드가 섞여 나올 수 있다.
+     */
+    private String kakaoError(HttpStatusCodeException e) {
+        try {
+            JsonNode body = objectMapper.readTree(e.getResponseBodyAsString());
+            return "error=%s, error_code=%s, description=%s".formatted(
+                    body.path("error").asText("?"),
+                    body.path("error_code").asText("?"),
+                    body.path("error_description").asText("?"));
+        } catch (Exception ignored) {
+            return "(응답 파싱 실패)";
         }
     }
 

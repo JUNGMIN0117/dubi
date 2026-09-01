@@ -57,7 +57,12 @@ public class AuthService {
     private final JwtTokenProvider tokenProvider;
     private final RefreshTokenStore refreshTokenStore;
     private final RevokedAccessTokenStore revokedStore;
-    private final Map<AuthProvider, OAuthClient> oauthClients = new EnumMap<>(AuthProvider.class);
+    /**
+     * 등록된 소셜 클라이언트. 생성 시점에 provider 별 맵으로 굳히지 않고 호출 때 찾는다 —
+     * 프록시·목으로 대체된 빈은 생성 시점에 provider() 가 아직 제 값을 주지 못한다.
+     * 구현체가 몇 개뿐이라 순회 비용은 무시할 수 있다.
+     */
+    private final List<OAuthClient> oauthClients;
 
     public AuthService(UserRepository userRepository,
                        UserAuthRepository userAuthRepository,
@@ -74,7 +79,15 @@ public class AuthService {
         this.tokenProvider = tokenProvider;
         this.refreshTokenStore = refreshTokenStore;
         this.revokedStore = revokedStore;
-        clients.forEach(c -> this.oauthClients.put(c.provider(), c));
+        this.oauthClients = List.copyOf(clients);
+    }
+
+    private OAuthClient clientFor(AuthProvider provider) {
+        return oauthClients.stream()
+                .filter(c -> c.provider() == provider)
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST,
+                        "지원하지 않는 소셜 로그인입니다."));
     }
 
     // ------------------------------------------------------------------
@@ -136,10 +149,7 @@ public class AuthService {
     /** @return 신규 가입이면 created=true → 컨트롤러가 201, 기존 계정이면 200 */
     @Transactional
     public OAuthResult loginOAuth(OAuthLoginRequest request) {
-        OAuthClient client = Optional.ofNullable(oauthClients.get(request.provider()))
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST,
-                        "지원하지 않는 소셜 로그인입니다."));
-
+        OAuthClient client = clientFor(request.provider());
         OAuthUserInfo info = client.fetchUserInfo(request.authorizationCode(), request.redirectUri());
 
         // ① 이미 연결된 소셜 계정 — 그냥 로그인

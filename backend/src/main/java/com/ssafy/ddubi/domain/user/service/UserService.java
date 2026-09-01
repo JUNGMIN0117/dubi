@@ -3,11 +3,14 @@ package com.ssafy.ddubi.domain.user.service;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
 import com.ssafy.ddubi.domain.auth.repository.UserAuthRepository;
 import com.ssafy.ddubi.domain.auth.service.RefreshTokenStore;
+import com.ssafy.ddubi.domain.user.dto.request.TransportPrefRequest;
 import com.ssafy.ddubi.domain.user.dto.request.UserUpdateRequest;
 import com.ssafy.ddubi.domain.user.dto.request.UserWithdrawRequest;
 import com.ssafy.ddubi.domain.user.dto.response.UserResponse;
 import com.ssafy.ddubi.domain.user.entity.User;
+import com.ssafy.ddubi.domain.user.entity.UserTransportPref;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
+import com.ssafy.ddubi.domain.user.repository.UserTransportPrefRepository;
 import com.ssafy.ddubi.global.exception.BusinessException;
 import com.ssafy.ddubi.global.exception.ErrorCode;
 import com.ssafy.ddubi.global.security.RevokedAccessTokenStore;
@@ -31,22 +34,26 @@ public class UserService {
     private final RefreshTokenStore refreshTokenStore;
     private final PasswordEncoder passwordEncoder;
     private final RevokedAccessTokenStore revokedStore;
+    private final UserTransportPrefRepository transportPrefRepository;
 
     public UserService(UserRepository userRepository,
                        UserAuthRepository userAuthRepository,
                        RefreshTokenStore refreshTokenStore,
                        PasswordEncoder passwordEncoder,
-                       RevokedAccessTokenStore revokedStore) {
+                       RevokedAccessTokenStore revokedStore,
+                       UserTransportPrefRepository transportPrefRepository) {
         this.userRepository = userRepository;
         this.userAuthRepository = userAuthRepository;
         this.refreshTokenStore = refreshTokenStore;
         this.passwordEncoder = passwordEncoder;
         this.revokedStore = revokedStore;
+        this.transportPrefRepository = transportPrefRepository;
     }
 
     @Transactional(readOnly = true)
     public UserResponse getMe(Long userId) {
-        return UserResponse.of(findUser(userId), representativeProvider(userId));
+        return UserResponse.of(findUser(userId), representativeProvider(userId),
+                transportPrefRepository.findAllByUserId(userId));
     }
 
     @Transactional
@@ -56,19 +63,54 @@ public class UserService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "변경할 항목이 없습니다.");
         }
         // null 은 "안 보냄"이므로 건너뛴다. 부분 수정(PATCH) 의미를 지킨다.
-        if (request.nickname() != null) {
-            user.changeNickname(request.nickname());
+        if (request.getNickname() != null) {
+            user.changeNickname(request.getNickname());
         }
-        if (request.notifyLeadMin() != null) {
-            user.changeNotifyLeadMin(request.notifyLeadMin());
+        if (request.getNotifyLeadMin() != null) {
+            user.changeNotifyLeadMin(request.getNotifyLeadMin());
         }
-        if (request.alarmEnabled() != null) {
-            user.changeAlarm(request.alarmEnabled());
+        if (request.getAlarmEnabled() != null) {
+            user.changeAlarm(request.getAlarmEnabled());
         }
-        if (request.historyConsent() != null) {
-            user.changeHistoryConsent(request.historyConsent());
+        if (request.getHistoryConsent() != null) {
+            user.changeHistoryConsent(request.getHistoryConsent());
         }
-        return UserResponse.of(user, representativeProvider(userId));
+        // 지울 수 있는 필드는 "키가 왔는가"로 판단한다. 값이 null 이면 지우라는 뜻이다.
+        if (request.isBriefingTimePresent()) {
+            user.changeBriefingTime(request.getBriefingTime());
+        }
+        if (request.isMobilityNotePresent()) {
+            user.changeMobilityNote(request.getMobilityNote());
+        }
+        if (request.getTransportPrefs() != null) {
+            replaceTransportPrefs(user, request.getTransportPrefs());
+        }
+        return UserResponse.of(user, representativeProvider(userId),
+                transportPrefRepository.findAllByUserId(userId));
+    }
+
+    /**
+     * 선호 교통수단 전체 교체.
+     *
+     * orphanRemoval 을 쓰지 않기로 했으므로(3.1장 규칙 12) 비우고 다시 넣는다.
+     * 삭제를 즉시 반영하지 않으면 뒤이은 INSERT 가 UK_UTPREF_USER_MODE 에 걸린다 —
+     * JPA 는 flush 순서를 보장하지 않아 delete 가 insert 뒤로 밀릴 수 있다.
+     */
+    private void replaceTransportPrefs(User user, List<TransportPrefRequest> requested) {
+        long distinctModes = requested.stream().map(TransportPrefRequest::mode).distinct().count();
+        if (distinctModes != requested.size()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                    "같은 교통수단을 두 번 지정할 수 없습니다.");
+        }
+
+        transportPrefRepository.deleteAllByUserId(user.getId());
+        transportPrefRepository.flush();
+
+        requested.forEach(pref -> transportPrefRepository.save(UserTransportPref.builder()
+                .user(user)
+                .mode(pref.mode())
+                .preference(pref.preference())
+                .build()));
     }
 
     /**

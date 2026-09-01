@@ -1,0 +1,44 @@
+# nginx 설정 템플릿 — 공식 이미지가 기동 시 ${변수} 를 환경변수로 치환해
+# /etc/nginx/conf.d/default.conf 로 만들어준다 (envsubst).
+# HTTPS(443) 는 인증서 발급 단계에서 server 블록을 추가한다.
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # 사용자 API — backend 로 프록시. /api 접두사는 보존된다 (트레일링 슬래시 없음)
+    location /api/ {
+        proxy_pass http://backend:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 내부 API (기준선 업로드 등) — 서버1(데이터)에서만 접근 허용.
+    # 기준선 청크(5000행)가 커서 본문 제한을 넉넉히 잡는다
+    location /internal/ {
+        allow ${SERVER1_PRIVATE_IP};
+        deny all;
+        client_max_body_size 20m;
+        proxy_pass http://backend:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Flutter Web 정적 파일 (빌드 결과물이 들어오기 전까지는 안내 페이지)
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+}

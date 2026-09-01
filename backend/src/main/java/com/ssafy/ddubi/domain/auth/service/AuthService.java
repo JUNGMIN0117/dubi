@@ -58,6 +58,7 @@ public class AuthService {
     private final JwtTokenProvider tokenProvider;
     private final RefreshTokenStore refreshTokenStore;
     private final RevokedAccessTokenStore revokedStore;
+    private final EmailVerificationService emailVerificationService;
     /**
      * 등록된 소셜 클라이언트. 생성 시점에 provider 별 맵으로 굳히지 않고 호출 때 찾는다 —
      * 프록시·목으로 대체된 빈은 생성 시점에 provider() 가 아직 제 값을 주지 못한다.
@@ -72,6 +73,7 @@ public class AuthService {
                        JwtTokenProvider tokenProvider,
                        RefreshTokenStore refreshTokenStore,
                        RevokedAccessTokenStore revokedStore,
+                       EmailVerificationService emailVerificationService,
                        List<OAuthClient> clients) {
         this.userRepository = userRepository;
         this.userAuthRepository = userAuthRepository;
@@ -80,6 +82,7 @@ public class AuthService {
         this.tokenProvider = tokenProvider;
         this.refreshTokenStore = refreshTokenStore;
         this.revokedStore = revokedStore;
+        this.emailVerificationService = emailVerificationService;
         this.oauthClients = List.copyOf(clients);
     }
 
@@ -97,6 +100,11 @@ public class AuthService {
 
     @Transactional
     public AuthTokenResponse signupLocal(LocalSignupRequest request) {
+        // 규칙 3 의 전제: 이메일이 계정 통합의 유일한 키다. 소유가 확인되지 않은 이메일로
+        // 계정을 만들게 두면, 남의 이메일을 선점해 두었다가 그 사람이 소셜 로그인하는
+        // 순간 자동 통합으로 계정을 가져갈 수 있다.
+        emailVerificationService.requireVerified(request.email());
+
         userRepository.findByEmail(request.email()).ifPresent(existing -> {
             // 규칙 3: 이미 소셜로 쓰이는 이메일이면 어떤 수단으로 가입했는지 알려준다.
             boolean hasLocal = userAuthRepository.existsByUserIdAndProvider(existing.getId(), AuthProvider.LOCAL);
@@ -110,6 +118,8 @@ public class AuthService {
                 .nickname(request.nickname())
                 .build());
         userAuthRepository.save(UserAuth.ofLocal(user, passwordEncoder.encode(request.password())));
+        // 가입이 성립한 뒤에 통행증을 쓴다 — 한 번 인증으로 계정을 여러 개 만들지 못하게 한다.
+        emailVerificationService.consume(request.email());
 
         return issueTokens(user, request.deviceId(), AuthProvider.LOCAL);
     }

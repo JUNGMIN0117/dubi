@@ -59,6 +59,7 @@ class WithdrawIntegrationTest extends IntegrationTestSupport {
 
     /** LOCAL + KAKAO 인증 수단과 기기 토큰까지 붙은 계정을 만든다. */
     private Long givenFullyPopulatedUser() {
+        givenEmailVerified(EMAIL);
         authService.signupLocal(new LocalSignupRequest(EMAIL, PASSWORD, "탈퇴대상", "dev-1"));
         given(kakaoOAuthClient.fetchUserInfo(any()))
                 .willReturn(new OAuthUserInfo("kakao-1", EMAIL, "카카오"));
@@ -119,6 +120,7 @@ class WithdrawIntegrationTest extends IntegrationTestSupport {
         Long userId = givenFullyPopulatedUser();
         userService.withdraw(userId, validRequest());
 
+        givenEmailVerified(EMAIL);
         authService.signupLocal(new LocalSignupRequest(EMAIL, PASSWORD, "재가입", "dev-3"));
 
         assertThat(userRepository.findByEmail(EMAIL)).isPresent();

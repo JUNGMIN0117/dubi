@@ -346,3 +346,136 @@ Content-Type: application/json
         client.assert(response.status === 400);
     });
 %}
+
+###############################################################################
+# 이메일 인증 (AUTH-006 / AUTH-007) — 로컬 가입의 선행 단계
+#
+# MAIL_USERNAME/MAIL_PASSWORD 가 비어 있으면 메일을 보내지 않고
+# 서버 콘솔에 코드를 찍는다. 거기서 6자리를 복사해 @verifyCode 에 넣는다.
+###############################################################################
+
+@newEmail = newbie@ddubi.com
+@verifyCode = 000000
+
+### ㉮ 인증 없이 가입 시도 — 400
+POST {{host}}/api/v1/auth/local/signup
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}",
+  "password": "password123",
+  "nickname": "신입"
+}
+
+> {%
+    client.test("400 — 이메일 인증이 먼저다", function () {
+        client.assert(response.status === 400);
+        client.assert(response.body.error.message.includes("이메일 인증"));
+    });
+%}
+
+### ㉯ 인증 코드 발송 — 204 (콘솔 로그에서 코드 확인)
+POST {{host}}/api/v1/auth/email/verification
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}"
+}
+
+> {%
+    client.test("204", function () {
+        client.assert(response.status === 204);
+    });
+%}
+
+### ㉰ 60초 안에 재발송 — 400 (도배 차단)
+POST {{host}}/api/v1/auth/email/verification
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}"
+}
+
+> {%
+    client.test("400 — 쿨다운", function () {
+        client.assert(response.status === 400);
+    });
+%}
+
+### ㉱ 틀린 코드 — 400, 남은 시도 횟수를 알려준다
+POST {{host}}/api/v1/auth/email/verification/confirm
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}",
+  "code": "999999"
+}
+
+> {%
+    client.test("400 — 시도 횟수 표시", function () {
+        client.assert(response.status === 400);
+    });
+%}
+
+### ㉲ 형식 오류 (6자리 아님) — 400 fieldErrors
+POST {{host}}/api/v1/auth/email/verification/confirm
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}",
+  "code": "12"
+}
+
+> {%
+    client.test("400 — fieldErrors 에 code", function () {
+        client.assert(response.status === 400);
+        client.assert(response.body.error.fieldErrors.length > 0);
+    });
+%}
+
+### ㉳ 맞는 코드 — 204 (@verifyCode 를 콘솔 값으로 바꾼 뒤 실행)
+POST {{host}}/api/v1/auth/email/verification/confirm
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}",
+  "code": "{{verifyCode}}"
+}
+
+> {%
+    client.test("204 — 인증 완료", function () {
+        client.assert(response.status === 204);
+    });
+%}
+
+### ㉴ 가입 — 201
+POST {{host}}/api/v1/auth/local/signup
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}",
+  "password": "password123",
+  "nickname": "신입"
+}
+
+> {%
+    client.test("201", function () {
+        client.assert(response.status === 201);
+    });
+%}
+
+### ㉵ 같은 인증으로 또 가입 — 400 (통행증은 1회용)
+POST {{host}}/api/v1/auth/local/signup
+Content-Type: application/json
+
+{
+  "email": "{{newEmail}}",
+  "password": "password123",
+  "nickname": "신입2"
+}
+
+> {%
+    client.test("400 — 통행증이 소비됐다", function () {
+        client.assert(response.status === 400);
+    });
+%}

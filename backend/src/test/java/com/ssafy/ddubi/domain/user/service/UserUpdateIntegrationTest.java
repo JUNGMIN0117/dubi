@@ -36,6 +36,7 @@ class UserUpdateIntegrationTest extends IntegrationTestSupport {
 
     @BeforeEach
     void signup() {
+        givenEmailVerified("update@ddubi.com");
         userId = authService.signupLocal(
                 new LocalSignupRequest("update@ddubi.com", "password123", "처음닉네임", "d1"))
                 .user().id();

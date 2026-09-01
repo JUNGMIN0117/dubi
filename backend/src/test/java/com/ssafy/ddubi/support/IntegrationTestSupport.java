@@ -1,6 +1,8 @@
 package com.ssafy.ddubi.support;
 
 import com.ssafy.ddubi.domain.auth.client.KakaoOAuthClient;
+import com.ssafy.ddubi.domain.auth.service.EmailVerificationStore;
+import com.ssafy.ddubi.global.mail.EmailSender;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -66,11 +68,18 @@ public abstract class IntegrationTestSupport {
     @MockitoBean
     protected KakaoOAuthClient kakaoOAuthClient;
 
+    /** 테스트가 실제로 메일을 보내지 않게 막는다. 발송 내용 검증에도 쓴다. */
+    @MockitoBean
+    protected EmailSender emailSender;
+
     @org.springframework.beans.factory.annotation.Autowired
     private DatabaseCleaner databaseCleaner;
 
     @org.springframework.beans.factory.annotation.Autowired
     private StringRedisTemplate redisTemplate;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    protected EmailVerificationStore emailVerificationStore;
 
     @BeforeEach
     void resetState() {
@@ -78,5 +87,15 @@ public abstract class IntegrationTestSupport {
         redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
         // AuthService 가 호출 시점에 provider 로 클라이언트를 찾으므로 매번 다시 스텁한다.
         given(kakaoOAuthClient.provider()).willReturn(AuthProvider.KAKAO);
+    }
+
+    /**
+     * 이메일 인증을 통과한 상태로 만든다.
+     *
+     * 로컬 가입의 전제 조건이라 가입을 쓰는 테스트는 모두 이걸 먼저 부른다.
+     * 인증 절차 자체는 EmailVerificationIntegrationTest 가 따로 검증한다.
+     */
+    protected void givenEmailVerified(String email) {
+        emailVerificationStore.markVerified(email, java.time.Duration.ofMinutes(30));
     }
 }

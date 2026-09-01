@@ -1,5 +1,7 @@
 package com.ssafy.ddubi.domain.auth.controller;
 
+import com.ssafy.ddubi.domain.auth.dto.request.EmailVerificationConfirmRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.EmailVerificationRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LocalLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LocalSignupRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LogoutRequest;
@@ -7,6 +9,7 @@ import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.service.AuthService;
+import com.ssafy.ddubi.domain.auth.service.EmailVerificationService;
 import com.ssafy.ddubi.global.common.ApiResponse;
 import com.ssafy.ddubi.global.security.LoginUserId;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,12 +28,33 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final EmailVerificationService emailVerificationService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, EmailVerificationService emailVerificationService) {
         this.authService = authService;
+        this.emailVerificationService = emailVerificationService;
     }
 
-    @Operation(summary = "로컬 회원가입", description = "user 와 user_auth(LOCAL) 를 함께 만든다. AUTH-001")
+    @Operation(summary = "이메일 인증 코드 발송",
+            description = "회원가입 전 이메일 소유를 확인한다. 60초 안에 다시 요청하면 400. AUTH-006")
+    @PostMapping("/email/verification")
+    public ResponseEntity<Void> sendEmailVerification(
+            @Valid @RequestBody EmailVerificationRequest request) {
+        emailVerificationService.sendCode(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "이메일 인증 코드 확인",
+            description = "확인에 성공하면 30분간 유효한 가입 자격이 생긴다. 5회 틀리면 코드가 폐기된다. AUTH-007")
+    @PostMapping("/email/verification/confirm")
+    public ResponseEntity<Void> confirmEmailVerification(
+            @Valid @RequestBody EmailVerificationConfirmRequest request) {
+        emailVerificationService.confirm(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "로컬 회원가입",
+            description = "user 와 user_auth(LOCAL) 를 함께 만든다. 이메일 인증을 먼저 마쳐야 한다. AUTH-001")
     @PostMapping("/local/signup")
     public ResponseEntity<ApiResponse<AuthTokenResponse>> signupLocal(
             @Valid @RequestBody LocalSignupRequest request) {

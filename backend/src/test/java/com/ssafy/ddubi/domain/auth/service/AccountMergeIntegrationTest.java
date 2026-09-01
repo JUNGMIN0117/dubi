@@ -49,6 +49,7 @@ class AccountMergeIntegrationTest extends IntegrationTestSupport {
     }
 
     private void signupLocal(String email, String nickname) {
+        givenEmailVerified(email);
         authService.signupLocal(new LocalSignupRequest(email, "password123", nickname, "dev-0"));
     }
 

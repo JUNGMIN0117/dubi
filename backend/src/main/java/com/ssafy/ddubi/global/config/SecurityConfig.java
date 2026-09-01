@@ -42,6 +42,8 @@ public class SecurityConfig {
      * 인증이 걸려야 한다. internal API 도 여기 넣지 않는다(서비스 계정 전용).
      */
     private static final String[] PUBLIC_PATHS = {
+            "/api/v1/auth/email/verification",
+            "/api/v1/auth/email/verification/confirm",
             "/api/v1/auth/local/signup",
             "/api/v1/auth/local/login",
             "/api/v1/auth/oauth",

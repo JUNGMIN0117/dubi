@@ -44,7 +44,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 .flatMap(token -> tokenProvider.parse(token, TokenType.ACCESS))
                 // 서명이 유효해도 탈퇴·탈취로 무효화된 사용자면 인증하지 않는다.
                 // JWT 는 발급 후 취소가 안 되므로 이 확인이 유일한 즉시 차단 수단이다.
-                .filter(payload -> !revokedStore.isRevoked(payload.userId()))
+                .filter(payload -> !revokedStore.isRevoked(
+                        payload.userId(), payload.accessVersion()))
                 .ifPresent(payload -> authenticate(payload, request));
         chain.doFilter(request, response);
     }

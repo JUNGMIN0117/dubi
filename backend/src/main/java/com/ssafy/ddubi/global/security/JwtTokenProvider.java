@@ -36,6 +36,7 @@ public class JwtTokenProvider {
 
     private static final String CLAIM_TYPE = "typ";
     private static final String CLAIM_DEVICE_ID = "did";
+    private static final String CLAIM_ACCESS_VERSION = "aver";
 
     private final JwtProperties properties;
     private final SecretKey key;
@@ -73,7 +74,12 @@ public class JwtTokenProvider {
     }
 
     public String createAccessToken(Long userId) {
-        return build(userId, TokenType.ACCESS, null, null, properties.accessTokenValidity());
+        return createAccessToken(userId, 0);
+    }
+
+    public String createAccessToken(Long userId, long accessVersion) {
+        return build(userId, TokenType.ACCESS, null, null, accessVersion,
+                properties.accessTokenValidity());
     }
 
     /**
@@ -81,12 +87,13 @@ public class JwtTokenProvider {
      */
     public IssuedRefreshToken createRefreshToken(Long userId, String deviceId) {
         String tokenId = UUID.randomUUID().toString();
-        String token = build(userId, TokenType.REFRESH, deviceId, tokenId,
+        String token = build(userId, TokenType.REFRESH, deviceId, tokenId, 0,
                 properties.refreshTokenValidity());
         return new IssuedRefreshToken(token, tokenId);
     }
 
-    private String build(Long userId, TokenType type, String deviceId, String tokenId, Duration validity) {
+    private String build(Long userId, TokenType type, String deviceId, String tokenId,
+                         long accessVersion, Duration validity) {
         Instant now = Instant.now();
         var builder = Jwts.builder()
                 .subject(String.valueOf(userId))
@@ -98,6 +105,9 @@ public class JwtTokenProvider {
         }
         if (tokenId != null) {
             builder.id(tokenId);
+        }
+        if (type == TokenType.ACCESS) {
+            builder.claim(CLAIM_ACCESS_VERSION, accessVersion);
         }
         return builder.signWith(key).compact();
     }
@@ -119,7 +129,8 @@ public class JwtTokenProvider {
                     Long.valueOf(claims.getSubject()),
                     TokenType.valueOf(claims.get(CLAIM_TYPE, String.class)),
                     claims.get(CLAIM_DEVICE_ID, String.class),
-                    claims.getId()));
+                    claims.getId(),
+                    accessVersion(claims)));
         } catch (ExpiredJwtException e) {
             log.debug("만료된 토큰");
             return Optional.empty();
@@ -133,6 +144,11 @@ public class JwtTokenProvider {
     /** 용도까지 맞는지 확인한다. Refresh 토큰으로 API 를 호출하는 것을 막는 지점. */
     public Optional<TokenPayload> parse(String token, TokenType expected) {
         return parse(token).filter(payload -> payload.type() == expected);
+    }
+
+    private long accessVersion(Claims claims) {
+        Object value = claims.get(CLAIM_ACCESS_VERSION);
+        return value instanceof Number number ? number.longValue() : 0L;
     }
 
     public Duration accessTokenValidity() {

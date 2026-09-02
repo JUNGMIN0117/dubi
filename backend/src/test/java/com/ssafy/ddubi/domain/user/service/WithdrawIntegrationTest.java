@@ -107,11 +107,11 @@ class WithdrawIntegrationTest extends IntegrationTestSupport {
     @DisplayName("탈퇴하면 이미 발급된 액세스 토큰도 즉시 무효화된다")
     void revokesLiveAccessTokens() {
         Long userId = givenFullyPopulatedUser();
-        assertThat(revokedStore.isRevoked(userId)).isFalse();
+        assertThat(revokedStore.currentVersion(userId)).isZero();
 
         userService.withdraw(userId, validRequest());
 
-        assertThat(revokedStore.isRevoked(userId)).isTrue();
+        assertThat(revokedStore.currentVersion(userId)).isPositive();
     }
 
     @Test

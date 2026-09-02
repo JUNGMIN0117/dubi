@@ -28,11 +28,12 @@ class JwtTokenProviderTest {
     void createAndParseAccessToken() {
         JwtTokenProvider provider = provider();
 
-        String token = provider.createAccessToken(42L);
+        String token = provider.createAccessToken(42L, 7L);
 
         assertThat(provider.parse(token)).hasValueSatisfying(payload -> {
             assertThat(payload.userId()).isEqualTo(42L);
             assertThat(payload.type()).isEqualTo(TokenType.ACCESS);
+            assertThat(payload.accessVersion()).isEqualTo(7L);
         });
     }
 

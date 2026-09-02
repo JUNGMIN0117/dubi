@@ -238,7 +238,14 @@ public class AuthService {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "기기 정보가 일치하지 않습니다.");
         }
 
-        if (!refreshTokenStore.matches(payload.userId(), payload.deviceId(), payload.tokenId())) {
+        User user = userRepository.findById(payload.userId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        var nextRefresh = tokenProvider.createRefreshToken(payload.userId(), payload.deviceId());
+        boolean rotated = refreshTokenStore.rotate(
+                payload.userId(), payload.deviceId(), payload.tokenId(), nextRefresh.tokenId(),
+                tokenProvider.refreshTokenValidity());
+        if (!rotated) {
             // 이미 회전된 옛 토큰이 다시 왔다 = 토큰이 두 곳에서 쓰이고 있다.
             // 공격자와 정상 사용자를 함께 로그아웃시키는 편이 탈취 상태를 방치하는 것보다 낫다.
             long revoked = refreshTokenStore.revokeAll(payload.userId());
@@ -249,9 +256,7 @@ public class AuthService {
                     "보안을 위해 모든 기기에서 로그아웃되었습니다. 다시 로그인해 주세요.");
         }
 
-        User user = userRepository.findById(payload.userId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-        return issueTokensOnly(payload.userId(), payload.deviceId());
+        return issueTokensOnly(payload.userId(), nextRefresh.token());
     }
 
     // ------------------------------------------------------------------
@@ -291,11 +296,12 @@ public class AuthService {
     }
 
     /** 재발급 — 명세서 AUTH-004 에는 user·deviceId 가 없다. */
-    private AuthTokenResponse issueTokensOnly(Long userId, String deviceId) {
-        var issued = issue(userId, deviceId);
+    private AuthTokenResponse issueTokensOnly(Long userId, String rotatedRefreshToken) {
+        String accessToken = tokenProvider.createAccessToken(
+                userId, revokedStore.versionForIssue(userId));
         return AuthTokenResponse.tokensOnly(
-                issued.accessToken(),
-                issued.refreshToken(),
+                accessToken,
+                rotatedRefreshToken,
                 tokenProvider.accessTokenValidity().toSeconds(),
                 tokenProvider.refreshTokenValidity().toSeconds());
     }
@@ -311,10 +317,8 @@ public class AuthService {
     }
 
     private IssuedPair issue(Long userId, String deviceId) {
-        // 정상 로그인·재발급은 무효화 표시를 푼다. 재사용 감지로 막힌 사용자가
-        // 다시 로그인하면 정상 사용자로 돌아와야 한다.
-        revokedStore.clear(userId);
-        String accessToken = tokenProvider.createAccessToken(userId);
+        long accessVersion = revokedStore.versionForIssue(userId);
+        String accessToken = tokenProvider.createAccessToken(userId, accessVersion);
         var refresh = tokenProvider.createRefreshToken(userId, deviceId);
         // 저장은 발급 직후 — 이 시점 이후 이전 토큰은 재사용으로 판정된다(회전).
         refreshTokenStore.save(userId, deviceId, refresh.tokenId(),

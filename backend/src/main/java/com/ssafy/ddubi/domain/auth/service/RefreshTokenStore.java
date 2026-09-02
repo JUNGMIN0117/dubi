@@ -5,10 +5,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -30,6 +32,15 @@ public class RefreshTokenStore {
 
     private static final String KEY_PREFIX = "auth:refresh:";
 
+    private static final DefaultRedisScript<Long> ROTATE_SCRIPT = new DefaultRedisScript<>("""
+            local current = redis.call('GET', KEYS[1])
+            if current == ARGV[1] then
+              redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+              return 1
+            end
+            return 0
+            """, Long.class);
+
     private final StringRedisTemplate redis;
 
     public RefreshTokenStore(StringRedisTemplate redis) {
@@ -45,13 +56,12 @@ public class RefreshTokenStore {
         redis.opsForValue().set(key(userId, deviceId), tokenId, ttl);
     }
 
-    /**
-     * 제시된 jti 가 현재 저장된 것과 같은지 확인한다.
-     * 세션이 없거나(만료·로그아웃) 값이 다르면 false.
-     */
-    public boolean matches(Long userId, String deviceId, String tokenId) {
-        String stored = redis.opsForValue().get(key(userId, deviceId));
-        return stored != null && stored.equals(tokenId);
+    /** 기존 jti 검증과 새 jti 저장을 Redis 안에서 한 번에 처리한다. */
+    public boolean rotate(Long userId, String deviceId, String expectedTokenId,
+                          String newTokenId, Duration ttl) {
+        Long result = redis.execute(ROTATE_SCRIPT, List.of(key(userId, deviceId)),
+                expectedTokenId, newTokenId, String.valueOf(ttl.toMillis()));
+        return Long.valueOf(1L).equals(result);
     }
 
     public boolean exists(Long userId, String deviceId) {

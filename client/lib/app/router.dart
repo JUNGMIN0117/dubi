@@ -148,16 +148,18 @@ class _ResponsiveNavigationShell extends StatelessWidget {
               children: [
                 NavigationRail(
                   extended: useExtendedRail,
-                  minExtendedWidth: 190,
-                  backgroundColor: DdubiColors.surface,
+                  minExtendedWidth: 210,
+                  backgroundColor: Colors.white,
                   selectedIndex: _selectedIndex,
                   onDestinationSelected: (index) => _go(context, index),
+                  groupAlignment: -.72,
+                  indicatorColor: const Color(0xFFDDF7F3),
                   labelType: useExtendedRail
                       ? NavigationRailLabelType.none
                       : NavigationRailLabelType.all,
                   leading: useExtendedRail
                       ? Padding(
-                          padding: const EdgeInsets.only(bottom: 18),
+                          padding: const EdgeInsets.only(bottom: 28),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -181,6 +183,12 @@ class _ResponsiveNavigationShell extends StatelessWidget {
                               ),
                             ],
                           ),
+                        )
+                      : null,
+                  trailing: useExtendedRail
+                      ? const Padding(
+                          padding: EdgeInsets.only(top: 30),
+                          child: _WebUserSummary(),
                         )
                       : null,
                   destinations: const [
@@ -224,4 +232,28 @@ class _ResponsiveNavigationShell extends StatelessWidget {
       },
     );
   }
+}
+
+class _WebUserSummary extends StatelessWidget {
+  const _WebUserSummary();
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const CircleAvatar(
+        radius: 16,
+        backgroundColor: Color(0xFFEAFBF8),
+        child: Icon(Icons.person_outline, size: 18, color: DdubiColors.blue),
+      ),
+      const SizedBox(width: 9),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('뚜비 사용자', style: Theme.of(context).textTheme.titleSmall),
+          Text('이동 준비 중', style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    ],
+  );
 }

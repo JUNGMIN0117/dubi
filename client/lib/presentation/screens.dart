@@ -173,6 +173,8 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext c) => AppPage(
     title: '다음 중요 일정',
+    webTitle: '이동 대시보드',
+    webSubtitle: '오늘 일정과 추천 출발 시간, 교통 상태를 한눈에 확인하세요.',
     index: go == null ? null : 2,
     onNav: go,
     actions: const [
@@ -240,14 +242,50 @@ class _WebHomeContent extends StatelessWidget {
     key: const Key('webHomeDashboard'),
     padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
     children: [
-      Text('오늘의 이동', style: Theme.of(context).textTheme.headlineSmall),
-      const SizedBox(height: 4),
-      Text(
-        '다음 일정과 추천 경로를 한눈에 확인하세요.',
-        style: Theme.of(context).textTheme.bodyMedium
-            ?.copyWith(color: const Color(0xFF667085)),
+      const Row(
+        key: Key('webHomeMetrics'),
+        children: [
+          Expanded(
+            child: DashboardMetricCard(
+              label: '다음 일정',
+              value: '19:30',
+              caption: '잠실야구장',
+              icon: Icons.event_available_outlined,
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: DashboardMetricCard(
+              label: '추천 출발',
+              value: '17:57',
+              caption: '15분 여유',
+              icon: Icons.directions_run_outlined,
+              tone: DdubiColors.green,
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: DashboardMetricCard(
+              label: '도착 예정',
+              value: '18:45',
+              caption: '이동 48분',
+              icon: Icons.flag_outlined,
+              tone: Color(0xFF7257E8),
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: DashboardMetricCard(
+              label: '교통 상태',
+              value: '정상',
+              caption: '지하철 2호선',
+              icon: Icons.check_circle_outline,
+              tone: DdubiColors.green,
+            ),
+          ),
+        ],
       ),
-      const SizedBox(height: 18),
+      const SizedBox(height: 20),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -404,6 +442,8 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
   @override
   Widget build(BuildContext c) => AppPage(
     title: '전체 일정',
+    webTitle: '일정 대시보드',
+    webSubtitle: '월간 일정과 선택한 날짜의 이동 계획을 함께 관리하세요.',
     index: widget.go == null ? null : 0,
     onNav: widget.go,
     actions: [
@@ -452,20 +492,59 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
               return SingleChildScrollView(
                 key: const Key('webScheduleLayout'),
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
                   children: [
-                    Expanded(
-                      child: MonthlyCalendar(
-                        selectedDate: selectedDate,
-                        schedules: schedules,
-                        expanded: true,
-                        onSelected: (date) =>
-                            setState(() => selectedDate = date),
-                      ),
+                    Row(
+                      key: const Key('webScheduleMetrics'),
+                      children: [
+                        Expanded(
+                          child: DashboardMetricCard(
+                            label: '전체 일정',
+                            value: '${schedules.length}개',
+                            caption: '이번 달 등록 기준',
+                            icon: Icons.calendar_month_outlined,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DashboardMetricCard(
+                            label: '선택 날짜',
+                            value:
+                                '${selectedDate.month}월 ${selectedDate.day}일',
+                            caption: '${selectedSchedules.length}개의 일정',
+                            icon: Icons.today_outlined,
+                            tone: DdubiColors.green,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: DashboardMetricCard(
+                            label: '반복 일정',
+                            value: '평일',
+                            caption: '출근 일정 활성화',
+                            icon: Icons.repeat_rounded,
+                            tone: Color(0xFF7257E8),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 20),
-                    SizedBox(width: 340, child: dayPanel),
+                    const SizedBox(height: 20),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: MonthlyCalendar(
+                            selectedDate: selectedDate,
+                            schedules: schedules,
+                            expanded: true,
+                            onSelected: (date) =>
+                                setState(() => selectedDate = date),
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        SizedBox(width: 360, child: dayPanel),
+                      ],
+                    ),
                   ],
                 ),
               );
@@ -1289,6 +1368,8 @@ class RouteResultsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext c) => AppPage(
     title: '추천 결과',
+    webTitle: '경로 비교',
+    webSubtitle: '도착 시간과 이동 조건을 기준으로 추천 경로를 비교하세요.',
     index: go == null ? null : 1,
     onNav: go,
     actions: const [IconButton(onPressed: null, icon: Icon(Icons.refresh))],
@@ -1298,64 +1379,121 @@ class RouteResultsScreen extends StatelessWidget {
         if (s.hasError) {
           return const DataLoadError(message: '추천 경로를 불러오지 못했어요.');
         }
-        return ListView(
-          padding: _pad,
-          children: [
-            if (condition != null) ...[
-              _RouteSearchSummary(condition: condition!),
-              const SizedBox(height: 12),
-            ],
-            if (!s.hasData)
-              const Center(child: CircularProgressIndicator())
-            else ...[
-              const TtubeeGuideCard(
-                '이 경로가 지금 가장 안정적이에요!',
-                compact: true,
-                character: TtubeeEntrance(
-                  asset: 'assets/images/ttubee/route-guide.png',
-                  height: 62,
-                  fromRight: true,
-                  semanticLabel: '지도를 든 뚜비',
-                ),
-              ),
-              const SizedBox(height: 12),
-              ...s.data!.map(
-                (r) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: RouteCard(
-                    r,
-                    onTap: () => _open(
-                      c,
-                      RouteMapScreen(
-                        repository: repository,
-                        selectedRoute: r,
-                        condition: condition,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            const InfoCard(
-              color: Color(0xFFF4F8FF),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  StatusBadge(
-                    '추천 이유',
-                    tone: DdubiColors.blue,
-                    icon: Icons.lightbulb_outline,
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    '현재 버스 정차 구간이 혼잡해 버스 도착 예측 신뢰도가 낮아요.\n현재 정상 운행 중인 지하철 2호선 경로를 추천드려요.',
-                  ),
-                ],
-              ),
-            ),
-          ],
+        if (!s.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide =
+                constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
+            return isWide
+                ? _webRouteResults(c, s.data!)
+                : _mobileRouteResults(c, s.data!);
+          },
         );
       },
+    ),
+  );
+
+  Widget _mobileRouteResults(BuildContext context, List<RouteOption> routes) =>
+      ListView(
+        key: const Key('mobileRouteResultsLayout'),
+        padding: _pad,
+        children: [
+          if (condition != null) ...[
+            _RouteSearchSummary(condition: condition!),
+            const SizedBox(height: 12),
+          ],
+          _routeGuide,
+          const SizedBox(height: 12),
+          ...routes.map(
+            (route) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: RouteCard(
+                route,
+                onTap: () => _openRouteMap(context, route),
+              ),
+            ),
+          ),
+          _recommendationReason,
+        ],
+      );
+
+  Widget _webRouteResults(BuildContext context, List<RouteOption> routes) =>
+      ListView(
+        key: const Key('webRouteResultsLayout'),
+        padding: _pad,
+        children: [
+          if (condition != null) ...[
+            _RouteSearchSummary(condition: condition!),
+            const SizedBox(height: 16),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(flex: 3, child: _routeGuide),
+              const SizedBox(width: 16),
+              const Expanded(flex: 2, child: _recommendationReason),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text('경로 비교', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          Row(
+            key: const Key('webRouteResultsGrid'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var index = 0; index < routes.length; index++) ...[
+                if (index > 0) const SizedBox(width: 12),
+                Expanded(
+                  child: RouteCard(
+                    routes[index],
+                    compact: true,
+                    fillWidth: true,
+                    onTap: () => _openRouteMap(context, routes[index]),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      );
+
+  void _openRouteMap(BuildContext context, RouteOption route) => _open(
+    context,
+    RouteMapScreen(
+      repository: repository,
+      selectedRoute: route,
+      condition: condition,
+    ),
+  );
+
+  static const _routeGuide = TtubeeGuideCard(
+    '이 경로가 지금 가장 안정적이에요!',
+    compact: true,
+    character: TtubeeEntrance(
+      asset: 'assets/images/ttubee/route-guide.png',
+      height: 62,
+      fromRight: true,
+      semanticLabel: '지도를 든 뚜비',
+    ),
+  );
+
+  static const _recommendationReason = InfoCard(
+    color: Color(0xFFF4F8FF),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        StatusBadge(
+          '추천 이유',
+          tone: DdubiColors.blue,
+          icon: Icons.lightbulb_outline,
+        ),
+        SizedBox(height: 10),
+        Text(
+          '현재 버스 정차 구간이 혼잡해 버스 도착 예측 신뢰도가 낮아요.\n현재 정상 운행 중인 지하철 2호선 경로를 추천드려요.',
+        ),
+      ],
     ),
   );
 }
@@ -1395,63 +1533,81 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
   @override
   Widget build(BuildContext context) => AppPage(
     title: '경로 찾기',
+    webTitle: '경로 탐색',
+    webSubtitle: '출발지와 도착 희망시간을 입력해 이동 계획을 만들어보세요.',
     child: Form(
       key: _formKey,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 760;
+          final isWide =
+              constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
           return ListView(
             padding: _pad,
             children: [
-              const TtubeeGuideCard(
-                '언제 어디까지 가야 하는지 알려주세요.\n뚜비가 알맞은 경로를 찾아드릴게요!',
-                compact: true,
-              ),
-              const SizedBox(height: 16),
-              InfoCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+              if (isWide)
+                Row(
+                  key: const Key('webRouteSearchLayout'),
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '이동 조건',
-                      style: Theme.of(context).textTheme.titleMedium,
+                    const Expanded(flex: 2, child: _RouteSearchGuide()),
+                    const SizedBox(width: 20),
+                    Expanded(flex: 3, child: _searchFormCard(context, true)),
+                  ],
+                )
+              else
+                Column(
+                  key: const Key('mobileRouteSearchLayout'),
+                  children: [
+                    const TtubeeGuideCard(
+                      '언제 어디까지 가야 하는지 알려주세요.\n뚜비가 알맞은 경로를 찾아드릴게요!',
+                      compact: true,
                     ),
                     const SizedBox(height: 16),
-                    if (isWide)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: _placeField(true)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _placeField(false)),
-                        ],
-                      )
-                    else ...[
-                      _placeField(true),
-                      const SizedBox(height: 12),
-                      _placeField(false),
-                    ],
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      key: const Key('routeArrivalField'),
-                      controller: _arrival,
-                      readOnly: true,
-                      onTap: _pickArrival,
-                      decoration: const InputDecoration(
-                        labelText: '도착 희망시간',
-                        prefixIcon: Icon(Icons.schedule_outlined),
-                        suffixIcon: Icon(Icons.edit_calendar_outlined),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    PrimaryButton('추천 경로 찾기', onPressed: _search),
+                    _searchFormCard(context, false),
                   ],
                 ),
-              ),
             ],
           );
         },
       ),
+    ),
+  );
+
+  Widget _searchFormCard(BuildContext context, bool isWide) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('이동 조건', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 16),
+        if (isWide)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _placeField(true)),
+              const SizedBox(width: 12),
+              Expanded(child: _placeField(false)),
+            ],
+          )
+        else ...[
+          _placeField(true),
+          const SizedBox(height: 12),
+          _placeField(false),
+        ],
+        const SizedBox(height: 12),
+        TextFormField(
+          key: const Key('routeArrivalField'),
+          controller: _arrival,
+          readOnly: true,
+          onTap: _pickArrival,
+          decoration: const InputDecoration(
+            labelText: '도착 희망시간',
+            prefixIcon: Icon(Icons.schedule_outlined),
+            suffixIcon: Icon(Icons.edit_calendar_outlined),
+          ),
+        ),
+        const SizedBox(height: 20),
+        PrimaryButton('추천 경로 찾기', onPressed: _search),
+      ],
     ),
   );
 
@@ -1505,6 +1661,34 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
     );
     context.push('/recommendations/mock-recommendation-1', extra: condition);
   }
+}
+
+class _RouteSearchGuide extends StatelessWidget {
+  const _RouteSearchGuide();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const TtubeeGuideCard('언제 어디까지 가야 하는지 알려주세요.\n뚜비가 알맞은 경로를 찾아드릴게요!'),
+      const SizedBox(height: 16),
+      const InfoCard(
+        color: Color(0xFFF4F8FF),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            StatusBadge(
+              '어떻게 추천하나요?',
+              tone: DdubiColors.blue,
+              icon: Icons.info_outline,
+            ),
+            SizedBox(height: 10),
+            Text('도착 희망시간과 실시간 교통 상황을 함께 고려해 경로를 비교해요.'),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class _RouteSearchSummary extends StatelessWidget {
@@ -1570,6 +1754,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   @override
   Widget build(BuildContext context) => AppPage(
     title: '전체 지도',
+    webTitle: '경로 지도',
+    webSubtitle: '추천 경로와 이동 단계, 현재 위치를 한 화면에서 확인하세요.',
     child: FutureBuilder<List<RouteOption>>(
       future: _routes,
       builder: (context, snapshot) {
@@ -1602,6 +1788,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             );
             if (isWide) {
               return Padding(
+                key: const Key('webRouteMapLayout'),
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
@@ -1616,6 +1803,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
               );
             }
             return Column(
+              key: const Key('mobileRouteMapLayout'),
               children: [
                 Expanded(flex: 5, child: map),
                 Flexible(
@@ -2428,81 +2616,181 @@ class NotificationsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext c) => AppPage(
     title: '알림함',
+    webTitle: '알림 대시보드',
+    webSubtitle: '출발 알림과 최근 이동 결과를 확인하세요.',
     index: go == null ? null : 3,
     onNav: go,
     actions: const [
       IconButton(onPressed: null, icon: Icon(Icons.settings_outlined)),
     ],
-    child: ListView(
-      padding: _pad,
-      children: [
-        const SectionHeader('출발 알림'),
-        ...['08:30  곧 출발 시간이에요', '08:10  출발 20분 전 알림'].map(
-          (t) => ListTile(
-            leading: const Icon(Icons.circle, size: 8, color: DdubiColors.blue),
-            title: Text(t),
-            subtitle: const Text('방문 장소 · 09:00 일정'),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide =
+            constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
+        return isWide ? _webLayout(context) : _mobileLayout(context);
+      },
+    ),
+  );
+
+  Widget _mobileLayout(BuildContext context) => ListView(
+    key: const Key('mobileNotificationsLayout'),
+    padding: _pad,
+    children: [
+      const SectionHeader('출발 알림'),
+      ..._departureAlerts.map(_departureAlertTile),
+      const Divider(),
+      const SectionHeader('이동 기록'),
+      ..._movementRecords.map(_movementRecordTile),
+      const Divider(),
+      const SectionHeader('주간 리포트 (5.12 ~ 5.18)'),
+      const SizedBox(height: 10),
+      const Row(
+        children: [
+          Expanded(child: _NotificationMetricCard('제시간 도착률', '92%')),
+          SizedBox(width: 10),
+          Expanded(child: _NotificationMetricCard('평균 여유 시간', '6분')),
+        ],
+      ),
+    ],
+  );
+
+  Widget _webLayout(BuildContext context) => ListView(
+    key: const Key('webNotificationsLayout'),
+    padding: _pad,
+    children: [
+      Text('이번 주 이동 요약', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 12),
+      const Row(
+        key: Key('webNotificationMetrics'),
+        children: [
+          Expanded(
+            child: DashboardMetricCard(
+              label: '오늘 출발 알림',
+              value: '2건',
+              caption: '다음 알림 08:30',
+              icon: Icons.notifications_active_outlined,
+            ),
           ),
-        ),
-        const Divider(),
-        const SectionHeader('이동 기록'),
-        ...[
-          '5.18 (토)  강남역 → 여의도역|오전 9:37 도착|제시간',
-          '5.16 (목)  강남역 → 여의도역|오전 9:38 도착|제시간',
-          '5.14 (화)  강남역 → 여의도역|오전 9:47 도착|지연',
-        ].map((t) {
-          final p = t.split('|');
-          return ListTile(
-            title: Text(p[0]),
-            subtitle: Text(p[1]),
-            trailing: StatusBadge(
-              p[2],
-              tone: p[2] == '지연' ? DdubiColors.orange : DdubiColors.green,
-              icon: p[2] == '지연'
-                  ? Icons.warning_amber
-                  : Icons.check_circle_outline,
+          SizedBox(width: 12),
+          Expanded(
+            child: DashboardMetricCard(
+              label: '제시간 도착률',
+              value: '92%',
+              caption: '지난주 대비 +4%',
+              icon: Icons.task_alt_outlined,
+              tone: DdubiColors.green,
             ),
-          );
-        }),
-        const Divider(),
-        const SectionHeader('주간 리포트 (5.12 ~ 5.18)'),
-        const SizedBox(height: 10),
-        const Row(
-          children: [
-            Expanded(
-              child: InfoCard(
-                child: Column(
-                  children: [
-                    Text('제시간 도착률'),
-                    Text(
-                      '92%',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: DashboardMetricCard(
+              label: '평균 여유 시간',
+              value: '6분',
+              caption: '최근 이동 3건',
+              icon: Icons.schedule_outlined,
+              tone: Color(0xFF7257E8),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 3,
+            child: InfoCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SectionHeader('최근 알림'),
+                  const SizedBox(height: 8),
+                  ..._departureAlerts.map(_departureAlertTile),
+                  const Divider(),
+                  const ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundColor: Color(0xFFFFF4E5),
+                      child: Icon(
+                        Icons.warning_amber,
+                        color: DdubiColors.orange,
                       ),
                     ),
-                  ],
-                ),
+                    title: Text('일부 구간의 교통정보가 늦게 도착했어요.'),
+                    subtitle: Text('오늘 07:30 · 경로 추천은 정상적으로 완료됐어요.'),
+                  ),
+                ],
               ),
             ),
-            SizedBox(width: 10),
-            Expanded(
-              child: InfoCard(
-                child: Column(
-                  children: [
-                    Text('평균 여유 시간'),
-                    Text(
-                      '6분',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
+          ),
+          const SizedBox(width: 16),
+          SizedBox(
+            width: 390,
+            child: InfoCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SectionHeader('최근 이동 기록'),
+                  const SizedBox(height: 8),
+                  ..._movementRecords.map(_movementRecordTile),
+                ],
               ),
             ),
-          ],
+          ),
+        ],
+      ),
+    ],
+  );
+
+  static Widget _departureAlertTile(String text) => ListTile(
+    contentPadding: EdgeInsets.zero,
+    leading: const CircleAvatar(
+      backgroundColor: Color(0xFFEAFBF8),
+      child: Icon(Icons.notifications_active_outlined, color: DdubiColors.blue),
+    ),
+    title: Text(text),
+    subtitle: const Text('방문 장소 · 09:00 일정'),
+  );
+
+  static Widget _movementRecordTile(String text) {
+    final parts = text.split('|');
+    final isDelayed = parts[2] == '지연';
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(parts[0]),
+      subtitle: Text(parts[1]),
+      trailing: StatusBadge(
+        parts[2],
+        tone: isDelayed ? DdubiColors.orange : DdubiColors.green,
+        icon: isDelayed ? Icons.warning_amber : Icons.check_circle_outline,
+      ),
+    );
+  }
+
+  static const _departureAlerts = ['08:30  곧 출발 시간이에요', '08:10  출발 20분 전 알림'];
+
+  static const _movementRecords = [
+    '5.18 (토)  강남역 → 여의도역|오전 9:37 도착|제시간',
+    '5.16 (목)  강남역 → 여의도역|오전 9:38 도착|제시간',
+    '5.14 (화)  강남역 → 여의도역|오전 9:47 도착|지연',
+  ];
+}
+
+class _NotificationMetricCard extends StatelessWidget {
+  const _NotificationMetricCard(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => InfoCard(
+    child: Column(
+      children: [
+        Text(label),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
         ),
       ],
     ),
@@ -2518,179 +2806,242 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  int selected = 1;
+  int selectedTransport = 1;
+
   @override
   Widget build(BuildContext c) => AppPage(
     title: '이동 설정',
+    webTitle: '서비스 설정',
+    webSubtitle: '경로 추천 방식과 앱 권한, 계정 상태를 관리하세요.',
     index: widget.go == null ? null : 4,
     onNav: widget.go,
-    child: ListView(
-      padding: _pad,
-      children: [
-        InfoCard(
-          child: Column(
-            children: [
-              const ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(child: Icon(Icons.person_outline)),
-                title: Text(
-                  '뚜비 사용자',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text('user@example.com'),
-              ),
-              const Divider(),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.logout, color: DdubiColors.red),
-                title: const Text(
-                  '로그아웃',
-                  style: TextStyle(
-                    color: DdubiColors.red,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                onTap: () => showDialog<void>(
-                  context: c,
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text('로그아웃할까요?'),
-                    content: const Text('다시 로그인하면 일정과 추천 경로를 확인할 수 있어요.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        child: const Text('취소'),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide =
+            constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
+        return isWide ? _webLayout(context) : _mobileLayout(context);
+      },
+    ),
+  );
+
+  Widget _mobileLayout(BuildContext context) => ListView(
+    key: const Key('mobileSettingsLayout'),
+    padding: _pad,
+    children: [
+      _accountCard(context),
+      const SizedBox(height: 18),
+      const SectionHeader('교통수단 선호'),
+      const SizedBox(height: 10),
+      _transportSelector(),
+      const SizedBox(height: 16),
+      _permissionCard(),
+      const SizedBox(height: 14),
+      _serviceStatus(context),
+    ],
+  );
+
+  Widget _webLayout(BuildContext context) => ListView(
+    key: const Key('webSettingsLayout'),
+    padding: _pad,
+    children: [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 300,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _accountCard(context),
+                const SizedBox(height: 16),
+                const InfoCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      StatusBadge(
+                        '계정 연결됨',
+                        tone: DdubiColors.green,
+                        icon: Icons.verified_user_outlined,
                       ),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.pop(dialogContext);
-                          c.go('/login');
-                        },
-                        child: const Text('로그아웃'),
+                      SizedBox(height: 12),
+                      Text('현재 설정은 모바일 앱과 Web에서 동일하게 사용돼요.'),
+                      SizedBox(height: 12),
+                      Divider(),
+                      SizedBox(height: 4),
+                      Text('최근 로그인'),
+                      SizedBox(height: 4),
+                      Text(
+                        '오늘 15:20 · Web',
+                        style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ],
                   ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('이동 설정', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 4),
+                const Text('경로 추천에 사용할 교통수단과 앱 권한을 관리하세요.'),
+                const SizedBox(height: 16),
+                InfoCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SectionHeader('교통수단 선호'),
+                      const SizedBox(height: 12),
+                      _transportSelector(),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _permissionCard(),
+                const SizedBox(height: 16),
+                _serviceStatus(context),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _accountCard(BuildContext context) => InfoCard(
+    child: Column(
+      children: [
+        const ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: CircleAvatar(child: Icon(Icons.person_outline)),
+          title: Text('뚜비 사용자', style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: Text('user@example.com'),
+        ),
+        const Divider(),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.logout, color: DdubiColors.red),
+          title: const Text(
+            '로그아웃',
+            style: TextStyle(
+              color: DdubiColors.red,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          onTap: () => _showLogoutDialog(context),
+        ),
+      ],
+    ),
+  );
+
+  Widget _transportSelector() => Row(
+    children: List.generate(4, (index) {
+      const labels = ['버스', '지하철', '도보', '택시'];
+      const icons = [
+        Icons.directions_bus,
+        Icons.directions_subway,
+        Icons.directions_walk,
+        Icons.local_taxi,
+      ];
+      final isSelected = selectedTransport == index;
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 3),
+          child: InkWell(
+            onTap: () => setState(() => selectedTransport = index),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: isSelected ? DdubiColors.blue : DdubiColors.border,
+                ),
+                color: isSelected ? const Color(0xFFF0F6FF) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
               ),
-            ],
+              child: Column(
+                children: [
+                  Icon(
+                    icons[index],
+                    color: isSelected ? DdubiColors.blue : null,
+                  ),
+                  Text(labels[index], style: const TextStyle(fontSize: 11)),
+                ],
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: 18),
-        const SectionHeader('교통수단 선호'),
+      );
+    }),
+  );
+
+  Widget _permissionCard() => const InfoCard(
+    child: Column(
+      children: [
+        ListTile(
+          leading: Icon(Icons.location_on_outlined),
+          title: Text('위치 권한'),
+          subtitle: Text('현재 위치 기반 경로 안내에 사용'),
+          trailing: Text('항상 허용  ›'),
+        ),
+        Divider(),
+        ListTile(
+          leading: Icon(Icons.notifications_none),
+          title: Text('알림 권한'),
+          subtitle: Text('출발 시간과 지연 안내에 사용'),
+          trailing: Text('허용됨  ›'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _serviceStatus(BuildContext context) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader('서비스 상태'),
         const SizedBox(height: 10),
-        Row(
-          children: List.generate(4, (i) {
-            final labels = ['버스', '지하철', '도보', '택시'];
-            final icons = [
-              Icons.directions_bus,
-              Icons.directions_subway,
-              Icons.directions_walk,
-              Icons.local_taxi,
-            ];
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: InkWell(
-                  onTap: () => setState(() => selected = i),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: selected == i
-                            ? DdubiColors.blue
-                            : DdubiColors.border,
-                      ),
-                      color: selected == i
-                          ? const Color(0xFFF0F6FF)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          icons[i],
-                          color: selected == i ? DdubiColors.blue : null,
-                        ),
-                        Text(labels[i], style: const TextStyle(fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
+        const StatusBadge(
+          '최근 교통 정보 업데이트가 지연됐어요.',
+          tone: DdubiColors.orange,
+          icon: Icons.cloud_off_outlined,
         ),
-        const SizedBox(height: 16),
-        const InfoCard(
-          child: Column(
-            children: [
-              ListTile(
-                leading: Icon(Icons.location_on_outlined),
-                title: Text('위치 권한'),
-                trailing: Text('항상 허용  ›'),
-              ),
-              Divider(),
-              ListTile(
-                leading: Icon(Icons.notifications_none),
-                title: Text('알림 권한'),
-                trailing: Text('허용됨  ›'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        const TtubeeGuideCard(
-          '교통 정보를 불러오지 못했어요.\n잠시 후 다시 확인해주세요.',
-          compact: true,
-        ),
+        const SizedBox(height: 6),
+        const Text('최신 교통정보가 부족하면 Mock 경로로 화면을 확인할 수 있어요.'),
         const SizedBox(height: 12),
-        InfoCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SectionHeader('데이터 부족 알림'),
-              const SizedBox(height: 10),
-              const StatusBadge(
-                '교통 정보 업데이트에 실패했어요.',
-                tone: DdubiColors.orange,
-                icon: Icons.cloud_off_outlined,
-              ),
-              const Text('네트워크를 확인해주세요.'),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  onPressed: () {},
-                  child: const Text('다시 시도'),
-                ),
-              ),
-            ],
+        Align(
+          alignment: Alignment.centerRight,
+          child: OutlinedButton(
+            onPressed: () => _open(
+              context,
+              DelayAlertScreen(repository: MockDdubiRepository()),
+            ),
+            child: const Text('상세 확인'),
           ),
         ),
-        const SizedBox(height: 14),
-        InfoCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SectionHeader('예외 상황 기록'),
-              const SizedBox(height: 10),
-              const Text(
-                '최근 06.18 07:30',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const Text('최신 교통정보가 부족해\n추천 경로를 불러오지 못했어요.'),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: OutlinedButton(
-                  onPressed: () => _open(
-                    c,
-                    DelayAlertScreen(repository: MockDdubiRepository()),
-                  ),
-                  child: const Text('다시 시도'),
-                ),
-              ),
-            ],
-          ),
+      ],
+    ),
+  );
+
+  void _showLogoutDialog(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('로그아웃할까요?'),
+      content: const Text('다시 로그인하면 일정과 추천 경로를 확인할 수 있어요.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(dialogContext);
+            context.go('/login');
+          },
+          child: const Text('로그아웃'),
         ),
       ],
     ),

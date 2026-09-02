@@ -224,8 +224,10 @@ void main() {
 
     expect(find.byKey(const Key('webHomeDashboard')), findsOneWidget);
     expect(find.byKey(const Key('webHomeRouteGrid')), findsOneWidget);
-    expect(find.text('오늘의 이동'), findsOneWidget);
-    expect(find.text('도착 예정'), findsOneWidget);
+    expect(find.byKey(const Key('webHomeMetrics')), findsOneWidget);
+    expect(find.text('이동 대시보드'), findsOneWidget);
+    expect(find.text('서비스 정상'), findsOneWidget);
+    expect(find.text('도착 예정'), findsNWidgets(2));
     expect(find.byType(RouteCard), findsNWidgets(3));
   });
 
@@ -250,6 +252,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('webScheduleLayout')), findsOneWidget);
+    expect(find.byKey(const Key('webScheduleMetrics')), findsOneWidget);
     expect(find.byKey(const Key('mobileScheduleLayout')), findsNothing);
     expect(find.text('날짜를 선택해 일정을 확인하세요.'), findsOneWidget);
   });
@@ -353,6 +356,112 @@ void main() {
     expect(find.textContaining('강남역  →  여의도역'), findsOneWidget);
     expect(find.text('추천 경로'), findsOneWidget);
     expect(find.text('조건 수정'), findsOneWidget);
+  });
+
+  testWidgets('경로 화면은 Web에서 데스크톱 비교 레이아웃을 사용한다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    final router = container.read(appRouterProvider);
+    router.go('/recommendations');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('webRouteSearchLayout')), findsOneWidget);
+    expect(find.byKey(const Key('mobileRouteSearchLayout')), findsNothing);
+
+    router.go(
+      '/recommendations/mock-recommendation-1',
+      extra: RouteSearchCondition(
+        departurePlace: '강남역',
+        destinationPlace: '여의도역',
+        desiredArrivalAt: DateTime(2026, 9, 2, 10),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('webRouteResultsLayout')), findsOneWidget);
+    expect(find.byKey(const Key('webRouteResultsGrid')), findsOneWidget);
+    expect(find.byKey(const Key('mobileRouteResultsLayout')), findsNothing);
+    expect(find.byType(RouteCard), findsNWidgets(3));
+  });
+
+  testWidgets('전체 지도는 Web에서 지도와 상세 정보를 좌우로 표시한다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RouteMapScreen(
+          repository: MockDdubiRepository(),
+          selectedRoute: MockDdubiRepository.routeData.first,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('webRouteMapLayout')), findsOneWidget);
+    expect(find.byKey(const Key('mobileRouteMapLayout')), findsNothing);
+    expect(find.byType(ChoiceChip), findsNWidgets(3));
+  });
+
+  testWidgets('알림과 설정은 Web에서 데스크톱 정보 구조를 사용한다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    final router = container.read(appRouterProvider);
+    router.go('/notifications');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('webNotificationsLayout')), findsOneWidget);
+    expect(find.byKey(const Key('webNotificationMetrics')), findsOneWidget);
+    expect(find.byKey(const Key('mobileNotificationsLayout')), findsNothing);
+    expect(find.text('최근 이동 기록'), findsOneWidget);
+
+    router.go('/settings');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('webSettingsLayout')), findsOneWidget);
+    expect(find.byKey(const Key('mobileSettingsLayout')), findsNothing);
+    expect(find.text('경로 추천에 사용할 교통수단과 앱 권한을 관리하세요.'), findsOneWidget);
+  });
+
+  testWidgets('알림과 설정은 모바일에서 기존 세로형 구조를 유지한다', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    final router = container.read(appRouterProvider);
+    router.go('/notifications');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('mobileNotificationsLayout')), findsOneWidget);
+    expect(find.byKey(const Key('webNotificationsLayout')), findsNothing);
+
+    router.go('/settings');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('mobileSettingsLayout')), findsOneWidget);
+    expect(find.byKey(const Key('webSettingsLayout')), findsNothing);
   });
 
   testWidgets('Mock 지도에서 현재 위치와 출발지·도착지 및 후보를 구분한다', (tester) async {

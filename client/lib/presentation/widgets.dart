@@ -460,6 +460,8 @@ class AppPage extends StatelessWidget {
     this.onNav,
     this.actions,
     this.fab,
+    this.webTitle,
+    this.webSubtitle,
   });
   final String title;
   final Widget child;
@@ -467,32 +469,154 @@ class AppPage extends StatelessWidget {
   final ValueChanged<int>? onNav;
   final List<Widget>? actions;
   final Widget? fab;
+  final String? webTitle;
+  final String? webSubtitle;
+
   @override
-  Widget build(BuildContext c) => Scaffold(
-    backgroundColor:
-        MediaQuery.sizeOf(c).width >= LayoutConstants.wideScreenBreakpoint
-        ? DdubiColors.surface
-        : Colors.white,
-    appBar: AppBar(
-      backgroundColor:
-          MediaQuery.sizeOf(c).width >= LayoutConstants.wideScreenBreakpoint
-          ? DdubiColors.surface
-          : Colors.white,
-      title: Text(title, style: Theme.of(c).textTheme.titleMedium),
-      centerTitle: false,
-      actions: actions,
-    ),
-    body: SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
-          child: SizedBox(width: double.infinity, child: child),
+  Widget build(BuildContext context) {
+    final isWide =
+        MediaQuery.sizeOf(context).width >=
+        LayoutConstants.dashboardScreenBreakpoint;
+    if (isWide) {
+      return Scaffold(
+        backgroundColor: DdubiColors.surface,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _WebPageHeader(
+                title: webTitle ?? title,
+                subtitle: webSubtitle,
+                actions: actions,
+              ),
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: LayoutConstants.maxContentWidth,
+                    ),
+                    child: SizedBox(width: double.infinity, child: child),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+        floatingActionButton: fab,
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        title: Text(title, style: Theme.of(context).textTheme.titleMedium),
+        centerTitle: false,
+        actions: actions,
       ),
+      body: SafeArea(child: child),
+      floatingActionButton: fab,
+      bottomNavigationBar: index == null
+          ? null
+          : DdubiBottomNav(index: index!, onTap: onNav!),
+    );
+  }
+}
+
+class _WebPageHeader extends StatelessWidget {
+  const _WebPageHeader({
+    required this.title,
+    required this.subtitle,
+    required this.actions,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<Widget>? actions;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 82,
+    padding: const EdgeInsets.symmetric(horizontal: 28),
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      border: Border(bottom: BorderSide(color: DdubiColors.border)),
     ),
-    floatingActionButton: fab,
-    bottomNavigationBar: index == null
-        ? null
-        : DdubiBottomNav(index: index!, onTap: onNav!),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleLarge),
+              if (subtitle != null) ...[
+                const SizedBox(height: 3),
+                Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAFBF8),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const StatusBadge(
+            '서비스 정상',
+            tone: DdubiColors.green,
+            icon: Icons.cloud_done_outlined,
+          ),
+        ),
+        if (actions != null) ...[const SizedBox(width: 10), ...actions!],
+      ],
+    ),
+  );
+}
+
+class DashboardMetricCard extends StatelessWidget {
+  const DashboardMetricCard({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.tone = DdubiColors.blue,
+    this.caption,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color tone;
+  final String? caption;
+
+  @override
+  Widget build(BuildContext context) => InfoCard(
+    child: Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: .1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: tone),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 2),
+              Text(value, style: Theme.of(context).textTheme.titleLarge),
+              if (caption != null)
+                Text(caption!, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ],
+    ),
   );
 }

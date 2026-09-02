@@ -11,201 +11,235 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 카카오의 이름 기반 SUBWAY step을 공식 호선과 인접 역 구간으로 변환한다.
+ * 카카오 SUBWAY step을 정적 공식 topology의 인접 역 구간으로 변환한다.
  *
- * <ol>
- *     <li>카카오 vehicles.name을 정규화해 공식 호선·방향 후보를 찾는다.</li>
- *     <li>각 방향에서 승차역보다 뒤에 있는 하차역 조합만 만든다.</li>
- *     <li>카카오 중간역이 공식 목록에서 같은 순서로 등장하는지 검증한다.</li>
- *     <li>최상위 공식 후보가 하나일 때만 방향과 역 ID를 EXACT로 확정한다.</li>
- *     <li>승차~하차 범위를 실제 인접 역 구간 목록으로 전개한다.</li>
- * </ol>
+ * <p>canonical ID는 시간표 마스터의 정적 호선·역 ID로 고정한다. 서울 실시간 API의
+ * {@code subwayId/statnId}는 별도 crosswalk로만 전달하며, crosswalk가 나중에 보강되어도
+ * 기존 baseline·Redis key가 바뀌지 않는다. 따라서 topology가 하나로 확정되면 EXACT이고,
+ * 실시간 조회 가능 여부는 각 {@link MappedTransitSegment#realtimeLookupReady()}로 따로 판단한다.</p>
  *
- * <p>DB, Spring, 카카오 DTO와 공용 segment_id 형식에는 의존하지 않는다. 공식 마스터를
- * 파일이나 DB에서 읽어 주입할 수 있으며, 동일 입력은 항상 동일 결과를 만든다.</p>
+ * <p>별칭은 공식 이름으로 문자열 치환하지 않는다. 검증된 alias가 있으면 해당 정적
+ * canonical ID 후보만 허용하고, 없을 때만 기본 정규화 이름으로 후보를 찾는다.</p>
  */
 public class SubwaySegmentMatcher {
 
-    private static final double EXACT_SCORE = 0.90;
-    private static final double EXACT_PASSING_RATIO = 0.80;
-    private static final double TIE_EPSILON = 0.01;
-
     private final TransitNameNormalizer normalizer;
     private final Map<String, List<SubwayLineMaster>> linesByNormalizedName;
+    private final Map<String, List<SubwayLineMaster>> linesById;
+    private final Map<String, Set<String>> lineAliasIds;
+    private final Map<String, Set<String>> stationAliasIds;
 
     public SubwaySegmentMatcher(Collection<SubwayLineMaster> lines) {
-        this(lines, new TransitNameNormalizer());
+        this(lines, new TransitNameNormalizer(), Map.of(), Map.of());
     }
 
     public SubwaySegmentMatcher(
             Collection<SubwayLineMaster> lines,
             TransitNameNormalizer normalizer
     ) {
-        this.normalizer = Objects.requireNonNull(normalizer);
-        // 요청마다 전체 지하철 마스터를 순회하지 않도록 생성 시 호선명 인덱스를 만든다.
-        this.linesByNormalizedName = indexLines(lines == null ? List.of() : lines);
+        this(lines, normalizer, Map.of(), Map.of());
     }
 
     /**
-     * 카카오 SUBWAY step 하나를 공식 마스터에 매핑한다.
-     * 잘못된 실시간 구간 조회를 막기 위해 EXACT 외 결과에는 인접 역 구간을 넣지 않는다.
+     * @param lineAliasIds 기본 정규화된 provider 호선명 → 정적 subwayId 후보 집합
+     * @param stationAliasIds 기본 정규화된 provider 역명 → 호선별 정적 stationId 후보 집합
      */
+    public SubwaySegmentMatcher(
+            Collection<SubwayLineMaster> lines,
+            TransitNameNormalizer normalizer,
+            Map<String, Set<String>> lineAliasIds,
+            Map<String, Set<String>> stationAliasIds
+    ) {
+        this.normalizer = Objects.requireNonNull(normalizer);
+        this.lineAliasIds = normalizedAliasIds(lineAliasIds, true);
+        this.stationAliasIds = normalizedAliasIds(stationAliasIds, false);
+        List<SubwayLineMaster> safeLines = lines == null ? List.of() : List.copyOf(lines);
+        this.linesByNormalizedName = indexLinesByName(safeLines);
+        this.linesById = indexLinesById(safeLines);
+    }
+
+    /** 공식 호선·방향·역 경로가 하나일 때만 EXACT와 인접 역 segment 목록을 반환한다. */
     public SubwayMappingResult match(SubwayMappingRequest request) {
         Objects.requireNonNull(request, "request must not be null");
 
-        List<SubwayLineMaster> lineCandidates = findLineCandidates(request.providerLineNames());
-        if (lineCandidates.isEmpty()) {
+        // 1단계: 카카오 호선 표기와 검증 별칭을 정적 subwayId 후보로 바꾼다.
+        // 실시간 subwayId는 topology 식별자가 아니므로 이 후보 검색에 사용하지 않는다.
+        LineLookup lookup = findLineCandidates(request.providerLineNames());
+        if (lookup.normalizedProviderNames().isEmpty()) {
+            return failed(SubwayMappingStatus.UNMAPPED, "PROVIDER_LINE_NOT_PROVIDED", 0);
+        }
+        if (lookup.unresolvedProviderCount() > 0 && lookup.normalizedProviderNames().size() > 1) {
+            return failed(SubwayMappingStatus.PARTIAL,
+                    "PROVIDER_LINE_COVERAGE_INCOMPLETE", lookup.lines().size());
+        }
+        if (lookup.lines().isEmpty()) {
             return failed(SubwayMappingStatus.UNMAPPED, "LINE_NOT_FOUND", 0);
         }
+        if (lookup.distinctLineIds() > 1) {
+            return failed(SubwayMappingStatus.AMBIGUOUS,
+                    lookup.normalizedProviderNames().size() > 1
+                            ? "MULTIPLE_PROVIDER_LINES"
+                            : "LINE_NAME_AMBIGUOUS",
+                    lookup.lines().size());
+        }
 
-        // 동명이역과 순환선을 고려해 가능한 모든 정방향 승·하차 조합을 보존한다.
+        // 2단계: 같은 호선의 상·하행, 본선·지선·단축 패턴을 각각 독립적으로 탐색한다.
+        // 하나로 합치면 실제로 이어지지 않는 두 역을 인접 구간으로 만드는 오류가 생긴다.
         List<Candidate> candidates = new ArrayList<>();
-        for (SubwayLineMaster line : lineCandidates) {
+        for (SubwayLineMaster line : lookup.lines()) {
             candidates.addAll(matchStations(line, request));
         }
         if (candidates.isEmpty()) {
-            return partialLineOnly(lineCandidates, "STATION_OR_ORDER_NOT_FOUND");
+            return partialLineOnly(lookup.lines(), "STATION_OR_FORWARD_ORDER_NOT_FOUND", 0);
         }
 
+        // 3단계: 카카오가 준 전체 역 순서가 공식 부분경로와 일치하는 후보만 EXACT 대상으로 본다.
+        // 정렬은 결정론을 위한 것이며 서로 다른 topology identity를 동점 해소로 선택하지 않는다.
         candidates.sort(Comparator
-                .comparingDouble(Candidate::score).reversed()
-                .thenComparing(Comparator.comparingDouble(Candidate::passingRatio).reversed())
+                .comparingDouble(Candidate::passingRatio).reversed()
                 .thenComparing(candidate -> candidate.line().subwayId())
                 .thenComparing(candidate -> candidate.line().direction())
-                .thenComparingInt(Candidate::startIndex)
-                .thenComparingInt(Candidate::endIndex));
-
-        Candidate best = candidates.get(0);
-        long tiedCandidates = candidates.stream()
-                .filter(candidate -> Math.abs(candidate.score() - best.score()) < TIE_EPSILON)
-                .map(Candidate::identity)
-                .distinct()
-                .count();
-        // 같은 점수의 노선·방향·역 조합이 둘 이상이면 배열의 첫 항목을 선택하지 않는다.
-        if (tiedCandidates > 1) {
-            return failed(SubwayMappingStatus.AMBIGUOUS, "MULTIPLE_TOP_CANDIDATES", candidates.size());
+                .thenComparing(Candidate::identity));
+        List<Candidate> exactCandidates = candidates.stream()
+                .filter(candidate -> candidate.passingRatio() == 1.0)
+                .toList();
+        // subwayId·방향·전체 stationId 경로가 같을 때만 서비스 패턴 차이를 같은 결과로 접는다.
+        long exactIdentities = exactCandidates.stream().map(Candidate::identity).distinct().count();
+        if (exactIdentities > 1) {
+            return failed(SubwayMappingStatus.AMBIGUOUS,
+                    "MULTIPLE_TOPOLOGY_PATHS", candidates.size());
         }
-
-        if (best.score() < EXACT_SCORE || best.passingRatio() < EXACT_PASSING_RATIO) {
-            return new SubwayMappingResult(
-                    SubwayMappingStatus.PARTIAL,
-                    best.line().subwayId(),
-                    best.line().lineName(),
-                    null, null, null, null, null,
-                    round(best.score()),
-                    round(best.passingRatio()),
-                    candidates.size(),
-                    "PASSING_STATIONS_NOT_CONFIRMED",
-                    List.of()
-            );
+        if (exactIdentities == 0) {
+            return partialLineOnly(lookup.lines(), "PASSING_STATIONS_NOT_CONFIRMED", candidates.size());
         }
-
-        return exact(best, candidates.size());
+        return exact(exactCandidates.get(0), candidates.size());
     }
 
-    /** 유효한 마스터만 정규화 호선명 → 방향별 노선 목록으로 인덱싱한다. */
-    private Map<String, List<SubwayLineMaster>> indexLines(Collection<SubwayLineMaster> lines) {
+    /** provider 별칭의 영향을 받지 않는 공식 호선명 인덱스를 만든다. */
+    private Map<String, List<SubwayLineMaster>> indexLinesByName(
+            Collection<SubwayLineMaster> lines
+    ) {
         Map<String, List<SubwayLineMaster>> index = new HashMap<>();
-        for (SubwayLineMaster line : lines) {
-            if (line == null
-                    || line.subwayId() == null
-                    || line.lineName() == null
-                    || line.direction() == null
-                    || line.stations().isEmpty()) {
-                continue;
-            }
-            String normalizedName = normalizer.normalizeSubwayLineName(line.lineName());
-            if (!normalizedName.isEmpty()) {
-                index.computeIfAbsent(normalizedName, ignored -> new ArrayList<>()).add(line);
+        for (SubwayLineMaster line : validLines(lines)) {
+            String key = normalizer.normalizeSubwayLineName(line.lineName());
+            if (!key.isEmpty()) {
+                index.computeIfAbsent(key, ignored -> new ArrayList<>()).add(line);
             }
         }
         index.replaceAll((key, value) -> List.copyOf(value));
         return Map.copyOf(index);
     }
 
-    /** 카카오가 제시한 호선명에서 중복된 공식 subwayId·방향 후보를 제거한다. */
-    private List<SubwayLineMaster> findLineCandidates(List<String> providerLineNames) {
-        Set<String> lineKeys = new LinkedHashSet<>();
-        List<SubwayLineMaster> result = new ArrayList<>();
-        for (String providerName : providerLineNames) {
-            String normalizedName = normalizer.normalizeSubwayLineName(providerName);
-            for (SubwayLineMaster line : linesByNormalizedName.getOrDefault(normalizedName, List.of())) {
-                String key = line.subwayId() + ':' + line.direction();
-                if (lineKeys.add(key)) {
-                    result.add(line);
-                }
-            }
+    /** 같은 정적 호선의 방향·본선·지선·단축 패턴을 모두 보존한다. */
+    private Map<String, List<SubwayLineMaster>> indexLinesById(
+            Collection<SubwayLineMaster> lines
+    ) {
+        Map<String, List<SubwayLineMaster>> index = new HashMap<>();
+        for (SubwayLineMaster line : validLines(lines)) {
+            index.computeIfAbsent(line.subwayId(), ignored -> new ArrayList<>()).add(line);
         }
-        return result;
+        index.replaceAll((key, value) -> List.copyOf(value));
+        return Map.copyOf(index);
     }
 
-    /**
-     * 한 운행 방향 안에서 승차역 순번이 하차역 순번보다 앞선 조합만 점수화한다.
-     * 호선·두 역·순서가 일치한 기본 점수 0.75에 중간역 순차 일치율 0.25를 더한다.
-     */
+    /** 방향·서비스 패턴·최소 두 역이 모두 있는 topology만 검색 대상으로 사용한다. */
+    private List<SubwayLineMaster> validLines(Collection<SubwayLineMaster> lines) {
+        return lines.stream()
+                .filter(Objects::nonNull)
+                .filter(line -> line.subwayId() != null && !line.subwayId().isBlank())
+                .filter(line -> line.lineName() != null && !line.lineName().isBlank())
+                .filter(line -> line.direction() != null && !line.direction().isBlank())
+                .filter(line -> line.servicePatternId() != null && !line.servicePatternId().isBlank())
+                .filter(line -> line.stations().size() >= 2)
+                .toList();
+    }
+
+    /** alias ID가 없을 때만 공식 이름 인덱스로 fallback한다. */
+    private LineLookup findLineCandidates(List<String> providerLineNames) {
+        List<String> normalizedNames = providerLineNames.stream()
+                .map(normalizer::normalizeSubwayLineName)
+                .filter(name -> !name.isEmpty())
+                .distinct()
+                .toList();
+        Set<SubwayLineMaster> lines = new LinkedHashSet<>();
+        int unresolved = 0;
+        for (String name : normalizedNames) {
+            Set<String> canonicalIds = lineAliasIds.get(name);
+            List<SubwayLineMaster> matches = canonicalIds == null
+                    ? linesByNormalizedName.getOrDefault(name, List.of())
+                    : canonicalIds.stream()
+                    .flatMap(id -> linesById.getOrDefault(id, List.of()).stream())
+                    .distinct()
+                    .toList();
+            if (matches.isEmpty()) {
+                unresolved++;
+            } else {
+                lines.addAll(matches);
+            }
+        }
+        long distinctLineIds = lines.stream().map(SubwayLineMaster::subwayId).distinct().count();
+        return new LineLookup(normalizedNames, List.copyOf(lines), unresolved, distinctLineIds);
+    }
+
+    /** 한 운행 패턴에서 승차역 순번보다 뒤에 있는 하차역 조합만 만든다. */
     private List<Candidate> matchStations(SubwayLineMaster line, SubwayMappingRequest request) {
-        String normalizedFrom = normalizer.normalizeSubwayStationName(request.fromStationName());
-        String normalizedTo = normalizer.normalizeSubwayStationName(request.toStationName());
         List<SubwayStationMaster> stations = line.stations();
         List<Candidate> result = new ArrayList<>();
-
         for (int startIndex = 0; startIndex < stations.size(); startIndex++) {
-            if (!normalizer.normalizeSubwayStationName(stations.get(startIndex).stationName())
-                    .equals(normalizedFrom)) {
+            if (!matchesStation(request.fromStationName(), stations.get(startIndex))) {
                 continue;
             }
-            // 하차역을 다음 순번부터 찾는 조건으로 해당 방향의 실제 진행 순서를 강제한다.
             for (int endIndex = startIndex + 1; endIndex < stations.size(); endIndex++) {
-                if (!normalizer.normalizeSubwayStationName(stations.get(endIndex).stationName())
-                        .equals(normalizedTo)) {
+                if (!matchesStation(request.toStationName(), stations.get(endIndex))) {
                     continue;
                 }
                 double passingRatio = passingMatchRatio(
                         request.passingStationNames(), stations.subList(startIndex, endIndex + 1));
-                result.add(new Candidate(
-                        line, startIndex, endIndex, passingRatio, 0.75 + (0.25 * passingRatio)));
+                result.add(new Candidate(line, startIndex, endIndex, passingRatio));
             }
         }
         return result;
     }
 
-    /**
-     * 카카오 역 목록을 공식 구간의 부분수열로 비교한다. 일부 중간역 생략은 허용하지만
-     * 역 순서가 뒤집힌 경우는 일치로 세지 않아 잘못된 방향 확정을 막는다.
-     */
+    /** 별칭이 있으면 정적 stationId만 비교하고, 없을 때만 기본 정규화 이름을 비교한다. */
+    private boolean matchesStation(String providerName, SubwayStationMaster officialStation) {
+        String normalizedProvider = normalizer.normalizeSubwayStationName(providerName);
+        Set<String> aliasIds = stationAliasIds.get(normalizedProvider);
+        if (aliasIds != null) {
+            return aliasIds.contains(officialStation.stationId());
+        }
+        return normalizer.normalizeSubwayStationName(officialStation.stationName())
+                .equals(normalizedProvider);
+    }
+
+    /** 카카오 역 목록이 공식 부분경로와 같은 순서인지 부분수열 비율로 기록한다. */
     private double passingMatchRatio(
             List<String> providerNames,
             List<SubwayStationMaster> officialStations
     ) {
-        List<String> normalizedProvider = providerNames.stream()
-                .map(normalizer::normalizeSubwayStationName)
-                .filter(name -> !name.isEmpty())
+        List<String> usableProviderNames = providerNames.stream()
+                .filter(name -> name != null
+                        && !normalizer.normalizeSubwayStationName(name).isEmpty())
                 .toList();
-        if (normalizedProvider.isEmpty()) {
-            return 1.0;
+        if (usableProviderNames.isEmpty()) {
+            return 0.0;
         }
-
-        List<String> normalizedOfficial = officialStations.stream()
-                .map(SubwayStationMaster::stationName)
-                .map(normalizer::normalizeSubwayStationName)
-                .toList();
         int matched = 0;
         int officialIndex = 0;
-        for (String providerName : normalizedProvider) {
-            while (officialIndex < normalizedOfficial.size()
-                    && !normalizedOfficial.get(officialIndex).equals(providerName)) {
+        for (String providerName : usableProviderNames) {
+            while (officialIndex < officialStations.size()
+                    && !matchesStation(providerName, officialStations.get(officialIndex))) {
                 officialIndex++;
             }
-            if (officialIndex == normalizedOfficial.size()) {
-                continue;
+            if (officialIndex < officialStations.size()) {
+                matched++;
+                officialIndex++;
             }
-            matched++;
-            officialIndex++;
         }
-        return (double) matched / normalizedProvider.size();
+        return (double) matched / usableProviderNames.size();
     }
 
-    /** 확정한 승차~하차 범위를 실제 이웃한 역 쌍으로 전개한다. */
+    /** 정적 ID로 segment topology를 만들고 실시간 ID는 각 edge의 별도 crosswalk 필드에 보존한다. */
     private SubwayMappingResult exact(Candidate candidate, int candidateCount) {
         SubwayLineMaster line = candidate.line();
         List<SubwayStationMaster> stations = line.stations();
@@ -218,80 +252,103 @@ public class SubwaySegmentMatcher {
             segments.add(new MappedSubwaySegment(
                     segments.size() + 1,
                     line.subwayId(),
+                    line.realtimeSubwayId(),
                     line.lineName(),
                     line.direction(),
                     from.stationId(),
                     to.stationId(),
+                    from.realtimeStationId(),
+                    to.realtimeStationId(),
                     from.sequence(),
-                    to.sequence()
-            ));
+                    to.sequence()));
         }
         return new SubwayMappingResult(
                 SubwayMappingStatus.EXACT,
-                line.subwayId(),
-                line.lineName(),
-                start.stationId(),
-                end.stationId(),
-                start.sequence(),
-                end.sequence(),
-                line.direction(),
-                round(candidate.score()),
-                round(candidate.passingRatio()),
-                candidateCount,
-                "NONE",
-                segments
-        );
+                line.subwayId(), line.lineName(), start.stationId(), end.stationId(),
+                start.sequence(), end.sequence(), line.direction(),
+                1.0, round(candidate.passingRatio()), candidateCount, "NONE", segments);
     }
 
-    /** 호선은 찾았지만 역 또는 방향을 확정하지 못한 PARTIAL 결과를 만든다. */
-    private SubwayMappingResult partialLineOnly(List<SubwayLineMaster> lines, String reason) {
+    /** PARTIAL 진단에서도 서로 다른 정적 호선을 임의로 하나 선택하지 않는다. */
+    private SubwayMappingResult partialLineOnly(
+            List<SubwayLineMaster> lines,
+            String reason,
+            int candidateCount
+    ) {
         SubwayLineMaster representative = lines.get(0);
         boolean sameLine = lines.stream().allMatch(line ->
-                line.subwayId().equals(representative.subwayId())
-                        && line.lineName().equals(representative.lineName()));
+                Objects.equals(line.subwayId(), representative.subwayId()));
         return new SubwayMappingResult(
                 SubwayMappingStatus.PARTIAL,
                 sameLine ? representative.subwayId() : null,
                 sameLine ? representative.lineName() : null,
                 null, null, null, null, null,
-                0.25,
-                0.0,
-                0,
-                reason,
-                List.of()
-        );
+                0.0, 0.0, candidateCount, reason, List.of());
     }
 
-    /** 호선 미발견이나 다중 최상위 후보처럼 공식 선택을 노출하면 안 되는 결과를 만든다. */
-    private SubwayMappingResult failed(SubwayMappingStatus status, String reason, int candidateCount) {
+    /** 호선조차 확정할 수 없는 결과에는 임의의 대표 ID를 넣지 않는다. */
+    private SubwayMappingResult failed(
+            SubwayMappingStatus status,
+            String reason,
+            int candidateCount
+    ) {
         return new SubwayMappingResult(
-                status,
-                null, null, null, null, null, null, null,
-                0.0,
-                0.0,
-                candidateCount,
-                reason,
-                List.of()
-        );
+                status, null, null, null, null, null, null, null,
+                0.0, 0.0, candidateCount, reason, List.of());
+    }
+
+    /**
+     * 환승역은 같은 카카오 표기가 호선별 정적 stationId 여러 개를 가리킬 수 있다.
+     * 모든 검증 ID를 보존한 뒤 현재 호선 패턴에 포함된 역만 비교해 정상 환승역을 누락하지 않는다.
+     */
+    private Map<String, Set<String>> normalizedAliasIds(
+            Map<String, Set<String>> aliases,
+            boolean line
+    ) {
+        if (aliases == null || aliases.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Set<String>> result = new HashMap<>();
+        aliases.forEach((alias, canonicalIds) -> {
+            String key = line
+                    ? normalizer.normalizeSubwayLineName(alias)
+                    : normalizer.normalizeSubwayStationName(alias);
+            if (key.isEmpty() || canonicalIds == null || canonicalIds.isEmpty()
+                    || canonicalIds.stream().anyMatch(id -> id == null || id.isBlank())) {
+                throw new IllegalArgumentException("지하철 별칭 키와 canonical ID는 비어 있을 수 없습니다.");
+            }
+            result.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).addAll(canonicalIds);
+        });
+        result.replaceAll((key, value) -> Set.copyOf(value));
+        return Map.copyOf(result);
     }
 
     private double round(double value) {
         return Math.round(value * 10_000.0) / 10_000.0;
     }
 
-    /** 동률 판정 identity에는 방향을 포함해 같은 역 쌍의 상·하행도 서로 다른 후보로 취급한다. */
+    /** vehicles 전체의 호선 후보와 마스터 미조회 대안 수를 함께 가진 중간 결과다. */
+    private record LineLookup(
+            List<String> normalizedProviderNames,
+            List<SubwayLineMaster> lines,
+            int unresolvedProviderCount,
+            long distinctLineIds
+    ) { }
+
+    /** 실제 출력 key인 정적 subwayId·direction·정적 station 경로 전체를 identity로 사용한다. */
+    /** 한 방향·서비스 패턴에서 가능한 승차~하차 부분경로와 통과역 검증 비율이다. */
     private record Candidate(
             SubwayLineMaster line,
             int startIndex,
             int endIndex,
-            double passingRatio,
-            double score
+            double passingRatio
     ) {
         private String identity() {
-            SubwayStationMaster start = line.stations().get(startIndex);
-            SubwayStationMaster end = line.stations().get(endIndex);
-            return line.subwayId() + ':' + line.direction() + ':'
-                    + start.stationId() + ':' + end.stationId();
+            String path = line.stations().subList(startIndex, endIndex + 1).stream()
+                    .map(SubwayStationMaster::stationId)
+                    .reduce((left, right) -> left + '>' + right)
+                    .orElse("");
+            return line.subwayId() + ':' + line.direction() + ':' + path;
         }
     }
 }

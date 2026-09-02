@@ -13,216 +13,260 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 카카오의 이름 기반 BUS step을 공식 노선과 인접 정류장 구간으로 변환한다.
+ * 카카오 BUS step을 서울 공식 노선의 인접 정류장 구간으로 보수적으로 변환한다.
  *
- * <p>처리 단계는 다음과 같다.</p>
- * <ol>
- *     <li>카카오 vehicles.name을 정규화해 공식 노선 후보를 찾는다.</li>
- *     <li>후보 노선마다 승차 정류장보다 뒤에 있는 하차 정류장 조합을 만든다.</li>
- *     <li>카카오 중간 정류장이 공식 목록에서 같은 순서로 등장하는지 비율을 계산한다.</li>
- *     <li>좌표가 있으면 카카오 path가 승차→하차 방향으로 진행하는지 교차 검증한다.</li>
- *     <li>최상위 후보가 하나이고 임계값을 통과할 때만 EXACT로 확정한다.</li>
- *     <li>확정한 승차~하차 범위를 실제 인접 정류장 구간 목록으로 전개한다.</li>
- * </ol>
+ * <p>카카오 {@code vehicles[]}는 같은 step에서 탈 수 있는 대안 노선 목록일 수 있다.
+ * 따라서 서로 다른 대안이 둘 이상이면 임의로 하나를 고르지 않는다. 단일 노선에 대해서도
+ * 이름과 순번만으로 EXACT를 발급하지 않고, 카카오 path 양 끝과 공식 승·하차 정류장 사이의
+ * 절대 거리를 미터 단위로 확인한다.</p>
  *
- * <p>이 클래스는 저장소, Spring, 카카오 DTO, segment_id 문자열 형식에 의존하지 않는다.
- * 파일 또는 DB에서 읽은 {@link BusRouteMaster}를 주입하면 같은 입력에 항상 같은 결과를 반환한다.</p>
+ * <p>입력 좌표는 WGS84 경도·위도이며 허용 반경은 생성자에서 주입한다. 이 반경은 소요시간
+ * 예측 가중치가 아니라 잘못된 동명 정류장 선택을 차단하는 품질 게이트다. 실제 golden corpus의
+ * endpoint residual 분포를 측정해 운영 설정을 조정해야 한다. 좌표가 없거나 깨졌으면 성공으로
+ * 간주하지 않고 PARTIAL로 반환한다.</p>
  */
 public class BusSegmentMatcher {
 
-    // 현재 PoC에서 합의한 자동 확정 기준이다. 변경 영향이 한곳에 모이도록 상수로 격리한다.
-    private static final double EXACT_SCORE = 0.90;
-    private static final double EXACT_PASSING_RATIO = 0.80;
-    // 부동소수점 오차와 미세한 점수 차이로 동률 후보를 임의 선택하지 않게 하는 비교 허용치다.
-    private static final double TIE_EPSILON = 0.01;
+    /** Replay 근거가 생기기 전 사용하는 보수적 초기값이며 운영 설정으로 덮어쓸 수 있다. */
+    public static final double DEFAULT_MAX_ENDPOINT_DISTANCE_METERS = 150.0;
 
     private final TransitNameNormalizer normalizer;
     private final Map<String, List<BusRouteMaster>> routesByNormalizedName;
+    private final Map<String, List<BusRouteMaster>> routesById;
+    private final Map<String, Set<String>> routeAliasIds;
+    private final Map<String, Set<String>> stopAliasIds;
+    private final double maxEndpointDistanceMeters;
 
     public BusSegmentMatcher(Collection<BusRouteMaster> routes) {
-        this(routes, new TransitNameNormalizer());
+        this(routes, new TransitNameNormalizer(), Map.of(), Map.of(),
+                DEFAULT_MAX_ENDPOINT_DISTANCE_METERS);
     }
 
     public BusSegmentMatcher(Collection<BusRouteMaster> routes, TransitNameNormalizer normalizer) {
-        this.normalizer = Objects.requireNonNull(normalizer);
-        // 요청마다 전체 마스터를 순회하지 않도록 생성 시점에 정규화 노선명 인덱스를 만든다.
-        this.routesByNormalizedName = indexRoutes(routes == null ? List.of() : routes);
+        this(routes, normalizer, Map.of(), Map.of(), DEFAULT_MAX_ENDPOINT_DISTANCE_METERS);
     }
 
     /**
-     * 카카오 BUS step 하나를 공식 마스터에 매핑한다.
-     * EXACT 외 상태에서는 잘못된 실시간 보정을 막기 위해 인접 구간 목록을 비워 반환한다.
+     * @param routes 공식 노선별 정류장 순서. 같은 routeId의 지선/패턴도 별도 원소로 보존한다.
+     * @param routeAliasIds 기본 정규화된 외부 노선명 → 공식 routeId 후보 집합
+     * @param stopAliasIds 기본 정규화된 외부 정류장명 → 노선별 공식 stopId 후보 집합
+     * @param maxEndpointDistanceMeters path 끝점과 공식 정류장의 최대 허용거리(m), 0보다 커야 한다.
+     */
+    public BusSegmentMatcher(
+            Collection<BusRouteMaster> routes,
+            TransitNameNormalizer normalizer,
+            Map<String, Set<String>> routeAliasIds,
+            Map<String, Set<String>> stopAliasIds,
+            double maxEndpointDistanceMeters
+    ) {
+        this.normalizer = Objects.requireNonNull(normalizer);
+        if (!Double.isFinite(maxEndpointDistanceMeters) || maxEndpointDistanceMeters <= 0) {
+            throw new IllegalArgumentException("버스 endpoint 허용거리는 0보다 큰 유한값이어야 합니다.");
+        }
+        this.maxEndpointDistanceMeters = maxEndpointDistanceMeters;
+        this.routeAliasIds = normalizedAliasIds(routeAliasIds, true);
+        this.stopAliasIds = normalizedAliasIds(stopAliasIds, false);
+        List<BusRouteMaster> safeRoutes = routes == null ? List.of() : List.copyOf(routes);
+        this.routesByNormalizedName = indexRoutesByName(safeRoutes);
+        this.routesById = indexRoutesById(safeRoutes);
+    }
+
+    /**
+     * BUS step 하나를 매핑한다. EXACT일 때만 공식 승·하차 ID와 인접 segment 목록을 반환한다.
+     * PARTIAL/AMBIGUOUS/UNMAPPED에서는 실패 이유와 후보 수를 보존해 매핑 실패율을 숨기지 않는다.
      */
     public BusMappingResult match(BusMappingRequest request) {
         Objects.requireNonNull(request, "request must not be null");
 
-        // 1단계: 한 step에 여러 vehicles가 올 수 있으므로 모든 노선명을 공식 후보로 확장한다.
-        List<BusRouteMaster> routeCandidates = findRouteCandidates(request.providerRouteNames());
-        if (routeCandidates.isEmpty()) {
+        // 1단계: vehicles.name을 공식 routeId 후보로 바꾼다.
+        // 한 step의 vehicles는 대안 노선 목록일 수 있으므로 서로 다른 routeId를 하나로 합치지 않는다.
+        RouteLookup lookup = findRouteCandidates(request.providerRouteNames());
+        if (lookup.normalizedProviderNames().isEmpty()) {
+            return failed(BusMappingStatus.UNMAPPED, "PROVIDER_VEHICLE_NOT_PROVIDED", 0);
+        }
+        // 대안 중 일부만 공식 마스터에 있으면 현재 마스터 결측을 단일 노선 성공으로 숨기지 않는다.
+        if (lookup.unresolvedProviderCount() > 0 && lookup.normalizedProviderNames().size() > 1) {
+            return failed(BusMappingStatus.PARTIAL,
+                    "PROVIDER_VEHICLE_COVERAGE_INCOMPLETE", lookup.routes().size());
+        }
+        if (lookup.routes().isEmpty()) {
             return failed(BusMappingStatus.UNMAPPED, "ROUTE_NOT_FOUND", 0);
         }
+        // 하나의 카카오 step에 서로 다른 공식 routeId가 있으면 결과는 대안 집합이지 단일 segment다.
+        if (lookup.distinctRouteIds() > 1) {
+            return failed(BusMappingStatus.AMBIGUOUS,
+                    lookup.normalizedProviderNames().size() > 1
+                            ? "MULTIPLE_PROVIDER_VEHICLES"
+                            : "ROUTE_NAME_AMBIGUOUS",
+                    lookup.routes().size());
+        }
 
-        // 2단계: 같은 이름의 정류장이 노선 안에 반복될 수 있어 가능한 승·하차 순번 조합을 모두 만든다.
+        // 2단계: 남은 공식 노선 각각에서 승차→하차 정방향 부분경로를 전부 찾는다.
+        // 동명 정류장과 같은 routeId의 지선이 있을 수 있어 첫 후보를 즉시 확정하지 않는다.
         List<Candidate> candidates = new ArrayList<>();
-        for (BusRouteMaster route : routeCandidates) {
+        for (BusRouteMaster route : lookup.routes()) {
             candidates.addAll(matchStops(route, request));
         }
         if (candidates.isEmpty()) {
-            return partialRouteOnly(routeCandidates, "STOP_OR_ORDER_NOT_FOUND");
+            return partialRouteOnly(lookup.routes(), "STOP_OR_FORWARD_ORDER_NOT_FOUND", 0);
         }
 
-        // 3단계: 중간 정류장 일치율을 우선하고, 결과 재현을 위해 ID와 순번을 후속 정렬 기준으로 둔다.
+        // 3단계: 통과 정류장 전체와 BUS endpoint 좌표가 모두 확인된 후보만 EXACT 풀에 넣는다.
+        // 정렬은 결과와 진단 로그를 재현 가능하게 만들 뿐, 동점 후보를 임의 선택하는 수단이 아니다.
         candidates.sort(Comparator
-                .comparingDouble(Candidate::score).reversed()
+                .comparing((Candidate candidate) -> candidate.geometryStatus() == GeometryStatus.VERIFIED)
+                .reversed()
                 .thenComparing(Comparator.comparingDouble(Candidate::passingRatio).reversed())
                 .thenComparing(candidate -> candidate.route().routeId())
-                .thenComparingInt(Candidate::startIndex)
-                .thenComparingInt(Candidate::endIndex));
+                .thenComparing(Candidate::identity));
 
-        // 4단계: 점수가 사실상 같은 서로 다른 후보가 남으면 절대 첫 번째 후보를 임의 선택하지 않는다.
-        Candidate best = candidates.get(0);
-        long tiedCandidates = candidates.stream()
-                .filter(candidate -> Math.abs(candidate.score() - best.score()) < TIE_EPSILON)
-                .map(Candidate::identity)
-                .distinct()
-                .count();
-        if (tiedCandidates > 1) {
-            return failed(BusMappingStatus.AMBIGUOUS, "MULTIPLE_TOP_CANDIDATES", candidates.size());
+        // 모든 제공 정류장이 공식 부분경로 순서와 맞고 양 끝 좌표까지 검증된 후보만 EXACT 대상이다.
+        List<Candidate> exactCandidates = candidates.stream()
+                .filter(candidate -> candidate.passingRatio() == 1.0)
+                .filter(candidate -> candidate.geometryStatus() == GeometryStatus.VERIFIED)
+                .toList();
+        // routeId뿐 아니라 승차~하차의 전체 stopId 경로가 같아야 동일 후보로 본다.
+        // 같은 노선 번호라도 분기에서 중간 정류장이 다르면 서로 다른 경로이므로 AMBIGUOUS다.
+        long exactIdentities = exactCandidates.stream().map(Candidate::identity).distinct().count();
+        if (exactIdentities > 1) {
+            return failed(BusMappingStatus.AMBIGUOUS,
+                    "MULTIPLE_VERIFIED_PATHS", candidates.size());
+        }
+        if (exactIdentities == 1) {
+            return exact(exactCandidates.get(0), candidates.size());
         }
 
-        // 5단계: 점수, 중간 정류장 비율, 좌표 방향 중 하나라도 부족하면 공식 구간을 발급하지 않는다.
-        if (best.score() < EXACT_SCORE
-                || best.passingRatio() < EXACT_PASSING_RATIO
-                || Boolean.FALSE.equals(best.geometryConsistent())) {
-            return new BusMappingResult(
-                    BusMappingStatus.PARTIAL,
-                    best.route().routeId(),
-                    best.route().routeName(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    round(best.score()),
-                    round(best.passingRatio()),
-                    candidates.size(),
-                    Boolean.FALSE.equals(best.geometryConsistent())
-                            ? "GEOMETRY_DIRECTION_MISMATCH"
-                            : "PASSING_STOPS_NOT_CONFIRMED",
-                    List.of()
-            );
-        }
-
-        // 6단계: 모든 검증을 통과한 유일 후보만 실제 인접 정류장 구간으로 전개한다.
-        return exact(best, candidates.size());
+        return partialRouteOnly(lookup.routes(), failureReason(candidates), candidates.size());
     }
 
-    /** 공식 마스터를 정규화 노선명 → 노선 목록으로 인덱싱한다. */
-    private Map<String, List<BusRouteMaster>> indexRoutes(Collection<BusRouteMaster> routes) {
+    /** 공식 이름에는 provider 별칭을 적용하지 않고 순수 기본 정규화 키만 만든다. */
+    private Map<String, List<BusRouteMaster>> indexRoutesByName(Collection<BusRouteMaster> routes) {
         Map<String, List<BusRouteMaster>> index = new HashMap<>();
-        for (BusRouteMaster route : routes) {
-            if (route == null || route.routeId() == null || route.routeName() == null || route.stops().isEmpty()) {
-                continue;
-            }
-            String normalizedName = normalizer.normalizeRouteName(route.routeName());
-            if (!normalizedName.isEmpty()) {
-                index.computeIfAbsent(normalizedName, ignored -> new ArrayList<>()).add(route);
+        for (BusRouteMaster route : validRoutes(routes)) {
+            String key = normalizer.normalizeRouteName(route.routeName());
+            if (!key.isEmpty()) {
+                index.computeIfAbsent(key, ignored -> new ArrayList<>()).add(route);
             }
         }
         index.replaceAll((key, value) -> List.copyOf(value));
         return Map.copyOf(index);
     }
 
-    /** 카카오가 제시한 여러 탑승 가능 노선에서 중복 route_id를 제거한 공식 후보를 찾는다. */
-    private List<BusRouteMaster> findRouteCandidates(List<String> providerRouteNames) {
-        Set<String> routeIds = new LinkedHashSet<>();
-        List<BusRouteMaster> result = new ArrayList<>();
-        for (String providerName : providerRouteNames) {
-            String normalizedName = normalizer.normalizeRouteName(providerName);
-            for (BusRouteMaster route : routesByNormalizedName.getOrDefault(normalizedName, List.of())) {
-                if (routeIds.add(route.routeId())) {
-                    result.add(route);
-                }
-            }
+    /** 같은 routeId의 지선/서비스 패턴을 버리지 않도록 값은 목록으로 보존한다. */
+    private Map<String, List<BusRouteMaster>> indexRoutesById(Collection<BusRouteMaster> routes) {
+        Map<String, List<BusRouteMaster>> index = new HashMap<>();
+        for (BusRouteMaster route : validRoutes(routes)) {
+            index.computeIfAbsent(route.routeId(), ignored -> new ArrayList<>()).add(route);
         }
-        return result;
+        index.replaceAll((key, value) -> List.copyOf(value));
+        return Map.copyOf(index);
+    }
+
+    /** 최소 두 정류장과 공식 ID·이름을 갖춘 노선만 검색 인덱스에 포함한다. */
+    private List<BusRouteMaster> validRoutes(Collection<BusRouteMaster> routes) {
+        return routes.stream()
+                .filter(Objects::nonNull)
+                .filter(route -> route.routeId() != null && !route.routeId().isBlank())
+                .filter(route -> route.routeName() != null && !route.routeName().isBlank())
+                .filter(route -> route.stops().size() >= 2)
+                .toList();
     }
 
     /**
-     * 공식 노선 하나에서 가능한 모든 정방향 승차·하차 조합을 만든다.
-     * 기본 점수 0.75는 노선명 0.25, 승차명 0.20, 하차명 0.20, 순서 0.10을 모두 통과한 값이며,
-     * 중간 정류장 순차 일치율이 나머지 0.25를 결정한다. 좌표 방향이 반대면 0.10을 감점한다.
+     * 각 provider vehicle을 독립적으로 해석한다. alias가 있으면 canonical ID를 직접 사용하며,
+     * 해당 ID가 마스터에 없을 때 이름 검색으로 fallback하지 않는다.
      */
+    private RouteLookup findRouteCandidates(List<String> providerRouteNames) {
+        List<String> normalizedNames = providerRouteNames.stream()
+                .map(normalizer::normalizeRouteName)
+                .filter(name -> !name.isEmpty())
+                .distinct()
+                .toList();
+        Set<BusRouteMaster> routes = new LinkedHashSet<>();
+        int unresolved = 0;
+        for (String name : normalizedNames) {
+            Set<String> canonicalIds = routeAliasIds.get(name);
+            List<BusRouteMaster> matches = canonicalIds == null
+                    ? routesByNormalizedName.getOrDefault(name, List.of())
+                    : canonicalIds.stream()
+                    .flatMap(id -> routesById.getOrDefault(id, List.of()).stream())
+                    .distinct()
+                    .toList();
+            if (matches.isEmpty()) {
+                unresolved++;
+            } else {
+                routes.addAll(matches);
+            }
+        }
+        long distinctRouteIds = routes.stream().map(BusRouteMaster::routeId).distinct().count();
+        return new RouteLookup(normalizedNames, List.copyOf(routes), unresolved, distinctRouteIds);
+    }
+
+    /** 공식 노선 한 패턴에서 가능한 모든 정방향 승차·하차 조합을 만든다. */
     private List<Candidate> matchStops(BusRouteMaster route, BusMappingRequest request) {
-        String normalizedFrom = normalizer.normalizeStopName(request.fromStopName());
-        String normalizedTo = normalizer.normalizeStopName(request.toStopName());
         List<BusStopMaster> stops = route.stops();
         List<Candidate> result = new ArrayList<>();
-
-        // endIndex를 startIndex 다음부터 탐색하는 것 자체가 승차 순번 < 하차 순번 조건을 강제한다.
         for (int startIndex = 0; startIndex < stops.size(); startIndex++) {
-            if (!normalizer.normalizeStopName(stops.get(startIndex).stopName()).equals(normalizedFrom)) {
+            if (!matchesStop(request.fromStopName(), stops.get(startIndex))) {
                 continue;
             }
             for (int endIndex = startIndex + 1; endIndex < stops.size(); endIndex++) {
-                if (!normalizer.normalizeStopName(stops.get(endIndex).stopName()).equals(normalizedTo)) {
+                if (!matchesStop(request.toStopName(), stops.get(endIndex))) {
                     continue;
                 }
                 double passingRatio = passingMatchRatio(
                         request.passingStopNames(), stops.subList(startIndex, endIndex + 1));
-                Boolean geometryConsistent = geometryConsistent(
+                GeometryStatus geometryStatus = verifyGeometry(
                         request.geometry(), stops.get(startIndex), stops.get(endIndex));
-                double score = 0.75 + (0.25 * passingRatio);
-                if (Boolean.FALSE.equals(geometryConsistent)) {
-                    score -= 0.10;
-                }
                 result.add(new Candidate(
-                        route, startIndex, endIndex, passingRatio, score, geometryConsistent));
+                        route, startIndex, endIndex, passingRatio, geometryStatus));
             }
         }
         return result;
     }
 
-    /**
-     * 카카오 정류장 목록이 공식 구간에서 같은 순서로 등장하는 비율을 계산한다.
-     * 두 포인터 부분수열 비교를 사용하므로 카카오가 일부 중간 정류장을 생략해도 순서가 맞으면 인정하지만,
-     * 순서가 뒤집힌 정류장은 일치로 세지 않는다.
-     */
-    private double passingMatchRatio(List<String> providerNames, List<BusStopMaster> officialStops) {
-        List<String> normalizedProvider = providerNames.stream()
-                .map(normalizer::normalizeStopName)
-                .filter(name -> !name.isEmpty())
-                .toList();
-        // 카카오가 중간 정류장 목록을 주지 않은 경우 이름·순번 검증만으로 판단할 수 있게 중립값을 사용한다.
-        if (normalizedProvider.isEmpty()) {
-            return 1.0;
+    /** 별칭이 있으면 이름이 아니라 공식 stopId를 비교하고, 없을 때만 기본 정규화 이름을 비교한다. */
+    private boolean matchesStop(String providerName, BusStopMaster officialStop) {
+        String normalizedProvider = normalizer.normalizeStopName(providerName);
+        Set<String> aliasIds = stopAliasIds.get(normalizedProvider);
+        if (aliasIds != null) {
+            return aliasIds.contains(officialStop.stopId());
         }
+        return normalizer.normalizeStopName(officialStop.stopName()).equals(normalizedProvider);
+    }
 
-        List<String> normalizedOfficial = officialStops.stream()
-                .map(BusStopMaster::stopName)
-                .map(normalizer::normalizeStopName)
+    /** 제공 정류장들이 공식 구간에서 같은 순서의 부분수열인지 비율로 기록한다. */
+    private double passingMatchRatio(List<String> providerNames, List<BusStopMaster> officialStops) {
+        List<String> usableProviderNames = providerNames.stream()
+                .filter(name -> name != null && !normalizer.normalizeStopName(name).isEmpty())
                 .toList();
+        if (usableProviderNames.isEmpty()) {
+            return 0.0;
+        }
         int matched = 0;
         int officialIndex = 0;
-        for (String providerName : normalizedProvider) {
-            while (officialIndex < normalizedOfficial.size()
-                    && !normalizedOfficial.get(officialIndex).equals(providerName)) {
+        for (String providerName : usableProviderNames) {
+            while (officialIndex < officialStops.size()
+                    && !matchesStop(providerName, officialStops.get(officialIndex))) {
                 officialIndex++;
             }
-            if (officialIndex == normalizedOfficial.size()) {
-                continue;
+            if (officialIndex < officialStops.size()) {
+                matched++;
+                officialIndex++;
             }
-            matched++;
-            officialIndex++;
         }
-        return (double) matched / normalizedProvider.size();
+        return (double) matched / usableProviderNames.size();
     }
 
     /**
-     * 좌표 증거가 있으면 path 첫 점이 승차점에, 마지막 점이 하차점에 더 가까운지 확인한다.
-     * 좌표가 없으면 실패가 아니라 '검증 불가(null)'로 반환해 이름·순서 결과를 유지한다.
+     * path 첫·끝과 공식 승·하차 정류장의 절대 거리와 방향 배정을 함께 검증한다.
+     *
+     * <p>절대거리만 보면 서로 300m 이내인 두 정류장의 역방향 path도 양쪽 150m 반경을
+     * 동시에 통과할 수 있다. 따라서 첫 점은 하차점보다 승차점에, 마지막 점은 승차점보다
+     * 하차점에 명확히 더 가까워야 한다. 중점에 겹치거나 길이가 0인 path처럼 방향을
+     * 증명할 수 없는 입력도 성공으로 추정하지 않는다.</p>
      */
-    private Boolean geometryConsistent(
+    private GeometryStatus verifyGeometry(
             List<Coordinate> geometry,
             BusStopMaster start,
             BusStopMaster end
@@ -230,31 +274,84 @@ public class BusSegmentMatcher {
         if (geometry.size() < 2
                 || start.longitude() == null || start.latitude() == null
                 || end.longitude() == null || end.latitude() == null) {
-            return null;
+            return GeometryStatus.UNAVAILABLE;
         }
-        // 절대 거리가 아니라 어느 끝점에 더 가까운지만 비교하므로 제곱근 계산은 생략해도 결과가 같다.
         Coordinate first = geometry.get(0);
         Coordinate last = geometry.get(geometry.size() - 1);
-        double firstToStart = squaredDistance(first, start.longitude(), start.latitude());
-        double firstToEnd = squaredDistance(first, end.longitude(), end.latitude());
-        double lastToStart = squaredDistance(last, start.longitude(), start.latitude());
-        double lastToEnd = squaredDistance(last, end.longitude(), end.latitude());
-        return firstToStart <= firstToEnd && lastToEnd <= lastToStart;
+        if (!validCoordinate(first.longitude(), first.latitude())
+                || !validCoordinate(last.longitude(), last.latitude())
+                || !validCoordinate(start.longitude(), start.latitude())
+                || !validCoordinate(end.longitude(), end.latitude())) {
+            return GeometryStatus.INVALID;
+        }
+        double startDistance = haversineMeters(
+                first.longitude(), first.latitude(), start.longitude(), start.latitude());
+        double endDistance = haversineMeters(
+                last.longitude(), last.latitude(), end.longitude(), end.latitude());
+        if (startDistance > maxEndpointDistanceMeters || endDistance > maxEndpointDistanceMeters) {
+            return GeometryStatus.ENDPOINT_TOO_FAR;
+        }
+        double firstToEndDistance = haversineMeters(
+                first.longitude(), first.latitude(), end.longitude(), end.latitude());
+        double lastToStartDistance = haversineMeters(
+                last.longitude(), last.latitude(), start.longitude(), start.latitude());
+        // 근거 없이 별도 GPS 여유값을 만들지 않는다. 동률까지 포함해 방향 우위가 없으면 실패한다.
+        if (startDistance >= firstToEndDistance || endDistance >= lastToStartDistance) {
+            return GeometryStatus.DIRECTION_NOT_CONFIRMED;
+        }
+        return GeometryStatus.VERIFIED;
     }
 
-    private double squaredDistance(Coordinate point, double longitude, double latitude) {
-        double longitudeDifference = point.longitude() - longitude;
-        double latitudeDifference = point.latitude() - latitude;
-        return longitudeDifference * longitudeDifference + latitudeDifference * latitudeDifference;
+    private boolean validCoordinate(double longitude, double latitude) {
+        return Double.isFinite(longitude) && Double.isFinite(latitude)
+                && longitude >= -180 && longitude <= 180
+                && latitude >= -90 && latitude <= 90;
     }
 
-    /** 확정한 승차~하차 범위를 A→B, B→C 형태의 공식 인접 구간으로 전개한다. */
+    /** WGS84 두 점 사이 대권거리를 미터로 계산한다. */
+    private double haversineMeters(
+            double firstLongitude,
+            double firstLatitude,
+            double secondLongitude,
+            double secondLatitude
+    ) {
+        double latitudeDelta = Math.toRadians(secondLatitude - firstLatitude);
+        double longitudeDelta = Math.toRadians(secondLongitude - firstLongitude);
+        double firstLatitudeRadians = Math.toRadians(firstLatitude);
+        double secondLatitudeRadians = Math.toRadians(secondLatitude);
+        double a = Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2)
+                + Math.cos(firstLatitudeRadians) * Math.cos(secondLatitudeRadians)
+                * Math.sin(longitudeDelta / 2) * Math.sin(longitudeDelta / 2);
+        return 6_371_000.0 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    /** 후보별 실패 상태를 성공처럼 뭉개지 않고 가장 구체적인 원인으로 분류한다. */
+    private String failureReason(List<Candidate> candidates) {
+        if (candidates.stream().noneMatch(candidate -> candidate.passingRatio() == 1.0)) {
+            return "PASSING_STOPS_NOT_CONFIRMED";
+        }
+        Set<GeometryStatus> statuses = candidates.stream()
+                .filter(candidate -> candidate.passingRatio() == 1.0)
+                .map(Candidate::geometryStatus)
+                .collect(java.util.stream.Collectors.toSet());
+        if (statuses.contains(GeometryStatus.INVALID)) {
+            return "GEOMETRY_INVALID";
+        }
+        if (statuses.contains(GeometryStatus.ENDPOINT_TOO_FAR)) {
+            return "GEOMETRY_ENDPOINT_TOO_FAR";
+        }
+        if (statuses.contains(GeometryStatus.DIRECTION_NOT_CONFIRMED)) {
+            return "GEOMETRY_DIRECTION_NOT_CONFIRMED";
+        }
+        return "GEOMETRY_NOT_AVAILABLE";
+    }
+
+    /** 확정한 공식 부분경로를 A→B, B→C 형태의 인접 구간으로 전개한다. */
     private BusMappingResult exact(Candidate candidate, int candidateCount) {
         List<BusStopMaster> stops = candidate.route().stops();
         BusStopMaster start = stops.get(candidate.startIndex());
         BusStopMaster end = stops.get(candidate.endIndex());
         List<MappedBusSegment> segments = new ArrayList<>();
-        // 임의의 모든 정류장 쌍을 만들지 않고, 공식 목록에서 실제로 이웃한 구간만 생성한다.
         for (int index = candidate.startIndex(); index < candidate.endIndex(); index++) {
             BusStopMaster from = stops.get(index);
             BusStopMaster to = stops.get(index + 1);
@@ -264,73 +361,101 @@ public class BusSegmentMatcher {
                     from.stopId(),
                     to.stopId(),
                     from.sequence(),
-                    to.sequence()
-            ));
+                    to.sequence()));
         }
         return new BusMappingResult(
                 BusMappingStatus.EXACT,
                 candidate.route().routeId(),
                 candidate.route().routeName(),
-                start.stopId(),
-                end.stopId(),
-                start.sequence(),
-                end.sequence(),
-                "FORWARD",
-                round(candidate.score()),
-                round(candidate.passingRatio()),
-                candidateCount,
-                "NONE",
-                segments
-        );
+                start.stopId(), end.stopId(), start.sequence(), end.sequence(), "SEQUENCE_FORWARD",
+                1.0, round(candidate.passingRatio()), candidateCount, "NONE", segments);
     }
 
-    /** 노선은 찾았지만 정류장 ID와 순번을 확정하지 못한 상태를 만든다. */
-    private BusMappingResult partialRouteOnly(List<BusRouteMaster> routes, String reason) {
-        BusRouteMaster onlyRoute = routes.size() == 1 ? routes.get(0) : null;
+    /** PARTIAL에서도 모든 후보가 같은 공식 노선일 때만 그 노선 ID를 진단 정보로 노출한다. */
+    private BusMappingResult partialRouteOnly(
+            List<BusRouteMaster> routes,
+            String reason,
+            int candidateCount
+    ) {
+        BusRouteMaster representative = routes.get(0);
+        boolean sameRoute = routes.stream().allMatch(route ->
+                Objects.equals(route.routeId(), representative.routeId()));
         return new BusMappingResult(
                 BusMappingStatus.PARTIAL,
-                onlyRoute == null ? null : onlyRoute.routeId(),
-                onlyRoute == null ? null : onlyRoute.routeName(),
+                sameRoute ? representative.routeId() : null,
+                sameRoute ? representative.routeName() : null,
                 null, null, null, null, null,
-                0.25,
-                0.0,
-                0,
-                reason,
-                List.of()
-        );
+                0.0, 0.0, candidateCount, reason, List.of());
     }
 
-    /** 공식 노선 미발견 또는 다중 후보 상태처럼 선택 결과를 노출하면 안 되는 실패 결과를 만든다. */
+    /** 공식 ID를 전혀 확정할 수 없는 실패 결과에는 진단값 외 식별자를 넣지 않는다. */
     private BusMappingResult failed(BusMappingStatus status, String reason, int candidateCount) {
         return new BusMappingResult(
-                status,
-                null, null, null, null, null, null, null,
-                0.0,
-                0.0,
-                candidateCount,
-                reason,
-                List.of()
-        );
+                status, null, null, null, null, null, null, null,
+                0.0, 0.0, candidateCount, reason, List.of());
     }
 
-    /** 로그·응답·회귀 테스트에서 점수 표현이 흔들리지 않도록 소수 넷째 자리로 고정한다. */
+    /**
+     * 같은 표기가 노선별 동명 정류장 여러 개를 가리킬 수 있어 alias→단일 ID로 축소하지 않는다.
+     * Matcher는 현재 노선의 stopId와 집합을 비교하므로 다른 노선의 동명 ID는 자연스럽게 제외된다.
+     */
+    private Map<String, Set<String>> normalizedAliasIds(
+            Map<String, Set<String>> aliases,
+            boolean route
+    ) {
+        if (aliases == null || aliases.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Set<String>> result = new HashMap<>();
+        aliases.forEach((alias, canonicalIds) -> {
+            String key = route
+                    ? normalizer.normalizeRouteName(alias)
+                    : normalizer.normalizeStopName(alias);
+            if (key.isEmpty() || canonicalIds == null || canonicalIds.isEmpty()
+                    || canonicalIds.stream().anyMatch(id -> id == null || id.isBlank())) {
+                throw new IllegalArgumentException("버스 별칭 키와 canonical ID는 비어 있을 수 없습니다.");
+            }
+            result.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).addAll(canonicalIds);
+        });
+        result.replaceAll((key, value) -> Set.copyOf(value));
+        return Map.copyOf(result);
+    }
+
     private double round(double value) {
         return Math.round(value * 10_000.0) / 10_000.0;
     }
 
-    /** 외부에 노출하지 않는 후보 증거. identity는 동률 후보가 실제로 다른 공식 구간인지 판별한다. */
+    private enum GeometryStatus {
+        VERIFIED,
+        UNAVAILABLE,
+        INVALID,
+        ENDPOINT_TOO_FAR,
+        DIRECTION_NOT_CONFIRMED
+    }
+
+    /** vehicles 전체를 조회한 결과와 마스터에서 찾지 못한 대안 수를 함께 보존한다. */
+    private record RouteLookup(
+            List<String> normalizedProviderNames,
+            List<BusRouteMaster> routes,
+            int unresolvedProviderCount,
+            long distinctRouteIds
+    ) { }
+
+    /** identity는 실제 출력할 routeId와 전체 인접 stopId 경로를 포함해 지선 후보를 구분한다. */
+    /** 한 공식 노선 패턴 안에서 가능한 승차·하차 부분경로와 검증 근거다. */
     private record Candidate(
             BusRouteMaster route,
             int startIndex,
             int endIndex,
             double passingRatio,
-            double score,
-            Boolean geometryConsistent
+            GeometryStatus geometryStatus
     ) {
         private String identity() {
-            BusStopMaster start = route.stops().get(startIndex);
-            BusStopMaster end = route.stops().get(endIndex);
-            return route.routeId() + ':' + start.stopId() + ':' + end.stopId();
+            String path = route.stops().subList(startIndex, endIndex + 1).stream()
+                    .map(BusStopMaster::stopId)
+                    .reduce((left, right) -> left + '>' + right)
+                    .orElse("");
+            return route.routeId() + ':' + path;
         }
     }
 }

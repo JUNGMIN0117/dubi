@@ -2,22 +2,40 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 import '../domain/auth.dart';
+import '../services/kakao_login_service.dart';
+import '../services/google_login_service.dart';
+import '../services/naver_login_service.dart';
 import 'widgets.dart';
 import 'micro_animations.dart';
 
-class SocialAuthScreen extends StatelessWidget {
+class SocialAuthScreen extends StatefulWidget {
   const SocialAuthScreen({
     super.key,
     required this.provider,
     required this.onAuthenticated,
     required this.repository,
+    this.kakaoLoginService,
+    this.googleLoginService,
+    this.naverLoginService,
   });
   final String provider;
   final VoidCallback onAuthenticated;
   final AuthRepository repository;
+  final KakaoLoginService? kakaoLoginService;
+  final GoogleLoginService? googleLoginService;
+  final NaverLoginService? naverLoginService;
+
+  @override
+  State<SocialAuthScreen> createState() => _SocialAuthScreenState();
+}
+
+class _SocialAuthScreenState extends State<SocialAuthScreen> {
+  bool _loading = false;
+  String? _error;
 
   @override
   Widget build(BuildContext context) {
+    final provider = widget.provider;
     final isKakao = provider == '카카오';
     final isNaver = provider == '네이버';
     final buttonBackground = isKakao
@@ -44,16 +62,24 @@ class SocialAuthScreen extends StatelessWidget {
                   Image.asset('assets/images/ttubee-guide.png', height: 180),
                   const SizedBox(height: 20),
                   Text(
-                    '$provider 계정으로 계속하기',
+                    '$provider 공식 로그인',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '$provider OAuth 앱 키와 Redirect URI가 연결되면\n이 화면에서 공식 인증 화면으로 이동합니다.',
+                    '$provider 공식 로그인 화면에서 인증한 뒤\n뚜비 계정으로 안전하게 로그인합니다.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const Spacer(),
+                  if (_error != null) ...[
+                    Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: DdubiColors.red),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   SizedBox(
                     width: double.infinity,
                     height: 52,
@@ -67,26 +93,18 @@ class SocialAuthScreen extends StatelessWidget {
                               : DdubiColors.border,
                         ),
                       ),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AccountLinkPromptScreen(
-                            provider: provider,
-                            email: 'member@ddubi.app',
-                            repository: repository,
-                            onLinked: onAuthenticated,
-                          ),
-                        ),
-                      ),
+                      onPressed: _loading ? null : _login,
                       child: Text(
-                        '개발용 $provider 인증 완료',
+                        _loading ? '로그인 중...' : '$provider 계정으로 계속하기',
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '실서비스에서는 공식 SDK 인증 성공 후에만 진행돼요.',
+                    isKakao || isNaver
+                        ? '액세스 토큰은 백엔드에서 다시 검증해요.'
+                        : 'ID 토큰은 백엔드에서 다시 검증해요.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -96,6 +114,68 @@ class SocialAuthScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _login() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      switch (widget.provider) {
+        case '카카오':
+          final service = widget.kakaoLoginService;
+          if (service == null) {
+            throw const KakaoLoginException('카카오 로그인 설정을 확인해주세요.');
+          }
+          final accessToken = await service.login(context);
+          await widget.repository.loginWithOAuthToken(
+            provider: 'KAKAO',
+            accessToken: accessToken,
+          );
+          break;
+        case 'Google':
+          final service = widget.googleLoginService;
+          if (service == null) {
+            throw const GoogleLoginException('Google 로그인 설정을 확인해주세요.');
+          }
+          final idToken = await service.login(context);
+          await widget.repository.loginWithOAuthIdToken(
+            provider: 'GOOGLE',
+            idToken: idToken,
+          );
+          break;
+        case '네이버':
+          final service = widget.naverLoginService;
+          if (service == null) {
+            throw const NaverLoginException('네이버 로그인 설정을 확인해주세요.');
+          }
+          final accessToken = await service.login(context);
+          await widget.repository.loginWithOAuthToken(
+            provider: 'NAVER',
+            accessToken: accessToken,
+          );
+          break;
+        default:
+          throw const AuthException(
+            AuthErrorCode.serverError,
+            message: '지원하지 않는 로그인 방식이에요.',
+          );
+      }
+      if (mounted) widget.onAuthenticated();
+    } on KakaoLoginException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } on GoogleLoginException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } on NaverLoginException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } on AuthException catch (error) {
+      if (mounted) {
+        setState(() => _error = error.message ?? '소셜 로그인에 실패했어요.');
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 }
 
@@ -538,8 +618,10 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
         password: password.text,
       );
       if (mounted) widget.onAuthenticated();
-    } on AuthException {
-      if (mounted) setState(() => serverError = '이메일 또는 비밀번호를 확인해주세요.');
+    } on AuthException catch (error) {
+      if (mounted) {
+        setState(() => serverError = error.message ?? '이메일 또는 비밀번호를 확인해주세요.');
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -744,9 +826,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
     } on AuthException catch (error) {
       if (mounted) {
         setState(
-          () => serverError = error.code == AuthErrorCode.emailAlreadyExists
-              ? '이미 사용 중인 이메일이에요.'
-              : '잠시 후 다시 시도해주세요.',
+          () => serverError =
+              error.message ??
+              (error.code == AuthErrorCode.emailAlreadyExists
+                  ? '이미 사용 중인 이메일이에요.'
+                  : '잠시 후 다시 시도해주세요.'),
         );
       }
     } finally {

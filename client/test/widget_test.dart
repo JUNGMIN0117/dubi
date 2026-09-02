@@ -8,6 +8,9 @@ import 'package:ddubi/presentation/auth_screens.dart';
 import 'package:ddubi/presentation/screens.dart';
 import 'package:ddubi/presentation/widgets.dart';
 import 'package:ddubi/providers/app_providers.dart';
+import 'package:ddubi/services/kakao_login_service.dart';
+import 'package:ddubi/services/google_login_service.dart';
+import 'package:ddubi/services/naver_login_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,12 +37,20 @@ void main() {
   });
 
   testWidgets('로그인 화면과 핵심 진입 동작을 표시한다', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
     expect(find.text('뚜비'), findsOneWidget);
     expect(find.textContaining('카카오로 시작하기'), findsOneWidget);
     expect(find.textContaining('네이버로 시작하기'), findsOneWidget);
     expect(find.textContaining('Apple로 시작하기'), findsNothing);
     expect(find.textContaining('이메일로 시작하기'), findsOneWidget);
+    expect(find.byKey(const Key('debugHomeButton')), findsOneWidget);
     await tester.tap(find.textContaining('이메일로 시작하기'));
     await tester.pumpAndSettle();
     expect(find.text('이메일로 로그인'), findsOneWidget);
@@ -68,19 +79,69 @@ void main() {
   });
 
   testWidgets('카카오 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+          kakaoLoginServiceProvider.overrideWithValue(
+            const _FakeKakaoLoginService(),
+          ),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
     await tester.tap(find.textContaining('카카오로 시작하기'));
     await tester.pumpAndSettle();
     expect(find.text('카카오 로그인'), findsOneWidget);
-    expect(find.text('개발용 카카오 인증 완료'), findsOneWidget);
+    expect(find.text('카카오 계정으로 계속하기'), findsOneWidget);
+
+    await tester.tap(find.text('카카오 계정으로 계속하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('다음 중요 일정'), findsOneWidget);
   });
 
   testWidgets('네이버 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+          naverLoginServiceProvider.overrideWithValue(
+            const _FakeNaverLoginService(),
+          ),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
     await tester.tap(find.textContaining('네이버로 시작하기'));
     await tester.pumpAndSettle();
     expect(find.text('네이버 로그인'), findsOneWidget);
-    expect(find.text('개발용 네이버 인증 완료'), findsOneWidget);
+    expect(find.text('네이버 계정으로 계속하기'), findsOneWidget);
+
+    await tester.tap(find.text('네이버 계정으로 계속하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('다음 중요 일정'), findsOneWidget);
+  });
+
+  testWidgets('Google 로그인은 ID 토큰으로 앱 로그인을 완료한다', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+          googleLoginServiceProvider.overrideWithValue(
+            const _FakeGoogleLoginService(),
+          ),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
+    await tester.tap(find.textContaining('Google로 시작하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('Google 로그인'), findsOneWidget);
+    expect(find.text('Google 계정으로 계속하기'), findsOneWidget);
+
+    await tester.tap(find.text('Google 계정으로 계속하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('다음 중요 일정'), findsOneWidget);
   });
 
   testWidgets('기존 이메일 계정을 확인한 뒤 소셜 계정을 연동한다', (tester) async {
@@ -227,6 +288,48 @@ void main() {
     expect(saved.any((schedule) => schedule.departurePlace == '회사'), isTrue);
   });
 
+  testWidgets('반복 일정 화면에서 요일 규칙을 저장해 일정들을 생성한다', (tester) async {
+    final repository = MockDdubiRepository();
+    final container = ProviderContainer(
+      overrides: [ddubiRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    final router = container.read(appRouterProvider);
+    final navigation = router.push<bool>('/schedules/repeat/new');
+    await tester.pumpAndSettle();
+
+    expect(find.text('반복 일정 등록'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('repeatTitleField')), '평일 출근');
+    await tester.enterText(
+      find.byKey(const Key('repeatPlaceField')),
+      'SSAFY 서울캠퍼스',
+    );
+    await tester.enterText(find.byKey(const Key('repeatDepartureField')), '집');
+    await tester.drag(find.byType(ListView).last, const Offset(0, -450));
+    await tester.pumpAndSettle();
+    expect(find.text('반복 요일'), findsOneWidget);
+    expect(find.byKey(const Key('repeatWeekday1')), findsOneWidget);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('반복 일정 저장하기'));
+    await tester.pumpAndSettle();
+
+    expect(await navigation, isTrue);
+    final generated = (await repository.schedules())
+        .where((schedule) => schedule.title == '평일 출근')
+        .toList();
+    expect(generated, isNotEmpty);
+    expect(
+      generated.every((schedule) => schedule.repeatLabel == '평일 반복'),
+      isTrue,
+    );
+    expect(generated.every((schedule) => schedule.date.weekday <= 5), isTrue);
+  });
+
   testWidgets('경로 조건을 입력하면 Mock 추천 결과로 이동한다', (tester) async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
@@ -308,4 +411,25 @@ void main() {
     await tester.scrollUntilVisible(find.text('도착했어요'), 300);
     expect(find.text('도착했어요'), findsOneWidget);
   });
+}
+
+class _FakeKakaoLoginService implements KakaoLoginService {
+  const _FakeKakaoLoginService();
+
+  @override
+  Future<String> login(BuildContext context) async => 'test-kakao-access-token';
+}
+
+class _FakeGoogleLoginService implements GoogleLoginService {
+  const _FakeGoogleLoginService();
+
+  @override
+  Future<String> login(BuildContext context) async => 'test-google-id-token';
+}
+
+class _FakeNaverLoginService implements NaverLoginService {
+  const _FakeNaverLoginService();
+
+  @override
+  Future<String> login(BuildContext context) async => 'test-naver-access-token';
 }

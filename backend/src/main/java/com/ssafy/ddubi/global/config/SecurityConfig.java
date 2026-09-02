@@ -48,6 +48,7 @@ public class SecurityConfig {
             "/api/v1/auth/local/login",
             "/api/v1/auth/oauth",
             "/api/v1/auth/oauth/token",
+            "/api/v1/auth/oauth/id-token",
             "/api/v1/auth/refresh",
             "/actuator/health",
             "/actuator/health/**",

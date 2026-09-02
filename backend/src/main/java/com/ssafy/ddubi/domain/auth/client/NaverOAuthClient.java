@@ -70,6 +70,11 @@ public class NaverOAuthClient extends AbstractOAuthClient {
     }
 
     @Override
+    public OAuthUserInfo fetchUserInfoFromAccessToken(String accessToken) {
+        return fetchProfile(accessToken);
+    }
+
+    @Override
     protected MultiValueMap<String, String> tokenForm(OAuthCodeExchange exchange) {
         if (!StringUtils.hasText(exchange.state())) {
             // 네이버가 거부하기 전에 우리가 먼저 끊는다. 원인이 클라이언트 요청임을 분명히 한다.

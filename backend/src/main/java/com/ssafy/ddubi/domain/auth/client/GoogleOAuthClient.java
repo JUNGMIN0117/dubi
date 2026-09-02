@@ -3,12 +3,15 @@ package com.ssafy.ddubi.domain.auth.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
+import com.ssafy.ddubi.global.exception.BusinessException;
+import com.ssafy.ddubi.global.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 /**
  * 구글 로그인 연동.
@@ -30,11 +33,13 @@ public class GoogleOAuthClient extends AbstractOAuthClient {
     private static final Logger log = LoggerFactory.getLogger(GoogleOAuthClient.class);
 
     private final GoogleOAuthProperties properties;
+    private final RestClient tokenInfoClient;
 
     public GoogleOAuthClient(RestClient.Builder builder, ObjectMapper objectMapper,
                              GoogleOAuthProperties properties) {
         super(builder, objectMapper, properties.authUrl(), properties.apiUrl());
         this.properties = properties;
+        this.tokenInfoClient = builder.clone().baseUrl(properties.authUrl()).build();
     }
 
     @Override
@@ -60,6 +65,36 @@ public class GoogleOAuthClient extends AbstractOAuthClient {
     @Override
     protected String userInfoPath() {
         return "/oauth2/v3/userinfo";
+    }
+
+    @Override
+    public OAuthUserInfo fetchUserInfoFromIdToken(String idToken) {
+        if (!org.springframework.util.StringUtils.hasText(properties.clientId())) {
+            log.error("구글 로그인 설정 누락 — client id 없음");
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+
+        JsonNode body;
+        try {
+            body = tokenInfoClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/tokeninfo")
+                            .queryParam("id_token", idToken)
+                            .build())
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientException e) {
+            log.warn("구글 ID 토큰 검증 실패: {}", e.getClass().getSimpleName());
+            throw unauthorized("ID 토큰이 유효하지 않습니다.");
+        }
+        if (body == null || !properties.clientId().equals(text(body, "aud"))) {
+            log.warn("구글 ID 토큰의 audience 불일치");
+            throw unauthorized("ID 토큰이 유효하지 않습니다.");
+        }
+        OAuthUserInfo info = parseProfile(body);
+        if (!org.springframework.util.StringUtils.hasText(info.providerUserId())) {
+            throw unauthorized("로그인에 실패했습니다.");
+        }
+        return info;
     }
 
     @Override

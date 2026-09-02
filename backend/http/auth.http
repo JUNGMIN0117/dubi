@@ -292,6 +292,16 @@ Content-Type: application/json
   "deviceId": "{{deviceId}}"
 }
 
+### Google 모바일 SDK 로그인 — GOOGLE_CLIENT_ID와 실제 ID 토큰 필요
+POST {{host}}/api/v1/auth/oauth/id-token
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "여기에-Google-ID-토큰",
+  "deviceId": "{{deviceId}}"
+}
+
 ### 구글 소셜 로그인 — GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 필요
 # ⚠️ 콜백 URL 에서 code= 값만 잘라 쓴다. 뒤에 붙은 &scope=... &authuser=... 를 함께
 #    넣으면 제공자가 거절한다.

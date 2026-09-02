@@ -1,9 +1,12 @@
 package com.ssafy.ddubi.domain.auth.service;
 
+import com.ssafy.ddubi.domain.auth.client.GoogleOAuthClient;
+import com.ssafy.ddubi.domain.auth.client.NaverOAuthClient;
 import com.ssafy.ddubi.domain.auth.client.OAuthUserInfo;
 import com.ssafy.ddubi.domain.auth.dto.request.LocalSignupRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
 import com.ssafy.ddubi.domain.auth.repository.UserAuthRepository;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
@@ -13,6 +16,7 @@ import com.ssafy.ddubi.support.IntegrationTestSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +43,10 @@ class AccountMergeIntegrationTest extends IntegrationTestSupport {
     private UserRepository userRepository;
     @Autowired
     private UserAuthRepository userAuthRepository;
+    @MockitoBean
+    private GoogleOAuthClient googleOAuthClient;
+    @MockitoBean
+    private NaverOAuthClient naverOAuthClient;
 
     private void givenKakaoReturns(String providerUserId, String email, String nickname) {
         given(kakaoOAuthClient.fetchUserInfo(any()))
@@ -88,6 +96,42 @@ class AccountMergeIntegrationTest extends IntegrationTestSupport {
         assertThat(result.tokens().user().id()).isEqualTo(existingId);
         assertThat(userAuthRepository.findProvidersByUserId(existingId))
                 .containsExactlyInAnyOrder(AuthProvider.LOCAL, AuthProvider.KAKAO);
+    }
+
+    @Test
+    @DisplayName("모바일 Google ID 토큰 로그인도 기존 이메일 계정에 통합된다")
+    void mergesGoogleIdTokenLoginIntoExistingAccount() {
+        signupLocal(EMAIL, "기존닉네임");
+        Long existingId = userRepository.findByEmail(EMAIL).orElseThrow().getId();
+        given(googleOAuthClient.provider()).willReturn(AuthProvider.GOOGLE);
+        given(googleOAuthClient.fetchUserInfoFromIdToken(any()))
+                .willReturn(new OAuthUserInfo("google-1", EMAIL, "구글닉네임"));
+
+        var result = authService.loginOAuthIdToken(
+                new OAuthIdTokenLoginRequest(AuthProvider.GOOGLE, "google-id-token", "dev-mobile"));
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.tokens().user().id()).isEqualTo(existingId);
+        assertThat(userAuthRepository.findProvidersByUserId(existingId))
+                .containsExactlyInAnyOrder(AuthProvider.LOCAL, AuthProvider.GOOGLE);
+    }
+
+    @Test
+    @DisplayName("모바일 네이버 액세스 토큰 로그인도 기존 이메일 계정에 통합된다")
+    void mergesNaverAccessTokenLoginIntoExistingAccount() {
+        signupLocal(EMAIL, "기존닉네임");
+        Long existingId = userRepository.findByEmail(EMAIL).orElseThrow().getId();
+        given(naverOAuthClient.provider()).willReturn(AuthProvider.NAVER);
+        given(naverOAuthClient.fetchUserInfoFromAccessToken(any()))
+                .willReturn(new OAuthUserInfo("naver-1", EMAIL, "네이버닉네임"));
+
+        var result = authService.loginOAuthToken(
+                new OAuthAccessTokenLoginRequest(AuthProvider.NAVER, "naver-access-token", "dev-mobile"));
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.tokens().user().id()).isEqualTo(existingId);
+        assertThat(userAuthRepository.findProvidersByUserId(existingId))
+                .containsExactlyInAnyOrder(AuthProvider.LOCAL, AuthProvider.NAVER);
     }
 
     @Test

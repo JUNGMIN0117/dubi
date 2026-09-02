@@ -268,6 +268,38 @@ class OAuthClientTest {
         }
 
         @Test
+        @DisplayName("모바일 Google ID 토큰의 audience를 검증하고 사용자 정보를 돌려준다")
+        void fetchUserInfoFromIdToken() {
+            GoogleOAuthClient client = client("google-web-client-id");
+            server.expect(requestTo(AUTH_URL + "/tokeninfo?id_token=google-id-token"))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess("{\"aud\":\"google-web-client-id\",\"sub\":\"google-7\"," +
+                                    "\"email\":\"g@b.com\",\"email_verified\":true,\"name\":\"구글뚜비\"}",
+                            MediaType.APPLICATION_JSON));
+
+            OAuthUserInfo info = client.fetchUserInfoFromIdToken("google-id-token");
+
+            assertThat(info.providerUserId()).isEqualTo("google-7");
+            assertThat(info.email()).isEqualTo("g@b.com");
+            server.verify();
+        }
+
+        @Test
+        @DisplayName("다른 Google OAuth 클라이언트용 ID 토큰은 거절한다")
+        void rejectsIdTokenForAnotherAudience() {
+            GoogleOAuthClient client = client("google-web-client-id");
+            server.expect(requestTo(AUTH_URL + "/tokeninfo?id_token=foreign-token"))
+                    .andRespond(withSuccess("{\"aud\":\"another-client\",\"sub\":\"google-7\"}",
+                            MediaType.APPLICATION_JSON));
+
+            assertThatThrownBy(() -> client.fetchUserInfoFromIdToken("foreign-token"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).errorCode())
+                    .isEqualTo(ErrorCode.UNAUTHORIZED);
+            server.verify();
+        }
+
+        @Test
         @DisplayName("클라이언트 ID 가 없으면 호출하지 않고 500 으로 끊는다")
         void missingClientId() {
             GoogleOAuthClient client = client(null);

@@ -23,10 +23,16 @@ public interface OAuthClient {
 
     /**
      * 모바일 SDK가 발급한 액세스 토큰 → 사용자 정보.
-     * 현재는 카카오 모바일 로그인만 지원하며, 나머지 제공자는 명시적으로 거절한다.
+     * 현재 카카오와 네이버 모바일 로그인을 지원하며, 나머지 제공자는 명시적으로 거절한다.
      */
     default OAuthUserInfo fetchUserInfoFromAccessToken(String accessToken) {
         throw new BusinessException(ErrorCode.INVALID_REQUEST,
                 "해당 소셜 로그인은 모바일 액세스 토큰 방식을 지원하지 않습니다.");
+    }
+
+    /** OpenID Connect 제공자가 발급한 ID 토큰 → 사용자 정보. */
+    default OAuthUserInfo fetchUserInfoFromIdToken(String idToken) {
+        throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                "해당 소셜 로그인은 ID 토큰 방식을 지원하지 않습니다.");
     }
 }

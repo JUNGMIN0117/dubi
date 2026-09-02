@@ -7,6 +7,7 @@ import com.ssafy.ddubi.domain.auth.dto.request.LocalSignupRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LogoutRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthUserResponse;
@@ -189,6 +190,14 @@ public class AuthService {
     public OAuthResult loginOAuthToken(OAuthAccessTokenLoginRequest request) {
         OAuthClient client = clientFor(request.provider());
         OAuthUserInfo info = client.fetchUserInfoFromAccessToken(request.accessToken());
+        return loginOAuthUser(request.provider(), request.deviceId(), info);
+    }
+
+    /** 모바일 OIDC SDK의 ID 토큰 로그인. */
+    @Transactional
+    public OAuthResult loginOAuthIdToken(OAuthIdTokenLoginRequest request) {
+        OAuthClient client = clientFor(request.provider());
+        OAuthUserInfo info = client.fetchUserInfoFromIdToken(request.idToken());
         return loginOAuthUser(request.provider(), request.deviceId(), info);
     }
 

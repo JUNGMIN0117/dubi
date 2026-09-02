@@ -37,6 +37,14 @@ class LoginScreen extends StatelessWidget {
   final NaverLoginService naverLoginService;
   @override
   Widget build(BuildContext c) => Scaffold(
+    floatingActionButton: kDebugMode
+        ? FloatingActionButton.extended(
+            key: const Key('debugHomeButton'),
+            onPressed: () => _completeLogin(c),
+            icon: const Icon(Icons.home_outlined),
+            label: const Text('홈 바로가기'),
+          )
+        : null,
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -271,11 +279,27 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
     if (saved == true && mounted) setState(() {});
   }
 
+  Future<void> _addRepeat(BuildContext context) async {
+    final saved = await context.push<bool>(
+      '/schedules/repeat/new',
+      extra: selectedDate,
+    );
+    if (saved == true && mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext c) => AppPage(
     title: '전체 일정',
     index: widget.go == null ? null : 0,
     onNav: widget.go,
+    actions: [
+      IconButton(
+        key: const Key('addRepeatScheduleButton'),
+        tooltip: '반복 일정 추가',
+        onPressed: () => _addRepeat(c),
+        icon: const Icon(Icons.repeat_rounded),
+      ),
+    ],
     fab: FloatingActionButton(
       onPressed: () => _add(c),
       child: const Icon(Icons.add),
@@ -351,7 +375,11 @@ class _ScheduleListScreenState extends State<ScheduleListScreen> {
                     '${v.time}  ${v.title}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: Text(v.place),
+                  subtitle: Text(
+                    v.repeatLabel == null
+                        ? v.place
+                        : '${v.place} · ${v.repeatLabel}',
+                  ),
                   trailing: Text(v.dateLabel),
                   onTap: () => c.push('/schedules/${v.id}'),
                 ),
@@ -373,6 +401,342 @@ class ScheduleFormScreen extends StatefulWidget {
   final DateTime? initialDate;
   @override
   State<ScheduleFormScreen> createState() => _ScheduleFormScreenState();
+}
+
+class RepeatScheduleFormScreen extends StatefulWidget {
+  const RepeatScheduleFormScreen({
+    super.key,
+    required this.repository,
+    this.initialDate,
+  });
+
+  final DdubiRepository repository;
+  final DateTime? initialDate;
+
+  @override
+  State<RepeatScheduleFormScreen> createState() =>
+      _RepeatScheduleFormScreenState();
+}
+
+class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
+  final formKey = GlobalKey<FormState>();
+  final title = TextEditingController();
+  final place = TextEditingController();
+  final time = TextEditingController(text: '09:00');
+  final departure = TextEditingController(text: '집');
+  final weekdays = <int>{1, 2, 3, 4, 5};
+
+  late DateTime startDate;
+  late DateTime endDate;
+  bool hasEndDate = false;
+  int importance = 1;
+  int transport = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    startDate = widget.initialDate ?? DateTime.now();
+    endDate = startDate.add(const Duration(days: 84));
+  }
+
+  @override
+  void dispose() {
+    title.dispose();
+    place.dispose();
+    time.dispose();
+    departure.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '반복 일정 등록',
+    child: Form(
+      key: formKey,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 760;
+          final basic = _basicCard(context);
+          final repeat = _repeatCard(context);
+          final preference = _preferenceCard(context);
+          return ListView(
+            padding: _pad,
+            children: [
+              const TtubeeGuideCard(
+                '출근이나 수업처럼 정해진 요일에 반복되는 일정을 한 번에 등록해요.',
+                compact: true,
+              ),
+              const SizedBox(height: 16),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: basic),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          repeat,
+                          const SizedBox(height: 16),
+                          preference,
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+              else ...[
+                basic,
+                const SizedBox(height: 12),
+                repeat,
+                const SizedBox(height: 12),
+                preference,
+              ],
+              const SizedBox(height: 16),
+              PrimaryButton('반복 일정 저장하기', onPressed: _save),
+              const SizedBox(height: 24),
+            ],
+          );
+        },
+      ),
+    ),
+  );
+
+  Widget _basicCard(BuildContext context) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('일정 정보', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 16),
+        _field('일정 제목', title, key: const Key('repeatTitleField')),
+        _field(
+          '도착지',
+          place,
+          key: const Key('repeatPlaceField'),
+          icon: Icons.search,
+        ),
+        _field(
+          '반드시 도착해야 하는 시간',
+          time,
+          key: const Key('repeatTimeField'),
+          icon: Icons.schedule,
+          timeField: true,
+        ),
+        _field(
+          '출발지',
+          departure,
+          key: const Key('repeatDepartureField'),
+          icon: Icons.my_location,
+        ),
+      ],
+    ),
+  );
+
+  Widget _repeatCard(BuildContext context) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('반복 설정', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 16),
+        const Text('반복 요일', style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: List.generate(7, (index) {
+            final weekday = index + 1;
+            return FilterChip(
+              key: Key('repeatWeekday$weekday'),
+              label: Text(_weekdays[index]),
+              selected: weekdays.contains(weekday),
+              onSelected: (selected) => setState(() {
+                selected ? weekdays.add(weekday) : weekdays.remove(weekday);
+              }),
+            );
+          }),
+        ),
+        if (weekdays.isEmpty) ...[
+          const SizedBox(height: 8),
+          const Text(
+            '반복할 요일을 하나 이상 선택해주세요.',
+            style: TextStyle(color: DdubiColors.red, fontSize: 12),
+          ),
+        ],
+        const SizedBox(height: 18),
+        _dateRow(
+          context,
+          label: '시작일',
+          date: startDate,
+          key: const Key('repeatStartDateButton'),
+          onPressed: () => _pickStartDate(context),
+        ),
+        const SizedBox(height: 14),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('종료일 설정'),
+          subtitle: Text(hasEndDate ? _fullDate(endDate) : '종료일 없음'),
+          value: hasEndDate,
+          onChanged: (value) => setState(() => hasEndDate = value),
+        ),
+        if (hasEndDate)
+          _dateRow(
+            context,
+            label: '종료일',
+            date: endDate,
+            key: const Key('repeatEndDateButton'),
+            onPressed: () => _pickEndDate(context),
+          ),
+      ],
+    ),
+  );
+
+  Widget _preferenceCard(BuildContext context) => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('이동 설정', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 16),
+        const Text('중요도', style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 0, label: Text('일반')),
+            ButtonSegment(value: 1, label: Text('중요')),
+            ButtonSegment(value: 2, label: Text('절대 지각 불가')),
+          ],
+          selected: {importance},
+          onSelectionChanged: (value) =>
+              setState(() => importance = value.first),
+        ),
+        const SizedBox(height: 18),
+        const Text('교통수단 선호', style: TextStyle(fontWeight: FontWeight.w700)),
+        RadioGroup<int>(
+          groupValue: transport,
+          onChanged: (value) => setState(() => transport = value!),
+          child: Column(
+            children: ['지하철 우선', '버스 + 지하철', '버스 우선']
+                .asMap()
+                .entries
+                .map(
+                  (entry) => RadioListTile<int>(
+                    contentPadding: EdgeInsets.zero,
+                    value: entry.key,
+                    title: Text(entry.value),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    required Key key,
+    IconData? icon,
+    bool timeField = false,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 15),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 6),
+        TextFormField(
+          key: key,
+          controller: controller,
+          keyboardType: timeField ? TextInputType.datetime : TextInputType.text,
+          validator: (value) {
+            final text = (value ?? '').trim();
+            if (text.isEmpty) return '필수 입력 항목입니다.';
+            if (timeField &&
+                !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(text)) {
+              return '시간을 HH:mm 형식으로 입력해주세요.';
+            }
+            return null;
+          },
+          decoration: InputDecoration(
+            suffixIcon: icon == null ? null : Icon(icon),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _dateRow(
+    BuildContext context, {
+    required String label,
+    required DateTime date,
+    required Key key,
+    required VoidCallback onPressed,
+  }) => Row(
+    children: [
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text(_fullDate(date)),
+          ],
+        ),
+      ),
+      OutlinedButton.icon(
+        key: key,
+        onPressed: onPressed,
+        icon: const Icon(Icons.calendar_month_outlined),
+        label: const Text('변경'),
+      ),
+    ],
+  );
+
+  Future<void> _pickStartDate(BuildContext context) async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: startDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      startDate = selected;
+      if (endDate.isBefore(startDate)) {
+        endDate = startDate.add(const Duration(days: 84));
+      }
+    });
+  }
+
+  Future<void> _pickEndDate(BuildContext context) async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: endDate.isBefore(startDate) ? startDate : endDate,
+      firstDate: startDate,
+      lastDate: startDate.add(const Duration(days: 365 * 2)),
+    );
+    if (selected != null && mounted) setState(() => endDate = selected);
+  }
+
+  Future<void> _save() async {
+    setState(() {});
+    if (weekdays.isEmpty || !(formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+    await widget.repository.addRepeatSchedule(
+      RepeatScheduleRule(
+        id: 'repeat-${DateTime.now().microsecondsSinceEpoch}',
+        title: title.text.trim(),
+        place: place.text.trim(),
+        departurePlace: departure.text.trim(),
+        time: time.text.trim(),
+        startDate: startDate,
+        weekdays: {...weekdays},
+        untilDate: hasEndDate ? endDate : null,
+        importance: importance,
+        preferredTransport: transport,
+      ),
+    );
+    if (mounted) context.pop(true);
+  }
 }
 
 class _ScheduleFormScreenState extends State<ScheduleFormScreen> {

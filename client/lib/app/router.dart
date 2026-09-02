@@ -48,6 +48,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 ),
               ),
               GoRoute(
+                path: 'repeat/new',
+                builder: (context, state) => RepeatScheduleFormScreen(
+                  repository: repository,
+                  initialDate: state.extra as DateTime?,
+                ),
+              ),
+              GoRoute(
                 path: ':id',
                 builder: (context, state) => ScheduleDetailScreen(
                   repository: repository,

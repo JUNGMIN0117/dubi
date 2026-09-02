@@ -49,6 +49,7 @@ void main() {
     expect(find.textContaining('네이버로 시작하기'), findsOneWidget);
     expect(find.textContaining('Apple로 시작하기'), findsNothing);
     expect(find.textContaining('이메일로 시작하기'), findsOneWidget);
+    expect(find.byKey(const Key('debugHomeButton')), findsOneWidget);
     await tester.tap(find.textContaining('이메일로 시작하기'));
     await tester.pumpAndSettle();
     expect(find.text('이메일로 로그인'), findsOneWidget);
@@ -232,6 +233,48 @@ void main() {
     expect(saved.any((schedule) => schedule.place == '서울 병원'), isTrue);
     expect(saved.any((schedule) => schedule.time == '14:30'), isTrue);
     expect(saved.any((schedule) => schedule.departurePlace == '회사'), isTrue);
+  });
+
+  testWidgets('반복 일정 화면에서 요일 규칙을 저장해 일정들을 생성한다', (tester) async {
+    final repository = MockDdubiRepository();
+    final container = ProviderContainer(
+      overrides: [ddubiRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(container: container, child: const DdubiApp()),
+    );
+
+    final router = container.read(appRouterProvider);
+    final navigation = router.push<bool>('/schedules/repeat/new');
+    await tester.pumpAndSettle();
+
+    expect(find.text('반복 일정 등록'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('repeatTitleField')), '평일 출근');
+    await tester.enterText(
+      find.byKey(const Key('repeatPlaceField')),
+      'SSAFY 서울캠퍼스',
+    );
+    await tester.enterText(find.byKey(const Key('repeatDepartureField')), '집');
+    await tester.drag(find.byType(ListView).last, const Offset(0, -450));
+    await tester.pumpAndSettle();
+    expect(find.text('반복 요일'), findsOneWidget);
+    expect(find.byKey(const Key('repeatWeekday1')), findsOneWidget);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('반복 일정 저장하기'));
+    await tester.pumpAndSettle();
+
+    expect(await navigation, isTrue);
+    final generated = (await repository.schedules())
+        .where((schedule) => schedule.title == '평일 출근')
+        .toList();
+    expect(generated, isNotEmpty);
+    expect(
+      generated.every((schedule) => schedule.repeatLabel == '평일 반복'),
+      isTrue,
+    );
+    expect(generated.every((schedule) => schedule.date.weekday <= 5), isTrue);
   });
 
   testWidgets('경로 조건을 입력하면 Mock 추천 결과로 이동한다', (tester) async {

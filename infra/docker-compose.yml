@@ -488,6 +488,28 @@ services:
         condition: service_healthy
         required: false
 
+  # 아카이브 재생기 (일회성, 부하 실험·시연용). archiver 이미지 재사용.
+  # 원본 토픽이 아니라 전용 재생 토픽(예: city.replay)으로 발행한다 — 아카이버 재수집 오염 방지.
+  # 예: docker compose --profile replay run --rm replay-producer \
+  #       python -m replay --source-topic city.raw --target-topic city.replay \
+  #       --from-date 2026-08-31 --to-date 2026-09-01 --rate 500 --limit 50000
+  replay-producer:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: archiver/Dockerfile
+    image: ddubi/archiver:${APP_VERSION:-0.1.0}
+    container_name: replay-producer
+    profiles: ["replay"]
+    restart: "no"
+    mem_limit: 512m
+    command: ["sh", "-c", "echo 'usage: docker compose --profile replay run --rm replay-producer python -m replay --help'"]
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      ARCHIVE_URI: ${ARCHIVE_URI}
+      ARCHIVE_HDFS_USER: ${ARCHIVE_HDFS_USER:-hadoop}
+
   # =========================================================================
   # hdfs : NameNode + DataNode1 [서버1], DataNode2 [서버2]
   #  - namenode 는 최초 1회만 포맷하고 이후엔 그대로 기동한다.

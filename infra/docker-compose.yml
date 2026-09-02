@@ -287,15 +287,32 @@ services:
       - "443:443"
     environment:
       TZ: ${TZ:-Asia/Seoul}
-      # templates/*.template 의 ${SERVER1_PRIVATE_IP} 가 기동 시 치환된다 (/internal/ 허용 IP)
+      # templates/*.template 의 ${변수} 가 기동 시 치환된다 (envsubst)
       SERVER1_PRIVATE_IP: ${SERVER1_PRIVATE_IP:-127.0.0.1}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/html:/usr/share/nginx/html:ro
+      - certbot-certs:/etc/letsencrypt:ro      # certbot 이 발급한 인증서를 읽는다
+      - certbot-webroot:/var/www/certbot:ro    # LE 도메인 검증 파일 서빙
     depends_on:
       backend:
         condition: service_healthy
         required: false
+
+  # 인증서 발급·자동 갱신 (Let's Encrypt). 12시간마다 깨어나 만료 30일 전이면 갱신한다.
+  # 최초 발급은 수동 1회: infra/README.md 의 HTTPS 절 참고 (nginx 중지 후 standalone 발급)
+  # 주의: 인증서가 없는 로컬에서는 nginx(443 설정)가 뜨지 못한다 — 로컬 개발은 backend 만 띄우고 8080 직접 호출
+  certbot:
+    <<: *common
+    image: certbot/certbot:${CERTBOT_VERSION:-v2.11.0}
+    container_name: certbot
+    profiles: ["serving"]
+    mem_limit: 128m
+    entrypoint: sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $$!; done'
+    volumes:
+      - certbot-certs:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
 
   # =========================================================================
   # spark : Master + Worker x2 (PySpark 커스텀 이미지)              [서버1]
@@ -595,6 +612,8 @@ networks:
     name: ddubi-network
 
 volumes:
+  certbot-certs:
+  certbot-webroot:
   mysql-data:
   redis-data:
   kafka-data:

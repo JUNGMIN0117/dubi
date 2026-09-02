@@ -78,6 +78,10 @@ abstract interface class AuthRepository {
     required String provider,
     required String accessToken,
   });
+  Future<void> loginWithOAuthIdToken({
+    required String provider,
+    required String idToken,
+  });
   Future<void> signUp({required String email, required String password});
 }
 
@@ -94,6 +98,14 @@ class MockAuthRepository implements AuthRepository {
   Future<void> loginWithOAuthToken({
     required String provider,
     required String accessToken,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+
+  @override
+  Future<void> loginWithOAuthIdToken({
+    required String provider,
+    required String idToken,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }

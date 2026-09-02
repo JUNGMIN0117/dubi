@@ -11,6 +11,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final repository = ref.watch(ddubiRepositoryProvider);
   final authRepository = ref.watch(authRepositoryProvider);
   final kakaoLoginService = ref.watch(kakaoLoginServiceProvider);
+  final googleLoginService = ref.watch(googleLoginServiceProvider);
+  final naverLoginService = ref.watch(naverLoginServiceProvider);
 
   return GoRouter(
     initialLocation: '/login',
@@ -21,6 +23,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => LoginScreen(
           authRepository: authRepository,
           kakaoLoginService: kakaoLoginService,
+          googleLoginService: googleLoginService,
+          naverLoginService: naverLoginService,
         ),
       ),
       ShellRoute(

@@ -55,6 +55,29 @@ class ApiAuthRepository implements AuthRepository {
     }
   }
 
+  @override
+  Future<void> loginWithOAuthIdToken({
+    required String provider,
+    required String idToken,
+  }) async {
+    try {
+      final response = await _api.loginWithOAuthIdToken(
+        provider: provider,
+        idToken: idToken,
+      );
+      _saveSession(response.data);
+    } on DioException catch (error) {
+      throw _mapDioException(error);
+    } on AuthException {
+      rethrow;
+    } on Object {
+      throw const AuthException(
+        AuthErrorCode.serverError,
+        message: '소셜 로그인 처리 중 문제가 발생했습니다.',
+      );
+    }
+  }
+
   void _saveSession(Map<String, dynamic>? body) {
     final data = body?['data'];
     if (body?['success'] != true || data is! Map<String, dynamic>) {

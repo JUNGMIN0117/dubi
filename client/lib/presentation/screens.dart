@@ -9,6 +9,8 @@ import '../data/mock_repository.dart';
 import '../domain/auth.dart';
 import '../domain/models.dart';
 import '../services/kakao_login_service.dart';
+import '../services/google_login_service.dart';
+import '../services/naver_login_service.dart';
 import 'auth_screens.dart';
 import 'micro_animations.dart';
 import 'widgets.dart';
@@ -26,9 +28,13 @@ class LoginScreen extends StatelessWidget {
     super.key,
     required this.authRepository,
     required this.kakaoLoginService,
+    required this.googleLoginService,
+    required this.naverLoginService,
   });
   final AuthRepository authRepository;
   final KakaoLoginService kakaoLoginService;
+  final GoogleLoginService googleLoginService;
+  final NaverLoginService naverLoginService;
   @override
   Widget build(BuildContext c) => Scaffold(
     body: SafeArea(
@@ -119,6 +125,8 @@ class LoginScreen extends StatelessWidget {
       provider: provider,
       repository: authRepository,
       kakaoLoginService: provider == '카카오' ? kakaoLoginService : null,
+      googleLoginService: provider == 'Google' ? googleLoginService : null,
+      naverLoginService: provider == '네이버' ? naverLoginService : null,
       onAuthenticated: () => _completeLogin(c),
     ),
   );

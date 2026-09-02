@@ -7,6 +7,8 @@ import '../domain/models.dart';
 import '../services/auth_api.dart';
 import '../services/api_auth_repository.dart';
 import '../services/kakao_login_service.dart';
+import '../services/google_login_service.dart';
+import '../services/naver_login_service.dart';
 import '../services/recommendation_api.dart';
 import '../services/schedule_api.dart';
 
@@ -23,6 +25,14 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 
 final kakaoLoginServiceProvider = Provider<KakaoLoginService>((ref) {
   return const KakaoSdkLoginService();
+});
+
+final googleLoginServiceProvider = Provider<GoogleLoginService>((ref) {
+  return const GoogleSdkLoginService();
+});
+
+final naverLoginServiceProvider = Provider<NaverLoginService>((ref) {
+  return const NaverSdkLoginService();
 });
 
 final authApiProvider = Provider<AuthApi>((ref) {

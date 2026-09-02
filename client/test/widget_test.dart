@@ -8,6 +8,8 @@ import 'package:ddubi/presentation/auth_screens.dart';
 import 'package:ddubi/presentation/screens.dart';
 import 'package:ddubi/providers/app_providers.dart';
 import 'package:ddubi/services/kakao_login_service.dart';
+import 'package:ddubi/services/google_login_service.dart';
+import 'package:ddubi/services/naver_login_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -97,11 +99,47 @@ void main() {
   });
 
   testWidgets('네이버 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+          naverLoginServiceProvider.overrideWithValue(
+            const _FakeNaverLoginService(),
+          ),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
     await tester.tap(find.textContaining('네이버로 시작하기'));
     await tester.pumpAndSettle();
     expect(find.text('네이버 로그인'), findsOneWidget);
-    expect(find.text('개발용 네이버 인증 완료'), findsOneWidget);
+    expect(find.text('네이버 계정으로 계속하기'), findsOneWidget);
+
+    await tester.tap(find.text('네이버 계정으로 계속하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('다음 중요 일정'), findsOneWidget);
+  });
+
+  testWidgets('Google 로그인은 ID 토큰으로 앱 로그인을 완료한다', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+          googleLoginServiceProvider.overrideWithValue(
+            const _FakeGoogleLoginService(),
+          ),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
+    await tester.tap(find.textContaining('Google로 시작하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('Google 로그인'), findsOneWidget);
+    expect(find.text('Google 계정으로 계속하기'), findsOneWidget);
+
+    await tester.tap(find.text('Google 계정으로 계속하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('다음 중요 일정'), findsOneWidget);
   });
 
   testWidgets('기존 이메일 계정을 확인한 뒤 소셜 계정을 연동한다', (tester) async {
@@ -284,4 +322,18 @@ class _FakeKakaoLoginService implements KakaoLoginService {
 
   @override
   Future<String> login(BuildContext context) async => 'test-kakao-access-token';
+}
+
+class _FakeGoogleLoginService implements GoogleLoginService {
+  const _FakeGoogleLoginService();
+
+  @override
+  Future<String> login(BuildContext context) async => 'test-google-id-token';
+}
+
+class _FakeNaverLoginService implements NaverLoginService {
+  const _FakeNaverLoginService();
+
+  @override
+  Future<String> login(BuildContext context) async => 'test-naver-access-token';
 }

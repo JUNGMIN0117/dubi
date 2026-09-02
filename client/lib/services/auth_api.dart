@@ -49,4 +49,15 @@ class AuthApi {
       },
     );
   }
+
+  Future<Response<Map<String, dynamic>>> loginWithOAuthIdToken({
+    required String provider,
+    required String idToken,
+    String? deviceId,
+  }) {
+    return _dio.post<Map<String, dynamic>>(
+      ApiPaths.oauthIdTokenLogin,
+      data: {'provider': provider, 'idToken': idToken, 'deviceId': ?deviceId},
+    );
+  }
 }

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../domain/auth.dart';
 import '../services/kakao_login_service.dart';
+import '../services/google_login_service.dart';
+import '../services/naver_login_service.dart';
 import 'widgets.dart';
 import 'micro_animations.dart';
 
@@ -13,11 +15,15 @@ class SocialAuthScreen extends StatefulWidget {
     required this.onAuthenticated,
     required this.repository,
     this.kakaoLoginService,
+    this.googleLoginService,
+    this.naverLoginService,
   });
   final String provider;
   final VoidCallback onAuthenticated;
   final AuthRepository repository;
   final KakaoLoginService? kakaoLoginService;
+  final GoogleLoginService? googleLoginService;
+  final NaverLoginService? naverLoginService;
 
   @override
   State<SocialAuthScreen> createState() => _SocialAuthScreenState();
@@ -56,14 +62,12 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
                   Image.asset('assets/images/ttubee-guide.png', height: 180),
                   const SizedBox(height: 20),
                   Text(
-                    isKakao ? '카카오 공식 로그인' : '$provider 계정으로 계속하기',
+                    '$provider 공식 로그인',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    isKakao
-                        ? '카카오 공식 로그인 화면에서 인증한 뒤\n뚜비 계정으로 안전하게 로그인합니다.'
-                        : '$provider OAuth 연동은 다음 작업에서 연결할 예정입니다.',
+                    '$provider 공식 로그인 화면에서 인증한 뒤\n뚜비 계정으로 안전하게 로그인합니다.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
@@ -89,36 +93,18 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
                               : DdubiColors.border,
                         ),
                       ),
-                      onPressed: _loading
-                          ? null
-                          : isKakao
-                          ? _loginWithKakao
-                          : () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => AccountLinkPromptScreen(
-                                  provider: provider,
-                                  email: 'member@ddubi.app',
-                                  repository: widget.repository,
-                                  onLinked: widget.onAuthenticated,
-                                ),
-                              ),
-                            ),
+                      onPressed: _loading ? null : _login,
                       child: Text(
-                        _loading
-                            ? '로그인 중...'
-                            : isKakao
-                            ? '카카오 계정으로 계속하기'
-                            : '개발용 $provider 인증 완료',
+                        _loading ? '로그인 중...' : '$provider 계정으로 계속하기',
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    isKakao
+                    isKakao || isNaver
                         ? '액세스 토큰은 백엔드에서 다시 검증해요.'
-                        : '현재는 화면 확인용 Mock 흐름이에요.',
+                        : 'ID 토큰은 백엔드에서 다시 검증해요.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -130,27 +116,62 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
     );
   }
 
-  Future<void> _loginWithKakao() async {
+  Future<void> _login() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final service = widget.kakaoLoginService;
-      if (service == null) {
-        throw const KakaoLoginException('카카오 로그인 설정을 확인해주세요.');
+      switch (widget.provider) {
+        case '카카오':
+          final service = widget.kakaoLoginService;
+          if (service == null) {
+            throw const KakaoLoginException('카카오 로그인 설정을 확인해주세요.');
+          }
+          final accessToken = await service.login(context);
+          await widget.repository.loginWithOAuthToken(
+            provider: 'KAKAO',
+            accessToken: accessToken,
+          );
+          break;
+        case 'Google':
+          final service = widget.googleLoginService;
+          if (service == null) {
+            throw const GoogleLoginException('Google 로그인 설정을 확인해주세요.');
+          }
+          final idToken = await service.login(context);
+          await widget.repository.loginWithOAuthIdToken(
+            provider: 'GOOGLE',
+            idToken: idToken,
+          );
+          break;
+        case '네이버':
+          final service = widget.naverLoginService;
+          if (service == null) {
+            throw const NaverLoginException('네이버 로그인 설정을 확인해주세요.');
+          }
+          final accessToken = await service.login(context);
+          await widget.repository.loginWithOAuthToken(
+            provider: 'NAVER',
+            accessToken: accessToken,
+          );
+          break;
+        default:
+          throw const AuthException(
+            AuthErrorCode.serverError,
+            message: '지원하지 않는 로그인 방식이에요.',
+          );
       }
-      final accessToken = await service.login(context);
-      await widget.repository.loginWithOAuthToken(
-        provider: 'KAKAO',
-        accessToken: accessToken,
-      );
       if (mounted) widget.onAuthenticated();
     } on KakaoLoginException catch (error) {
       if (mounted) setState(() => _error = error.message);
+    } on GoogleLoginException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } on NaverLoginException catch (error) {
+      if (mounted) setState(() => _error = error.message);
     } on AuthException catch (error) {
       if (mounted) {
-        setState(() => _error = error.message ?? '카카오 로그인에 실패했어요.');
+        setState(() => _error = error.message ?? '소셜 로그인에 실패했어요.');
       }
     } finally {
       if (mounted) setState(() => _loading = false);

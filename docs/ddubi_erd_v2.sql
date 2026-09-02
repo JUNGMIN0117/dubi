@@ -1,7 +1,7 @@
 -- =====================================================================
 -- 뚜비(DDUBI) 서비스 DB 스키마 — ERD_master (구 ERD v2)
 -- =====================================================================
--- 원천: Notion「ERD_master」(mermaid) + 「ERD 설명서」 + backend/CLAUDE.md
+-- 원천: Notion「ERD_master」(mermaid) + 「ERD 설명서」 + backend/BACKEND_CONVENTION.md
 -- 대상: MySQL 8.0+ / InnoDB / utf8mb4
 -- 소유: 백엔드(서비스) — 단, 15~17번 테이블은 분산 담당 소유(아래 주석 참조)
 --
@@ -49,7 +49,7 @@ CREATE TABLE `user` (
 CREATE TABLE user_auth (
     id               BIGINT       NOT NULL AUTO_INCREMENT,
     user_id          BIGINT       NOT NULL,
-    provider         ENUM('LOCAL','KAKAO','GOOGLE','NAVER') NOT NULL COMMENT 'v1 구현 범위는 LOCAL + KAKAO',
+    provider         ENUM('LOCAL','KAKAO','GOOGLE','NAVER') NOT NULL COMMENT '로그인 수단 4종. SSAFY·APPLE 은 팀 합의로 제외',
     provider_user_id VARCHAR(100) NULL     COMMENT '소셜 외부 고유 ID(카카오 회원번호 등). LOCAL은 NULL',
     password_hash    VARCHAR(255) NULL     COMMENT 'bcrypt 해시. LOCAL 행에만 값 존재',
     created_at       DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -188,7 +188,7 @@ CREATE TABLE route_request (
 --    [서비스 계층 보장 1] schedule_id 는 route_request.schedule_id 와 항상 같아야 한다
 --                        (성능 목적 비정규화. DB로 강제 불가)
 --    [서비스 계층 보장 2] 한 schedule 에 is_selected=TRUE 는 최대 1건
---                        (CLAUDE.md 규칙 6. PUT .../selection 트랜잭션에서 나머지 FALSE)
+--                        (BACKEND_CONVENTION.md 규칙 6. PUT .../selection 트랜잭션에서 나머지 FALSE)
 --    ※ 팀 합의 시 아래로 DB 강제 가능(별도 마이그레이션 안건):
 --        selected_schedule_id BIGINT GENERATED ALWAYS AS (IF(is_selected, schedule_id, NULL)) VIRTUAL,
 --        UNIQUE KEY UK_ROUTE_SELECTED (selected_schedule_id)
@@ -339,7 +339,7 @@ CREATE TABLE report_detail (
 CREATE TABLE baseline_serving (
     id             BIGINT      NOT NULL AUTO_INCREMENT,
     segment_id     VARCHAR(50) NOT NULL COMMENT 'route_segment·Redis 와 동일 체계',
-    dow            TINYINT     NOT NULL COMMENT '요일 1~7 (월=1)',
+    dow            TINYINT     NOT NULL COMMENT '요일 1~7. 일=1, 토=7 (Spark dayofweek 기준). Java LocalDate 는 월=1 이므로 변환 필요',
     hour_slot      TINYINT     NOT NULL COMMENT '시간대 0~23',
     weather_bucket ENUM('DRY','RAIN','SNOW') NOT NULL,
     p50            INT         NOT NULL COMMENT '단위: 초',

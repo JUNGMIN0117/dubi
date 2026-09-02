@@ -1,8 +1,14 @@
-# CLAUDE.md — 뚜비(DDUBI) 서비스 백엔드
+# 백엔드 개발 규약 — 뚜비(DDUBI) 서비스 백엔드
 
-> 이 문서는 뚜비 프로젝트의 **서비스 백엔드(Spring Boot)** 개발을 위한 단일 컨텍스트다.
-> Notion 원본 문서(요구사항 명세서 REQ-*, 기능 명세서 F-*, API 명세서 v2.1.1, 시스템 설계)의 확정 내용을 압축했으며,
-> 이 문서와 `docs/ddubi_erd_v2.sql`이 충돌하면 **이 문서가 우선**한다.
+> 뚜비 **서비스 백엔드(Spring Boot)** 의 아키텍처·규약·도메인 규칙을 담은 팀 문서다.
+> Notion 원본(요구사항 명세서 REQ-*, 기능 명세서 F-*, API 명세서 v2.1.1, 시스템 설계)의 확정 내용을 압축했다.
+>
+> **정본 우선순위**
+> 1. Notion「DDUBI_APP_API」 명세서 v2.1.1 — API 계약의 최종 근거
+> 2. 이 문서 — 위 명세서를 코드 관점으로 정리한 것
+> 3. `docs/ddubi_erd_v2.sql` — 스키마 원천. 이 문서의 5장과 충돌하면 SQL 파일이 맞다
+>
+> 개인 AI 협업 지침은 `backend/CLAUDE.md`(git 제외)에 따로 둔다. 팀이 공유할 규약만 여기 적는다.
 
 ---
 
@@ -10,8 +16,8 @@
 
 - **서비스**: 뚜비(뚜벅이 비서) — 일정과 실시간 교통·날씨·행사 데이터를 분석해 "늦지 않을 출발 시각 + 이동 경로"를 선제적으로 알려주는 대중교통 이동 비서 (SSAFY 특화, 도메인: 빅데이터·분산시스템)
 - **핵심 흐름**: 사용자가 "도착 시각(arrive_by)"이 있는 일정을 등록 → 외부 길찾기 API(카카오맵)로 후보 경로 확보 → 후보를 구간(segment) 단위로 분해 → Spark가 계산한 구간별 실시간 상태(Redis) + 평소값(baseline)으로 재평가 → 권장 출발 시각·추천 경로·이유를 응답 → 상황 변화 시 영향 일정만 재계산 후 FCM 알림
-- **내(백엔드 서비스 담당)가 만드는 것**: 회원/인증, 일정/반복일정/장소, 경로·추천, 알림, 도착·리포트, 내부(internal) API 전부 + 분산 계산 결과(Redis/baseline)를 프론트에 서빙하는 계층
-- **내가 만들지 않는 것**: 수집기(collector), Spark 잡, Flutter 클라이언트, 인프라(compose/CI). 단, `baseline_serving`·`detection_log`·`pipeline_config`와 internal API는 **백엔드가 스텁·스키마를 먼저 만들고 분산 담당이 수정**하는 방식이다.
+- **백엔드(서비스) 담당 범위**: 회원/인증, 일정/반복일정/장소, 경로·추천, 알림, 도착·리포트, 내부(internal) API 전부 + 분산 계산 결과(Redis/baseline)를 프론트에 서빙하는 계층
+- **담당 밖**: 수집기(collector), Spark 잡, Flutter 클라이언트, 인프라(compose/CI). 단, `baseline_serving`·`detection_log`·`pipeline_config`와 internal API는 **백엔드가 스텁·스키마를 먼저 만들고 분산 담당이 수정**하는 방식이다.
 
 ## 2. 아키텍처 (확정)
 
@@ -130,7 +136,7 @@ docker compose -f backend/docker-compose.dev.yml up -d
 | 그룹 | 테이블 | 핵심 |
 | --- | --- | --- |
 | 회원 | `user` | email(UNIQUE, 통합 키, NULL 허용), nickname, mobility_note, notify_lead_min(기본 30), briefing_time, is_alarm, history_consented_at |
-| | `user_auth` | user 1:N. provider ENUM(LOCAL,KAKAO,GOOGLE,NAVER — v1 구현은 LOCAL+KAKAO), provider_user_id, password_hash(LOCAL만). UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider) |
+| | `user_auth` | user 1:N. provider ENUM(LOCAL,KAKAO,GOOGLE,NAVER — 4종 모두 구현), provider_user_id, password_hash(LOCAL만). UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider) |
 | | `user_transport_pref` | mode ENUM(BUS,SUBWAY) × preference ENUM(PREFER,AVOID), UNIQUE(user_id,mode) |
 | | `place` | 즐겨찾는 장소. 일정과 FK 관계 없음(스냅샷 원칙) |
 | | `device_token` | fcm_token UNIQUE(토큰 기준 upsert, 마지막 로그인 사용자가 주인), platform, is_valid |
@@ -177,9 +183,15 @@ FK: user 하위 전부 `ON DELETE CASCADE`, notification의 schedule_id/recommen
 ### 6.3 엔드포인트 (internal — 서비스 계정/관리자 전용, 사용자 JWT 거부)
 BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spark 배치, 단위 초), DETECT-001~003 `/internal/detections`, SEG-001 `/internal/segments/states/query`(Redis 일괄 조회), RECALC-001/002 `/internal/recalculations`(202+jobId, 작업 상태는 Redis), OPS/HEALTH `/internal/ops/*`.
 
-### 6.4 명세서 원문 대비 확정 변경사항 (ERD v2 반영 — 코드에서는 아래가 정답)
-1. 회원가입 = `user` + `user_auth(LOCAL, password_hash)` 생성. password_hash는 user 테이블에 없다.
-2. 응답의 `user.provider` 단일값 → `providers: ["LOCAL","KAKAO"]` 배열.
+### 6.4 ERD v2 반영 메모 (⚠️ 정본은 Notion API 명세서다)
+
+> **정본 우선순위: Notion「DDUBI_APP_API」명세서 v2.1.1 > 이 문서.**
+> 아래 항목은 ERD와 맞추려고 적어둔 메모이고, **명세서와 충돌하면 명세서를 따른다.**
+> 실제로 2번이 틀린 것으로 확인되어 되돌렸다(2026-08-31). 나머지 항목도 코드로 옮기기 전에
+> 명세서 원문을 먼저 확인할 것.
+
+1. 회원가입 = `user` + `user_auth(LOCAL, password_hash)` 생성. password_hash는 user 테이블에 없다. *(ERD 사실 — 명세서와 충돌 없음)*
+2. ~~응답의 `user.provider` 단일값 → `providers` 배열~~ → **철회.** 명세서대로 `provider` **단일값**이다. 계정에 LOCAL·KAKAO가 함께 붙어 있어도 **이번 요청에서 인증에 사용한 수단** 하나만 담는다.
 3. `GET /users/me` 응답에서 `withdrawnAt` 제거(컬럼 없음).
 4. `DELETE /users/me` = 하드 삭제 CASCADE. `ALREADY_WITHDRAWN` 개념 없음.
 5. `PATCH /users/me` 지원 필드 확장: nickname, notifyLeadMin(0~180), alarmEnabled, historyConsent, **briefingTime(HH:mm:ss|null), mobilityNote(≤100자), transportPrefs([{mode,preference}])**.
@@ -216,7 +228,3 @@ BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spa
 - collector/sparkjobs/notification/client/infra 폴더의 코드를 수정하지 않는다(인터페이스 제안은 docs/contracts에 문서로).
 - 성능 목표: 단순 조회 p95 500ms, Redis 재평가 2초 내, 초과 시 202 전환.
 
-## 10. 진행 방식
-- 작업 전 해당 Phase의 계획(생성/수정 파일 목록)을 먼저 제시하고 진행한다.
-- 도메인 규칙(4장) 각각에 대응하는 테스트를 작성한다. Testcontainers 기반 통합 테스트 우선.
-- 커밋은 논리 단위로 쪼개고 컨벤션을 지킨다. Jira 번호는 자리표시자 `S15P21E202-XX`로 두면 내가 채운다.

@@ -3,7 +3,7 @@
 -- =====================================================================
 -- 원천: Notion「ERD_master」(mermaid) + 「ERD 설명서」 + backend/BACKEND_CONVENTION.md
 -- 대상: MySQL 8.0+ / InnoDB / utf8mb4
--- 소유: 백엔드(서비스) — 단, 15~17번 테이블은 분산 담당 소유(아래 주석 참조)
+-- 소유: 백엔드(서비스) — 단, 16번 detection_log 는 분산 담당 소유(15~17번 주석 참조)
 --
 -- 이 파일이 Flyway `backend/src/main/resources/db/migration/V1__init.sql`의
 -- 원천이다. 두 파일은 항상 동일해야 하며, 스키마 변경 시
@@ -327,9 +327,12 @@ CREATE TABLE report_detail (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '일정별 이동 결과 (P3)';
 
 -- =====================================================================
--- 파이프라인 서빙 테이블 (15~17)
---   소유: 분산 담당. 백엔드는 스키마 초안만 제공하고 읽기 전용으로 쓴다.
---   배치 적재 주체는 Spark. 스키마 수정 권한은 분산 담당에게 있다.
+-- 파이프라인 서빙 테이블 (15~17) — 소유가 표마다 다르다
+--   15 baseline_serving · 17 pipeline_config: **백엔드(서비스) 소유.**
+--     Spark 는 MySQL 에 직접 쓰지 않고 internal API(방법 2, docs/contracts/
+--     internal-api.yaml)로 업로드하며, 검증·적재·버전 전환은 백엔드가 한다.
+--     (2026-09-01 인프라 합의. 이전에는 분산 담당 소유였다)
+--   16 detection_log: 분산 담당 소유. 감지 주체가 Spark 라 그쪽이 직접 쓴다.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -351,7 +354,7 @@ CREATE TABLE baseline_serving (
     updated_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
     UNIQUE KEY UK_BASELINE_KEY (segment_id, dow, hour_slot, weather_bucket, data_version)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '평소 이동시간 baseline (소유: 분산 담당)';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '평소 이동시간 baseline (소유: 백엔드 — Spark 가 internal API 로 업로드)';
 
 -- ---------------------------------------------------------------------
 -- 16. detection_log — 이상 감지 선행 검증 (REQ-PIP-003, 발표 근거)
@@ -372,13 +375,15 @@ CREATE TABLE detection_log (
 
 -- ---------------------------------------------------------------------
 -- 17. pipeline_config — 파이프라인 설정 포인터 (Key-Value)
---     ※ 공통 규칙(BIGINT AUTO_INCREMENT PK)의 **유일한 예외**.
---       ERD_master 정의를 그대로 따른다(소유: 분산 담당).
---     대표 용도: baseline_active_version = 백엔드가 읽어야 할 data_version
+--     ※ 공통 규칙(BIGINT AUTO_INCREMENT PK)의 **유일한 예외**. ERD_master 정의를 따른다.
+--     소유: 백엔드. internal API 의 activate 가 아래 두 키를 트랜잭션으로 갱신한다.
+--       baseline_active_version    = 서빙 중인 data_version (예: 2026-09-01)
+--       baseline_last_activated_at = 마지막 활성화 시각 — 이 값이 오래되면
+--         confidence 강등·DATA_STALE 알림의 근거가 된다 (internal-api-review 3-2)
 -- ---------------------------------------------------------------------
 CREATE TABLE pipeline_config (
     config_key   VARCHAR(50)  NOT NULL COMMENT '설정 이름 (예: baseline_active_version)',
     config_value VARCHAR(100) NOT NULL COMMENT '설정 값 (예: 2026-08-29)',
     updated_at   DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (config_key)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '파이프라인 설정 포인터 (소유: 분산 담당)';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '파이프라인 설정 포인터 (소유: 백엔드 — internal API 활성화 시점에 갱신)';

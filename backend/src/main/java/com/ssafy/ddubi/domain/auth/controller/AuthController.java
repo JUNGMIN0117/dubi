@@ -6,6 +6,7 @@ import com.ssafy.ddubi.domain.auth.dto.request.LocalLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LocalSignupRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LogoutRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.service.AuthService;
@@ -76,6 +77,17 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthTokenResponse>> loginOAuth(
             @Valid @RequestBody OAuthLoginRequest request) {
         AuthService.OAuthResult result = authService.loginOAuth(request);
+        HttpStatus status = result.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(ApiResponse.success(result.tokens()));
+    }
+
+    @Operation(summary = "모바일 소셜 로그인",
+            description = "모바일 SDK가 발급한 액세스 토큰을 검증한다. 현재 카카오만 지원한다. "
+                    + "기존 계정이면 200, 완전 신규면 201. AUTH-003")
+    @PostMapping("/oauth/token")
+    public ResponseEntity<ApiResponse<AuthTokenResponse>> loginOAuthToken(
+            @Valid @RequestBody OAuthAccessTokenLoginRequest request) {
+        AuthService.OAuthResult result = authService.loginOAuthToken(request);
         HttpStatus status = result.created() ? HttpStatus.CREATED : HttpStatus.OK;
         return ResponseEntity.status(status).body(ApiResponse.success(result.tokens()));
     }

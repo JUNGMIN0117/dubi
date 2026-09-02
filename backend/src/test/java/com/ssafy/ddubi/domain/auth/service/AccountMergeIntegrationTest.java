@@ -3,6 +3,7 @@ package com.ssafy.ddubi.domain.auth.service;
 import com.ssafy.ddubi.domain.auth.client.OAuthUserInfo;
 import com.ssafy.ddubi.domain.auth.dto.request.LocalSignupRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
 import com.ssafy.ddubi.domain.auth.repository.UserAuthRepository;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
@@ -48,6 +49,10 @@ class AccountMergeIntegrationTest extends IntegrationTestSupport {
         return new OAuthLoginRequest(AuthProvider.KAKAO, "code", "http://localhost:3001/oauth/kakao", null, "dev-1");
     }
 
+    private OAuthAccessTokenLoginRequest kakaoTokenLogin() {
+        return new OAuthAccessTokenLoginRequest(AuthProvider.KAKAO, "mobile-access-token", "dev-mobile");
+    }
+
     private void signupLocal(String email, String nickname) {
         givenEmailVerified(email);
         authService.signupLocal(new LocalSignupRequest(email, "password123", nickname, "dev-0"));
@@ -65,6 +70,22 @@ class AccountMergeIntegrationTest extends IntegrationTestSupport {
         assertThat(result.created()).as("기존 계정이므로 201 이 아니라 200").isFalse();
         assertThat(result.tokens().user().id()).isEqualTo(existingId);
         assertThat(userRepository.count()).as("계정은 늘지 않는다").isEqualTo(1);
+        assertThat(userAuthRepository.findProvidersByUserId(existingId))
+                .containsExactlyInAnyOrder(AuthProvider.LOCAL, AuthProvider.KAKAO);
+    }
+
+    @Test
+    @DisplayName("모바일 카카오 토큰 로그인도 기존 이메일 계정에 같은 통합 규칙을 적용한다")
+    void mergesMobileTokenLoginIntoExistingAccount() {
+        signupLocal(EMAIL, "기존닉네임");
+        Long existingId = userRepository.findByEmail(EMAIL).orElseThrow().getId();
+        given(kakaoOAuthClient.fetchUserInfoFromAccessToken(any()))
+                .willReturn(new OAuthUserInfo(KAKAO_ID, EMAIL, "카카오닉네임"));
+
+        var result = authService.loginOAuthToken(kakaoTokenLogin());
+
+        assertThat(result.created()).isFalse();
+        assertThat(result.tokens().user().id()).isEqualTo(existingId);
         assertThat(userAuthRepository.findProvidersByUserId(existingId))
                 .containsExactlyInAnyOrder(AuthProvider.LOCAL, AuthProvider.KAKAO);
     }

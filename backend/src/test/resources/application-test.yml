@@ -27,6 +27,7 @@ ddubi:
         api-url: http://localhost:1
         rest-api-key: test-rest-api-key
         client-secret: ""
+        app-id: "12345"
 
 logging:
   level:

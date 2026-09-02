@@ -111,7 +111,9 @@ services:
 
   kafka-ui:
     <<: *common
-    image: provectuslabs/kafka-ui:${KAFKA_UI_VERSION:-v0.7.2}
+    # provectuslabs 는 개발 중단(v0.7.2 가 마지막)이라 최신 Kafka 의 offset 을 잘못 읽는다.
+    # 후속 프로젝트 kafbat/kafka-ui 로 교체 (Overview·Messages 의 메시지 수·offset 오독 해결)
+    image: ${KAFKA_UI_IMAGE:-ghcr.io/kafbat/kafka-ui}:${KAFKA_UI_VERSION:-v1.1.0}
     container_name: kafka-ui
     profiles: ["core"]
     mem_limit: 512m

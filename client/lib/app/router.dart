@@ -10,6 +10,7 @@ import '../providers/app_providers.dart';
 final appRouterProvider = Provider<GoRouter>((ref) {
   final repository = ref.watch(ddubiRepositoryProvider);
   final authRepository = ref.watch(authRepositoryProvider);
+  final kakaoLoginService = ref.watch(kakaoLoginServiceProvider);
 
   return GoRouter(
     initialLocation: '/login',
@@ -17,8 +18,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/', redirect: (context, state) => '/login'),
       GoRoute(
         path: '/login',
-        builder: (context, state) =>
-            LoginScreen(authRepository: authRepository),
+        builder: (context, state) => LoginScreen(
+          authRepository: authRepository,
+          kakaoLoginService: kakaoLoginService,
+        ),
       ),
       ShellRoute(
         builder: (context, state, child) =>

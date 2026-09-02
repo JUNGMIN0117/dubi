@@ -7,6 +7,7 @@ import 'package:ddubi/domain/models.dart';
 import 'package:ddubi/presentation/auth_screens.dart';
 import 'package:ddubi/presentation/screens.dart';
 import 'package:ddubi/providers/app_providers.dart';
+import 'package:ddubi/services/kakao_login_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,7 +34,14 @@ void main() {
   });
 
   testWidgets('로그인 화면과 핵심 진입 동작을 표시한다', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
     expect(find.text('뚜비'), findsOneWidget);
     expect(find.textContaining('카카오로 시작하기'), findsOneWidget);
     expect(find.textContaining('네이버로 시작하기'), findsOneWidget);
@@ -67,11 +75,25 @@ void main() {
   });
 
   testWidgets('카카오 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(MockAuthRepository()),
+          kakaoLoginServiceProvider.overrideWithValue(
+            const _FakeKakaoLoginService(),
+          ),
+        ],
+        child: const DdubiApp(),
+      ),
+    );
     await tester.tap(find.textContaining('카카오로 시작하기'));
     await tester.pumpAndSettle();
     expect(find.text('카카오 로그인'), findsOneWidget);
-    expect(find.text('개발용 카카오 인증 완료'), findsOneWidget);
+    expect(find.text('카카오 계정으로 계속하기'), findsOneWidget);
+
+    await tester.tap(find.text('카카오 계정으로 계속하기'));
+    await tester.pumpAndSettle();
+    expect(find.text('다음 중요 일정'), findsOneWidget);
   });
 
   testWidgets('네이버 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
@@ -255,4 +277,11 @@ void main() {
     await tester.scrollUntilVisible(find.text('도착했어요'), 300);
     expect(find.text('도착했어요'), findsOneWidget);
   });
+}
+
+class _FakeKakaoLoginService implements KakaoLoginService {
+  const _FakeKakaoLoginService();
+
+  @override
+  Future<String> login(BuildContext context) async => 'test-kakao-access-token';
 }

@@ -34,4 +34,19 @@ class AuthApi {
       },
     );
   }
+
+  Future<Response<Map<String, dynamic>>> loginWithOAuthToken({
+    required String provider,
+    required String accessToken,
+    String? deviceId,
+  }) {
+    return _dio.post<Map<String, dynamic>>(
+      ApiPaths.oauthTokenLogin,
+      data: {
+        'provider': provider,
+        'accessToken': accessToken,
+        'deviceId': ?deviceId,
+      },
+    );
+  }
 }

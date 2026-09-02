@@ -8,6 +8,7 @@ import '../core/theme.dart';
 import '../data/mock_repository.dart';
 import '../domain/auth.dart';
 import '../domain/models.dart';
+import '../services/kakao_login_service.dart';
 import 'auth_screens.dart';
 import 'micro_animations.dart';
 import 'widgets.dart';
@@ -21,8 +22,13 @@ String _fullDate(DateTime date) =>
     '${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')} (${_weekdays[date.weekday - 1]})';
 
 class LoginScreen extends StatelessWidget {
-  const LoginScreen({super.key, required this.authRepository});
+  const LoginScreen({
+    super.key,
+    required this.authRepository,
+    required this.kakaoLoginService,
+  });
   final AuthRepository authRepository;
+  final KakaoLoginService kakaoLoginService;
   @override
   Widget build(BuildContext c) => Scaffold(
     body: SafeArea(
@@ -112,6 +118,7 @@ class LoginScreen extends StatelessWidget {
     SocialAuthScreen(
       provider: provider,
       repository: authRepository,
+      kakaoLoginService: provider == '카카오' ? kakaoLoginService : null,
       onAuthenticated: () => _completeLogin(c),
     ),
   );

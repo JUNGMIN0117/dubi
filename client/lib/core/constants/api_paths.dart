@@ -2,6 +2,7 @@ class ApiPaths {
   ApiPaths._();
 
   static const String login = '/auth/local/login';
+  static const String oauthTokenLogin = '/auth/oauth/token';
   static const String signUp = '/auth/local/signup';
   static const String schedules = '/schedules';
 

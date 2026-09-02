@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val localEnv = Properties().apply {
+    val envFile = rootProject.file("../.env")
+    if (envFile.exists()) {
+        envFile.inputStream().use(::load)
+    }
+}
+
+val kakaoNativeAppKey = System.getenv("KAKAO_NATIVE_APP_KEY")
+    ?: localEnv.getProperty("KAKAO_NATIVE_APP_KEY")
+    ?: "NOT_CONFIGURED"
 
 android {
     namespace = "com.ssafy.ddubi"
@@ -27,6 +40,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["KAKAO_NATIVE_APP_KEY"] = kakaoNativeAppKey
     }
 
     buildTypes {

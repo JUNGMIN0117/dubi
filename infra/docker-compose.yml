@@ -111,7 +111,9 @@ services:
 
   kafka-ui:
     <<: *common
-    image: provectuslabs/kafka-ui:${KAFKA_UI_VERSION:-v0.7.2}
+    # provectuslabs 는 개발 중단(v0.7.2 가 마지막)이라 최신 Kafka 의 offset 을 잘못 읽는다.
+    # 후속 프로젝트 kafbat/kafka-ui 로 교체 (Overview·Messages 의 메시지 수·offset 오독 해결)
+    image: ${KAFKA_UI_IMAGE:-ghcr.io/kafbat/kafka-ui}:${KAFKA_UI_VERSION:-v1.1.0}
     container_name: kafka-ui
     profiles: ["core"]
     mem_limit: 512m
@@ -229,6 +231,90 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+
+  # =========================================================================
+  # serving : Backend(Spring) + Nginx                               [서버2]
+  #  - data 프로필과 함께 띄운다 (mysql·redis 필요): --profile data --profile serving
+  #  - backend 는 첫 기동 때 Flyway 마이그레이션이 스키마를 만든다 (테이블 수동 생성 불필요)
+  #  - 외부 공개는 nginx 의 80/443 뿐. backend 는 호스트 포트를 열지 않는다
+  #  - JWT_SECRET 이 비어 있으면 backend 가 기동을 거부한다 (.env 에 반드시 설정)
+  # =========================================================================
+  backend:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: ddubi/backend:${APP_VERSION:-0.1.0}
+    container_name: backend
+    profiles: ["serving"]
+    mem_limit: 1g
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      BACKEND_PORT: 8080
+      # 같은 도커 네트워크라 서비스 이름으로 접속한다 (서버 IP 불필요)
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-}
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      JAVA_OPTS: -Xms256m -Xmx512m
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/actuator/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s   # 첫 기동은 Flyway 마이그레이션 때문에 오래 걸릴 수 있다
+
+  nginx:
+    <<: *common
+    image: nginx:${NGINX_VERSION:-1.27-alpine}
+    container_name: nginx
+    profiles: ["serving"]
+    mem_limit: 128m
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      # templates/*.template 의 ${변수} 가 기동 시 치환된다 (envsubst)
+      SERVER1_PRIVATE_IP: ${SERVER1_PRIVATE_IP:-127.0.0.1}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+      - certbot-certs:/etc/letsencrypt:ro      # certbot 이 발급한 인증서를 읽는다
+      - certbot-webroot:/var/www/certbot:ro    # LE 도메인 검증 파일 서빙
+    depends_on:
+      backend:
+        condition: service_healthy
+        required: false
+
+  # 인증서 발급·자동 갱신 (Let's Encrypt). 12시간마다 깨어나 만료 30일 전이면 갱신한다.
+  # 최초 발급은 수동 1회: infra/README.md 의 HTTPS 절 참고 (nginx 중지 후 standalone 발급)
+  # 주의: 인증서가 없는 로컬에서는 nginx(443 설정)가 뜨지 못한다 — 로컬 개발은 backend 만 띄우고 8080 직접 호출
+  certbot:
+    <<: *common
+    image: certbot/certbot:${CERTBOT_VERSION:-v2.11.0}
+    container_name: certbot
+    profiles: ["serving"]
+    mem_limit: 128m
+    entrypoint: sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $$!; done'
+    volumes:
+      - certbot-certs:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
 
   # =========================================================================
   # spark : Master + Worker x2 (PySpark 커스텀 이미지)              [서버1]
@@ -357,6 +443,9 @@ services:
       BASELINE_INPUT_URI: ${BASELINE_INPUT_URI}
       BASELINE_OUTPUT_URI: ${BASELINE_OUTPUT_URI}
       BASELINE_WINDOW_DAYS: ${BASELINE_WINDOW_DAYS:-28}
+      # 기준선 업로드 API (비우면 업로드 생략 — 구간 기준선 배치에서 사용 예정)
+      INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       # 스트리밍 실행기(1g x2)가 워커 메모리(1536m x2)를 먼저 쓰고 있어, 배치는 남는 몫(≈500m) 안에서 돈다.
       # 더 크게 잡으면 자원을 못 받아 무한 대기하고, Spark 최소값(450m) 보다 작으면 시작을 거부한다. 워커 메모리를 늘리면 함께 올린다.
       SPARK_EXECUTOR_MEMORY: ${BATCH_EXECUTOR_MEMORY:-480m}
@@ -400,6 +489,28 @@ services:
       kafka:
         condition: service_healthy
         required: false
+
+  # 아카이브 재생기 (일회성, 부하 실험·시연용). archiver 이미지 재사용.
+  # 원본 토픽이 아니라 전용 재생 토픽(예: city.replay)으로 발행한다 — 아카이버 재수집 오염 방지.
+  # 예: docker compose --profile replay run --rm replay-producer \
+  #       python -m replay --source-topic city.raw --target-topic city.replay \
+  #       --from-date 2026-08-31 --to-date 2026-09-01 --rate 500 --limit 50000
+  replay-producer:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: archiver/Dockerfile
+    image: ddubi/archiver:${APP_VERSION:-0.1.0}
+    container_name: replay-producer
+    profiles: ["replay"]
+    restart: "no"
+    mem_limit: 512m
+    command: ["sh", "-c", "echo 'usage: docker compose --profile replay run --rm replay-producer python -m replay --help'"]
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      ARCHIVE_URI: ${ARCHIVE_URI}
+      ARCHIVE_HDFS_USER: ${ARCHIVE_HDFS_USER:-hadoop}
 
   # =========================================================================
   # hdfs : NameNode + DataNode1 [서버1], DataNode2 [서버2]
@@ -525,6 +636,8 @@ networks:
     name: ddubi-network
 
 volumes:
+  certbot-certs:
+  certbot-webroot:
   mysql-data:
   redis-data:
   kafka-data:

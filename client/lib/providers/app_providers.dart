@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/network/dio_provider.dart';
@@ -6,6 +8,7 @@ import '../domain/auth.dart';
 import '../domain/models.dart';
 import '../services/auth_api.dart';
 import '../services/api_auth_repository.dart';
+import '../services/device_token_service.dart';
 import '../services/kakao_login_service.dart';
 import '../services/google_login_service.dart';
 import '../services/naver_login_service.dart';
@@ -20,7 +23,18 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return ApiAuthRepository(
     api: ref.watch(authApiProvider),
     sessionStore: ref.watch(authSessionStoreProvider),
+    deviceTokenService: ref.watch(deviceTokenServiceProvider),
   );
+});
+
+final deviceTokenServiceProvider = Provider<DeviceTokenService>((ref) {
+  final service = DeviceTokenService(
+    ref.watch(dioProvider),
+    ref.watch(authSessionStoreProvider),
+  );
+  unawaited(service.start());
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 final kakaoLoginServiceProvider = Provider<KakaoLoginService>((ref) {

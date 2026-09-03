@@ -28,6 +28,7 @@
           Testcontainers 를 올려 해결한다.
         -->
         <testcontainers.version>1.21.4</testcontainers.version>
+        <apache-poi.version>5.5.1</apache-poi.version>
     </properties>
 
     <dependencies>
@@ -51,6 +52,12 @@
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <!-- 서울 버스 공식 XLSX 마스터를 관리 명령으로 적재할 때만 사용한다. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${apache-poi.version}</version>
         </dependency>
 
         <!-- 스키마 마이그레이션: Flyway (docs/ddubi_erd_v2.sql 이 원천) -->

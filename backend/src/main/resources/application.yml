@@ -170,3 +170,19 @@ ddubi:
         # 네이버 개발자센터 > 애플리케이션 > 내 애플리케이션.
         client-id: ${NAVER_CLIENT_ID:}
         client-secret: ${NAVER_CLIENT_SECRET:}
+  transit-master-import:
+    # 평상시 기동에는 반드시 false다. 관리자가 공식 파일을 새 버전으로 적재할 때만 true로 실행한다.
+    enabled: ${DDUBI_TRANSIT_MASTER_IMPORT_ENABLED:false}
+    data-version: ${DDUBI_TRANSIT_MASTER_DATA_VERSION:}
+    bus-workbook: ${DDUBI_TRANSIT_MASTER_BUS_WORKBOOK:}
+    subway-timetable: ${DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE:}
+    # [{"lineNumber":"2","subwayId":"1002","staticStationCode":"0222","externalCode":"222","realtimeStationId":"1002000222"}] 형식
+    subway-realtime-stations: ${DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS:}
+    # 검증된 카카오 별칭 배열 JSON. verified=true인 행만 Matcher가 사용한다.
+    aliases: ${DDUBI_TRANSIT_MASTER_ALIASES:}
+  transit-mapping:
+    # 다른 Backend replica가 새 ACTIVE 마스터 버전을 발견하는 최대 주기(ms)
+    refresh-interval-ms: ${DDUBI_TRANSIT_MAPPING_REFRESH_INTERVAL_MS:60000}
+    bus:
+      # BUS EXACT 품질 게이트(m). golden corpus의 endpoint 거리 분포로 조정하며 소요시간 가중치가 아니다.
+      max-endpoint-distance-meters: ${DDUBI_BUS_MAPPING_MAX_ENDPOINT_DISTANCE_METERS:150}

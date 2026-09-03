@@ -111,6 +111,17 @@ public class Notification extends BaseTimeEntity {
         return readAt != null;
     }
 
+    /** 발송 성공. 억제 상태로 만들어 둔 행을 SENT 로 올린다. */
+    public void markSent(LocalDateTime sentAt) {
+        this.status = NotificationStatus.SENT;
+        this.sentAt = sentAt;
+    }
+
+    /** 발송 시도했으나 전부 실패. 억제(보내지 않음)와 구분해야 원인 추적이 된다. */
+    public void markFailed() {
+        this.status = NotificationStatus.FAILED;
+    }
+
     /**
      * 읽음 처리. 이미 읽었으면 시각을 덮어쓰지 않는다 —
      * 같은 요청이 두 번 와도 처음 읽은 시각이 유지되어야 하고(멱등),

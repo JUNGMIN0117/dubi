@@ -55,7 +55,7 @@ def parse_envelope(raw: DataFrame) -> DataFrame:
 
 
 def read_events_stream(spark: SparkSession, settings: Settings, topic: str) -> DataFrame:
-    reader = (
+    raw = (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", settings.kafka_bootstrap_servers)
         .option("subscribe", topic)
@@ -63,8 +63,6 @@ def read_events_stream(spark: SparkSession, settings: Settings, topic: str) -> D
         .option("maxOffsetsPerTrigger", settings.max_offsets_per_trigger)
         # 보존 만료·토픽 재생성으로 오프셋이 사라져도 잡을 죽이지 않고 다음 데이터부터 이어간다
         .option("failOnDataLoss", "false")
+        .load()
     )
-    if settings.kafka_group_id:
-        # 기본은 Spark 가 만드는 무작위 그룹 이름. 지정하면 kafka-exporter 랙 지표에 이 이름으로 잡힌다
-        reader = reader.option("kafka.group.id", settings.kafka_group_id)
-    return parse_envelope(reader.load())
+    return parse_envelope(raw)

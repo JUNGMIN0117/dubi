@@ -29,7 +29,6 @@ class Settings:
     checkpoint_dir: str  # 1단계: 로컬 볼륨, 3단계: hdfs://... (값만 바뀐다)
     starting_offsets: str = "latest"  # 체크포인트가 없을 때만 적용된다
     max_offsets_per_trigger: int = 10000  # 트리거(10s)당 최대 소비 건수 = 처리량 상한. 부하 실험 때 올린다
-    kafka_group_id: str | None = None  # 지정하면 kafka-exporter 랙 그래프에 이 이름으로 보인다
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -41,7 +40,6 @@ class Settings:
             checkpoint_dir=_require("SPARK_CHECKPOINT_DIR").rstrip("/"),
             starting_offsets=_env("SPARK_STARTING_OFFSETS", "latest") or "latest",
             max_offsets_per_trigger=int(_env("SPARK_MAX_OFFSETS_PER_TRIGGER", "10000") or "10000"),
-            kafka_group_id=_env("SPARK_KAFKA_GROUP_ID"),
         )
 
     def checkpoint_for(self, job_name: str) -> str:

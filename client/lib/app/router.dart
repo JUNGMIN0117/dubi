@@ -10,10 +10,12 @@ import '../providers/app_providers.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final repository = ref.watch(ddubiRepositoryProvider);
+  final scheduleRepository = ref.watch(scheduleRepositoryProvider);
   final authRepository = ref.watch(authRepositoryProvider);
   final kakaoLoginService = ref.watch(kakaoLoginServiceProvider);
   final googleLoginService = ref.watch(googleLoginServiceProvider);
   final naverLoginService = ref.watch(naverLoginServiceProvider);
+  final placeSearchService = ref.watch(placeApiProvider);
 
   return GoRouter(
     initialLocation: '/login',
@@ -39,12 +41,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/schedules',
             builder: (context, state) =>
-                ScheduleListScreen(repository: repository),
+                ScheduleListScreen(repository: scheduleRepository),
             routes: [
               GoRoute(
                 path: 'new',
                 builder: (context, state) => ScheduleFormScreen(
-                  repository: repository,
+                  repository: scheduleRepository,
+                  placeSearchService: placeSearchService,
                   initialDate: state.extra as DateTime?,
                 ),
               ),
@@ -56,9 +59,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 ),
               ),
               GoRoute(
+                path: ':id/edit',
+                builder: (context, state) => ScheduleEditScreen(
+                  repository: scheduleRepository,
+                  placeSearchService: placeSearchService,
+                  scheduleId: state.pathParameters['id']!,
+                ),
+              ),
+              GoRoute(
                 path: ':id',
                 builder: (context, state) => ScheduleDetailScreen(
-                  repository: repository,
+                  repository: scheduleRepository,
                   scheduleId: state.pathParameters['id']!,
                 ),
               ),

@@ -2,21 +2,31 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/constants/api_constants.dart';
 import '../core/network/dio_provider.dart';
 import '../data/mock_repository.dart';
 import '../domain/auth.dart';
 import '../domain/models.dart';
 import '../services/auth_api.dart';
+import '../services/api_schedule_repository.dart';
 import '../services/api_auth_repository.dart';
 import '../services/device_token_service.dart';
 import '../services/kakao_login_service.dart';
 import '../services/google_login_service.dart';
 import '../services/naver_login_service.dart';
+import '../services/place_api.dart';
 import '../services/recommendation_api.dart';
 import '../services/schedule_api.dart';
 
 final ddubiRepositoryProvider = Provider<DdubiRepository>((ref) {
   return MockDdubiRepository();
+});
+
+final scheduleRepositoryProvider = Provider<ScheduleRepository>((ref) {
+  if (!ApiConstants.useScheduleApi) {
+    return ref.watch(ddubiRepositoryProvider);
+  }
+  return ApiScheduleRepository(ref.watch(scheduleApiProvider));
 });
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
@@ -55,6 +65,13 @@ final authApiProvider = Provider<AuthApi>((ref) {
 
 final scheduleApiProvider = Provider<ScheduleApi>((ref) {
   return ScheduleApi(ref.watch(dioProvider));
+});
+
+final placeApiProvider = Provider<PlaceSearchService>((ref) {
+  if (!ApiConstants.useScheduleApi) {
+    return const MockPlaceSearchService();
+  }
+  return PlaceApi(ref.watch(dioProvider));
 });
 
 final recommendationApiProvider = Provider<RecommendationApi>((ref) {

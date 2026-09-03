@@ -133,10 +133,14 @@ services:
 
   # =========================================================================
   # collect : Python 수집기 x5 (Kafka 발행만 담당)                [서버1]
+  #  - collect          : 구현되어 실제로 돌리는 수집기 (지금은 weather)
+  #  - collect-pending  : 미구현 수집기. 켜면 소스 없음으로 재시작을 반복하므로 배포에서 제외한다.
+  #                       구현이 끝나면 해당 서비스의 profiles 를 ["collect"] 로 바꾼다
   # =========================================================================
   collector-bus:
     <<: *collector
     container_name: collector-bus
+    profiles: ["collect-pending"]   # 미구현
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: bus
@@ -144,6 +148,7 @@ services:
   collector-subway:
     <<: *collector
     container_name: collector-subway
+    profiles: ["collect-pending"]   # 미구현
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: subway
@@ -151,6 +156,7 @@ services:
   collector-traffic:
     <<: *collector
     container_name: collector-traffic
+    profiles: ["collect-pending"]   # 미구현
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: traffic
@@ -165,6 +171,7 @@ services:
   collector-event:
     <<: *collector
     container_name: collector-event
+    profiles: ["collect-pending"]   # 미구현
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: event

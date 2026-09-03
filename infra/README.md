@@ -33,7 +33,8 @@
 |---|---|---|
 | `core` | kafka, kafka-ui | 가장 먼저 띄운다 |
 | `data` | mysql, redis | |
-| `collect` | collector-bus/subway/traffic/weather/event | 지금은 weather만 구현됨 → `collector-weather`만 지정해서 띄운다 |
+| `collect` | collector-weather | 구현된 수집기만. 배포 잡이 이 프로필을 켠다 |
+| `collect-pending` | collector-bus/subway/traffic/event | 미구현. 소스 구현 후 해당 서비스의 profiles 를 `collect` 로 옮긴다 |
 | `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
 | `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather | |

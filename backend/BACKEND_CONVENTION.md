@@ -1,8 +1,14 @@
-# CLAUDE.md — 뚜비(DDUBI) 서비스 백엔드
+# 백엔드 개발 규약 — 뚜비(DDUBI) 서비스 백엔드
 
-> 이 문서는 뚜비 프로젝트의 **서비스 백엔드(Spring Boot)** 개발을 위한 단일 컨텍스트다.
-> Notion 원본 문서(요구사항 명세서 REQ-*, 기능 명세서 F-*, API 명세서 v2.1.1, 시스템 설계)의 확정 내용을 압축했으며,
-> 이 문서와 `docs/ddubi_erd_v2.sql`이 충돌하면 **이 문서가 우선**한다.
+> 뚜비 **서비스 백엔드(Spring Boot)** 의 아키텍처·규약·도메인 규칙을 담은 팀 문서다.
+> Notion 원본(요구사항 명세서 REQ-*, 기능 명세서 F-*, API 명세서 v2.1.1, 시스템 설계)의 확정 내용을 압축했다.
+>
+> **정본 우선순위**
+> 1. Notion「DDUBI_APP_API」 명세서 v2.1.1 — API 계약의 최종 근거
+> 2. 이 문서 — 위 명세서를 코드 관점으로 정리한 것
+> 3. `docs/ddubi_erd_v2.sql` — 스키마 원천. 이 문서의 5장과 충돌하면 SQL 파일이 맞다
+>
+> 개인 AI 협업 지침은 `backend/CLAUDE.md`(git 제외)에 따로 둔다. 팀이 공유할 규약만 여기 적는다.
 
 ---
 
@@ -10,8 +16,8 @@
 
 - **서비스**: 뚜비(뚜벅이 비서) — 일정과 실시간 교통·날씨·행사 데이터를 분석해 "늦지 않을 출발 시각 + 이동 경로"를 선제적으로 알려주는 대중교통 이동 비서 (SSAFY 특화, 도메인: 빅데이터·분산시스템)
 - **핵심 흐름**: 사용자가 "도착 시각(arrive_by)"이 있는 일정을 등록 → 외부 길찾기 API(카카오맵)로 후보 경로 확보 → 후보를 구간(segment) 단위로 분해 → Spark가 계산한 구간별 실시간 상태(Redis) + 평소값(baseline)으로 재평가 → 권장 출발 시각·추천 경로·이유를 응답 → 상황 변화 시 영향 일정만 재계산 후 FCM 알림
-- **내(백엔드 서비스 담당)가 만드는 것**: 회원/인증, 일정/반복일정/장소, 경로·추천, 알림, 도착·리포트, 내부(internal) API 전부 + 분산 계산 결과(Redis/baseline)를 프론트에 서빙하는 계층
-- **내가 만들지 않는 것**: 수집기(collector), Spark 잡, Flutter 클라이언트, 인프라(compose/CI). 단, `baseline_serving`·`detection_log`·`pipeline_config`와 internal API는 **백엔드가 스텁·스키마를 먼저 만들고 분산 담당이 수정**하는 방식이다.
+- **백엔드(서비스) 담당 범위**: 회원/인증, 일정/반복일정/장소, 경로·추천, 알림, 도착·리포트, 내부(internal) API 전부 + 분산 계산 결과(Redis/baseline)를 프론트에 서빙하는 계층
+- **담당 밖**: 수집기(collector), Spark 잡, Flutter 클라이언트, 인프라(compose/CI). 단, `baseline_serving`·`pipeline_config`는 **백엔드 소유**다 — Spark 는 MySQL 직접 쓰기 대신 internal API 로 업로드하고 검증·적재·버전 전환은 백엔드가 한다(2026-09-01 인프라 합의). `detection_log` 만 분산 담당 소유.
 
 ## 2. 아키텍처 (확정)
 
@@ -105,7 +111,7 @@ docker compose -f backend/docker-compose.dev.yml up -d
 
 ### 잊지 말 것
 - `ddl-auto`는 영원히 `validate`다. `update`/`create`로 바꾸지 않는다 — 엔티티가 없는 파이프라인 테이블 3개가 조용히 사라지고 분산 담당과 스키마가 어긋난다.
-- `baseline_serving`·`detection_log`·`pipeline_config`는 분산 담당 소유다. 그쪽이 변경을 요청하면 마이그레이션은 백엔드가 작성하되 내용은 그쪽 확정을 따른다.
+- `baseline_serving`·`pipeline_config`는 백엔드 소유(internal API 로만 적재), `detection_log` 는 분산 담당 소유다. 분산 쪽 변경 요청 시 마이그레이션은 백엔드가 작성하되 내용은 그쪽 확정을 따른다.
 
 ## 4. 도메인 규칙 (DB 제약이 아닌 것은 서비스 계층이 반드시 보장)
 
@@ -117,8 +123,11 @@ docker compose -f backend/docker-compose.dev.yml up -d
 6. **경로 선택 단일성**: 한 schedule에 `route.is_selected=true`는 최대 1건. `PUT .../selection` 트랜잭션에서 나머지를 false로.
 7. **추천은 불변 INSERT**: `recommendation`은 절대 UPDATE하지 않는다. 계산 계기는 `trigger_type`, 중요도→백분위 정책은 NORMAL=p50 / HIGH=p80 / CRITICAL=p95, `reasons` JSON에 후보 비교 요약 포함, `data_checked_at` 필수.
 8. **폴백**: 실시간(Redis) 데이터가 없거나 stale이면 `baseline_serving`으로 계산하고 `confidence=LOW`, 응답에 `fallbackUsed=true`. 아예 계산 불가일 때만 `503 REALTIME_DATA_UNAVAILABLE`.
-9. **알림은 무조건 행 생성**: 발송 억제(알림 끔, DND, 중복)여도 `notification` 행은 만들고 `status=SUPPRESSED`. 재발송 방지는 `suppress_key`(일정·이유·행동 해시) + Redis TTL. `read_at IS NULL` 개수 = 안읽음 뱃지.
-10. **영향 일정 역조회 경로**: 변경 `segment_id` → `route_segment(IX_RSEG_SEGMENT)` → `route(is_selected=true)` → `schedule(status=UPCOMING)`. 별도 schedule_segment 테이블 없음(합의됨).
+9. **알림은 무조건 행 생성**: 발송 억제(알림 끔, 중복)여도 `notification` 행은 만들고 `status=SUPPRESSED`. 재발송 방지는 `suppress_key`(일정·이유·행동 해시) + Redis TTL. `read_at IS NULL` 개수 = 안읽음 뱃지. 알림 on/off 는 사용자 토글(`PATCH /users/me` 의 `alarmEnabled`)이며 **서버가 시간대를 정해 자동 억제하는 DND 는 두지 않는다**(2026-09-03 확정) — 껐다 켜는 것은 사용자가 정하고, 서버가 임의로 막으면 새벽 일정의 출발 알림이 조용히 사라진다.
+10. **영향 일정 역조회 경로 (F-05)**: 변경 `segment_id` → `route_segment_edge(IX_RSEG_EDGE_SEGMENT)` → `route_segment` → `route(is_selected=true)` → `schedule(status=UPCOMING)`. 별도 schedule_segment 테이블 없음(합의됨).
+    - 외부 API 의 이동 step 하나가 **공식 인접구간 여러 개로 전개**되므로 실제 매핑은 `route_segment` 1 : N `route_segment_edge` 다. 실시간 상태도 인접구간 단위로 오므로 역조회 기준은 edge 다.
+    - `route_segment.segment_id` 는 **레거시 단일-edge 호환 열**이다. 신규 저장은 `route_segment_edge` 를 단일 진실로 쓰고, 이 열로 역조회하지 않는다.
+    - `segment_id` 채번은 `CanonicalSegmentIdFactory` 한 곳에서만 한다: `BUS:{routeId}:{fromNodeId}:{toNodeId}` / `SUB:{subwayId}:{fromNodeId}:{toNodeId}`. 서울 공식 마스터 ID 기반이라 동명 정류장·노선명 변경에 흔들리지 않는다. **문자열을 직접 조립하지 말 것** — Collector·Spark 와의 공용 키다.
 11. **일정 삭제(SCH-005)는 soft**: `status=CANCELED`. 물리 삭제는 탈퇴 CASCADE뿐.
 12. **updated_at은 서버가 갱신** (`BaseTimeEntity` + JPA Auditing). DDL의 `ON UPDATE CURRENT_TIMESTAMP`는 안전망일 뿐이고, JPA가 명시값을 쓰므로 발동하지 않는다 — 낙관적 잠금 비교값이라 갱신 주체가 하나여야 한다. `raw_response`(외부 API 원본)는 어떤 사용자 응답에도 노출 금지.
 13. **예약어 주의**: 컬럼은 `trigger_type`, `rank_no`다. `trigger`, `rank`를 새로 만들지 말 것.
@@ -130,7 +139,7 @@ docker compose -f backend/docker-compose.dev.yml up -d
 | 그룹 | 테이블 | 핵심 |
 | --- | --- | --- |
 | 회원 | `user` | email(UNIQUE, 통합 키, NULL 허용), nickname, mobility_note, notify_lead_min(기본 30), briefing_time, is_alarm, history_consented_at |
-| | `user_auth` | user 1:N. provider ENUM(LOCAL,KAKAO,GOOGLE,NAVER — v1 구현은 LOCAL+KAKAO), provider_user_id, password_hash(LOCAL만). UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider) |
+| | `user_auth` | user 1:N. provider ENUM(LOCAL,KAKAO,GOOGLE,NAVER — 4종 모두 구현), provider_user_id, password_hash(LOCAL만). UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider) |
 | | `user_transport_pref` | mode ENUM(BUS,SUBWAY) × preference ENUM(PREFER,AVOID), UNIQUE(user_id,mode) |
 | | `place` | 즐겨찾는 장소. 일정과 FK 관계 없음(스냅샷 원칙) |
 | | `device_token` | fcm_token UNIQUE(토큰 기준 upsert, 마지막 로그인 사용자가 주인), platform, is_valid |
@@ -138,13 +147,14 @@ docker compose -f backend/docker-compose.dev.yml up -d
 | | `schedule` | origin/dest 스냅샷, arrive_by, importance ENUM(NORMAL,HIGH,CRITICAL), consider_last_trip, is_customized, status ENUM(UPCOMING,DONE,CANCELED), UNIQUE(repeat_id,arrive_by) |
 | 경로·추천 | `route_request` | 외부 API 호출 1회당 1행, raw_response JSON 원본 보관 |
 | | `route` | route_request_id FK, base_duration_min, is_selected, rank_no(최신 순위 캐시) |
-| | `route_segment` | seq, mode ENUM(WALK,BUS,SUBWAY), segment_id(파이프라인 공용 키, WALK는 NULL), geometry JSON, UNIQUE(route_id,seq), **INDEX(segment_id)** |
+| | `route_segment` | 외부 API 의 이동 step 단위. seq, mode ENUM(WALK,BUS,SUBWAY), geometry JSON, UNIQUE(route_id,seq). `segment_id` 는 레거시 호환 열 |
+| | `route_segment_edge` | **공식 인접구간 목록 — 신규 저장의 단일 진실.** PK(route_segment_id, edge_seq), segment_id VARCHAR(180), mapping_version, policy_version, **INDEX(segment_id, route_segment_id)** ← F-05 역조회 |
 | | `recommendation` | depart_at, eta, buffer_min, percentile_used, confidence, reasons JSON, segment_status_snapshot JSON, data_checked_at, policy_version, trigger_type |
 | 알림 | `notification` | type ENUM(MORNING_BRIEF, DEPART_SOON, EARLY_DEPART, ROUTE_CHANGE, ON_TIME_UNLIKELY, LAST_TRIP, SCHEDULE_CONFLICT, DATA_STALE), suppress_key, status ENUM(SENT,FAILED,SUPPRESSED), read_at |
 | 리포트 | `report` / `report_detail` | 주간 집계 + 일정별 결과(proxy_* 는 미동의자, actual_arrival은 동의자만). P3 — 스키마만 우선 |
-| 파이프라인(분산 소유) | `baseline_serving` | segment_id×dow(1~7)×hour_slot(0~23)×weather_bucket(DRY,RAIN,SNOW)×data_version UNIQUE. p50/p80/p95 **단위: 초** |
-| | `detection_log` | 이상 감지 vs 공식 공지 선행 검증 |
-| | `pipeline_config` | key-value. `baseline_active_version`으로 활성 버전 스위칭 |
+| 파이프라인 | `baseline_serving` | **소유: 백엔드** (Spark 가 internal API 로 업로드). segment_id×dow(1~7)×hour_slot(0~23)×weather_bucket(DRY,RAIN,SNOW)×data_version UNIQUE. p50/p80/p95 **단위: 초** |
+| | `detection_log` | **소유: 분산 담당.** 이상 감지 vs 공식 공지 선행 검증 |
+| | `pipeline_config` | **소유: 백엔드.** key-value. `baseline_active_version`(활성 버전) + `baseline_last_activated_at`(마지막 활성화 시각 — DATA_STALE·confidence 강등 근거) |
 
 FK: user 하위 전부 `ON DELETE CASCADE`, notification의 schedule_id/recommendation_id는 `SET NULL`, schedule.repeat_id는 `SET NULL`.
 
@@ -177,9 +187,15 @@ FK: user 하위 전부 `ON DELETE CASCADE`, notification의 schedule_id/recommen
 ### 6.3 엔드포인트 (internal — 서비스 계정/관리자 전용, 사용자 JWT 거부)
 BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spark 배치, 단위 초), DETECT-001~003 `/internal/detections`, SEG-001 `/internal/segments/states/query`(Redis 일괄 조회), RECALC-001/002 `/internal/recalculations`(202+jobId, 작업 상태는 Redis), OPS/HEALTH `/internal/ops/*`.
 
-### 6.4 명세서 원문 대비 확정 변경사항 (ERD v2 반영 — 코드에서는 아래가 정답)
-1. 회원가입 = `user` + `user_auth(LOCAL, password_hash)` 생성. password_hash는 user 테이블에 없다.
-2. 응답의 `user.provider` 단일값 → `providers: ["LOCAL","KAKAO"]` 배열.
+### 6.4 ERD v2 반영 메모 (⚠️ 정본은 Notion API 명세서다)
+
+> **정본 우선순위: Notion「DDUBI_APP_API」명세서 v2.1.1 > 이 문서.**
+> 아래 항목은 ERD와 맞추려고 적어둔 메모이고, **명세서와 충돌하면 명세서를 따른다.**
+> 실제로 2번이 틀린 것으로 확인되어 되돌렸다(2026-08-31). 나머지 항목도 코드로 옮기기 전에
+> 명세서 원문을 먼저 확인할 것.
+
+1. 회원가입 = `user` + `user_auth(LOCAL, password_hash)` 생성. password_hash는 user 테이블에 없다. *(ERD 사실 — 명세서와 충돌 없음)*
+2. ~~응답의 `user.provider` 단일값 → `providers` 배열~~ → **철회.** 명세서대로 `provider` **단일값**이다. 계정에 LOCAL·KAKAO가 함께 붙어 있어도 **이번 요청에서 인증에 사용한 수단** 하나만 담는다.
 3. `GET /users/me` 응답에서 `withdrawnAt` 제거(컬럼 없음).
 4. `DELETE /users/me` = 하드 삭제 CASCADE. `ALREADY_WITHDRAWN` 개념 없음.
 5. `PATCH /users/me` 지원 필드 확장: nickname, notifyLeadMin(0~180), alarmEnabled, historyConsent, **briefingTime(HH:mm:ss|null), mobilityNote(≤100자), transportPrefs([{mode,preference}])**.
@@ -199,7 +215,7 @@ BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spa
 | 재계산 작업 상태 | `job:recalc:{jobId}` | 백엔드 |
 | 구간 최신 상태 | `segment:status:{segmentId}` TTL 300s (분산 담당 소유 — 값 스키마·직렬화는 확정 대기. 어댑터 인터페이스로 격리할 것) | Spark |
 | 후보 경로 캐시 | `route:candidates:{originHash}:{destinationHash}` TTL 600s | 백엔드 |
-- segment_id 채번 규칙(예: `BUS:{노선}:{정류장A}:{정류장B}`)은 계약 파일이 진실. **코드에 하드코딩 금지, SegmentIdResolver로 분리.**
+- segment_id 채번은 확정됐다: `BUS:{routeId}:{fromNodeId}:{toNodeId}` / `SUB:{subwayId}:{fromNodeId}:{toNodeId}` (서울 공식 마스터 ID). **문자열 조립은 `CanonicalSegmentIdFactory` 한 곳에서만** 한다 — Collector·Spark 와의 공용 키라 흩어지면 계약이 깨진다.
 
 ## 8. 구현 순서 (이 순서로 진행, 각 Phase 완료 시 테스트 + Swagger 갱신)
 1. **Phase 0 — 골격**: Maven 단일 모듈(`backend/pom.xml` + `mvnw` 래퍼), 패키지 구조(3.1장), 공통 응답 래퍼·오류 처리·requestId 필터, JPA 설정(Auditing·BaseTimeEntity), Flyway V1(ERD_master), `backend/docker-compose.dev.yml`(MySQL·Redis), Actuator/Swagger.
@@ -216,7 +232,3 @@ BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spa
 - collector/sparkjobs/notification/client/infra 폴더의 코드를 수정하지 않는다(인터페이스 제안은 docs/contracts에 문서로).
 - 성능 목표: 단순 조회 p95 500ms, Redis 재평가 2초 내, 초과 시 202 전환.
 
-## 10. 진행 방식
-- 작업 전 해당 Phase의 계획(생성/수정 파일 목록)을 먼저 제시하고 진행한다.
-- 도메인 규칙(4장) 각각에 대응하는 테스트를 작성한다. Testcontainers 기반 통합 테스트 우선.
-- 커밋은 논리 단위로 쪼개고 컨벤션을 지킨다. Jira 번호는 자리표시자 `S15P21E202-XX`로 두면 내가 채운다.

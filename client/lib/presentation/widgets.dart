@@ -620,3 +620,207 @@ class DashboardMetricCard extends StatelessWidget {
     ),
   );
 }
+
+class PlaceSearchField extends StatelessWidget {
+  const PlaceSearchField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.searchService,
+    required this.onSelected,
+  });
+
+  final String label;
+  final PlaceLocation? value;
+  final PlaceSearchService searchService;
+  final ValueChanged<PlaceLocation> onSelected;
+
+  @override
+  Widget build(BuildContext context) => FormField<PlaceLocation>(
+    initialValue: value,
+    validator: (selected) => selected == null ? '$label를 검색해 선택해주세요.' : null,
+    builder: (field) => Padding(
+      padding: const EdgeInsets.only(bottom: 15),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () async {
+              final selected = await showDialog<PlaceLocation>(
+                context: context,
+                builder: (_) => _PlaceSearchDialog(
+                  title: '$label 검색',
+                  searchService: searchService,
+                ),
+              );
+              if (selected == null) return;
+              field.didChange(selected);
+              onSelected(selected);
+            },
+            child: InputDecorator(
+              decoration: InputDecoration(
+                errorText: field.errorText,
+                suffixIcon: const Icon(Icons.search),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value?.name ?? '$label를 검색해주세요.'),
+                  if (value?.address case final address?)
+                    Text(
+                      address,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class TransportPreferenceSelector extends StatelessWidget {
+  const TransportPreferenceSelector({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final TransportPreferenceChoice value;
+  final ValueChanged<TransportPreferenceChoice> onChanged;
+
+  @override
+  Widget build(BuildContext context) => RadioGroup<TransportPreferenceChoice>(
+    groupValue: value,
+    onChanged: (choice) {
+      if (choice != null) onChanged(choice);
+    },
+    child: Column(
+      children: TransportPreferenceChoice.values
+          .map(
+            (choice) => RadioListTile<TransportPreferenceChoice>(
+              key: Key('transportPreference-${choice.name}'),
+              contentPadding: EdgeInsets.zero,
+              value: choice,
+              title: Text(choice.label),
+            ),
+          )
+          .toList(growable: false),
+    ),
+  );
+}
+
+class _PlaceSearchDialog extends StatefulWidget {
+  const _PlaceSearchDialog({required this.title, required this.searchService});
+
+  final String title;
+  final PlaceSearchService searchService;
+
+  @override
+  State<_PlaceSearchDialog> createState() => _PlaceSearchDialogState();
+}
+
+class _PlaceSearchDialogState extends State<_PlaceSearchDialog> {
+  final _query = TextEditingController();
+  List<PlaceLocation> _results = const [];
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final query = _query.text.trim();
+    if (query.isEmpty || _loading) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final results = await widget.searchService.search(query);
+      if (!mounted) return;
+      setState(() {
+        _results = results;
+        if (results.isEmpty) _error = '서울 안에서 검색 결과를 찾지 못했어요.';
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() => _error = '장소 검색에 실패했어요. 잠시 후 다시 시도해주세요.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final height = MediaQuery.sizeOf(context).height * .55;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 520,
+        height: height.clamp(300, 480),
+        child: Column(
+          children: [
+            TextField(
+              key: const Key('placeSearchQuery'),
+              controller: _query,
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _search(),
+              decoration: InputDecoration(
+                hintText: '예: 잠실야구장',
+                suffixIcon: IconButton(
+                  key: const Key('placeSearchButton'),
+                  onPressed: _search,
+                  icon: const Icon(Icons.search),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_loading) const LinearProgressIndicator(),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(_error!, textAlign: TextAlign.center),
+              ),
+            Expanded(
+              child: ListView.separated(
+                itemCount: _results.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final place = _results[index];
+                  return ListTile(
+                    key: Key('placeSearchResult$index'),
+                    leading: const Icon(Icons.place_outlined),
+                    title: Text(place.name),
+                    subtitle: Text(place.address ?? '주소 정보 없음'),
+                    onTap: () => Navigator.pop(context, place),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('닫기'),
+        ),
+      ],
+    );
+  }
+}

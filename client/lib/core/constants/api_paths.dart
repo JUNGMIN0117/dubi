@@ -6,6 +6,7 @@ class ApiPaths {
   static const String oauthIdTokenLogin = '/auth/oauth/id-token';
   static const String signUp = '/auth/local/signup';
   static const String schedules = '/schedules';
+  static const String deviceToken = '/devices/token';
 
   static String schedule(String id) => '$schedules/$id';
   static String scheduleRecommendations(String scheduleId) =>

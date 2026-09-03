@@ -111,28 +111,33 @@ public abstract class AbstractOAuthClient implements OAuthClient {
         return body.path("access_token").asText();
     }
 
-    private OAuthUserInfo fetchProfile(String accessToken) {
-        JsonNode body;
-        try {
-            body = apiClient.get()
-                    .uri(userInfoPath())
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-                    .retrieve()
-                    .body(JsonNode.class);
-        } catch (RestClientException e) {
-            log.warn("{} 사용자 조회 실패: {}", displayName(), e.getClass().getSimpleName());
-            throw unauthorized("로그인에 실패했습니다.");
-        }
+    protected final OAuthUserInfo fetchProfile(String accessToken) {
+        JsonNode body = fetchApiResource(userInfoPath(), accessToken, "사용자 조회");
 
-        if (body == null) {
-            throw unauthorized("로그인에 실패했습니다.");
-        }
         OAuthUserInfo info = parseProfile(body);
         if (info == null || !StringUtils.hasText(info.providerUserId())) {
             log.warn("{} 사용자 조회 응답에 고유 ID 가 없음", displayName());
             throw unauthorized("로그인에 실패했습니다.");
         }
         return info;
+    }
+
+    /** 제공자 API를 Bearer 토큰으로 호출하고 공통 오류 형식으로 변환한다. */
+    protected final JsonNode fetchApiResource(String path, String accessToken, String action) {
+        try {
+            JsonNode body = apiClient.get()
+                    .uri(path)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (body == null) {
+                throw unauthorized("로그인에 실패했습니다.");
+            }
+            return body;
+        } catch (RestClientException e) {
+            log.warn("{} {} 실패: {}", displayName(), action, e.getClass().getSimpleName());
+            throw unauthorized("로그인에 실패했습니다.");
+        }
     }
 
     private String parseError(HttpStatusCodeException e) {

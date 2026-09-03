@@ -9,12 +9,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * restApiKey 는 길찾기와 같은 값이지만(같은 앱), 설정 클래스는 도메인별로 나눈다.
  *
  * @param clientSecret 콘솔에서 켰을 때만 값이 있다. 비어 있으면 토큰 교환에 보내지 않는다
+ * @param appId 카카오 앱의 숫자 ID. 모바일 SDK 토큰이 같은 앱에서 발급됐는지 검증한다
  */
 @ConfigurationProperties(prefix = "ddubi.external.kakao.oauth")
 public record KakaoOAuthProperties(
         String authUrl,
         String apiUrl,
         String restApiKey,
-        String clientSecret
+        String clientSecret,
+        String appId
 ) {
 }

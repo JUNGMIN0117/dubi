@@ -152,6 +152,8 @@ ddubi:
         rest-api-key: ${KAKAO_REST_API_KEY:}
         # 콘솔 > 카카오 로그인 > 보안 에서 켰을 때만 필요하다. 안 켰으면 비워둔다.
         client-secret: ${KAKAO_CLIENT_SECRET:}
+        # 모바일 SDK 액세스 토큰이 같은 카카오 앱에서 발급됐는지 검증할 숫자 앱 ID.
+        app-id: ${KAKAO_APP_ID:}
     google:
       oauth:
         # 토큰 교환과 사용자 조회의 호스트가 다르다.

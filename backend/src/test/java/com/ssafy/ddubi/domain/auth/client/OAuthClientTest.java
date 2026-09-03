@@ -50,9 +50,13 @@ class OAuthClientTest {
     class Kakao {
 
         private KakaoOAuthClient client(String restApiKey, String clientSecret) {
+            return client(restApiKey, clientSecret, "12345");
+        }
+
+        private KakaoOAuthClient client(String restApiKey, String clientSecret, String appId) {
             setUpServer();
             return new KakaoOAuthClient(builder, objectMapper,
-                    new KakaoOAuthProperties(AUTH_URL, API_URL, restApiKey, clientSecret));
+                    new KakaoOAuthProperties(AUTH_URL, API_URL, restApiKey, clientSecret, appId));
         }
 
         @Test
@@ -152,6 +156,52 @@ class OAuthClientTest {
                     .extracting(e -> ((BusinessException) e).errorCode())
                     .isEqualTo(ErrorCode.UNAUTHORIZED);
         }
+
+        @Test
+        @DisplayName("모바일 액세스 토큰의 앱 ID를 확인한 뒤 사용자 정보를 조회한다")
+        void fetchUserInfoFromAccessToken() {
+            KakaoOAuthClient client = client("kakao-key", null);
+            server.expect(requestTo(API_URL + "/v1/user/access_token_info"))
+                    .andExpect(header("Authorization", "Bearer mobile-at"))
+                    .andRespond(withSuccess("{\"app_id\":12345}", MediaType.APPLICATION_JSON));
+            server.expect(requestTo(API_URL + "/v2/user/me"))
+                    .andExpect(header("Authorization", "Bearer mobile-at"))
+                    .andRespond(withSuccess("{\"id\":77,\"kakao_account\":{\"email\":\"m@b.com\"," +
+                                    "\"is_email_verified\":true,\"profile\":{\"nickname\":\"모바일뚜비\"}}}",
+                            MediaType.APPLICATION_JSON));
+
+            OAuthUserInfo info = client.fetchUserInfoFromAccessToken("mobile-at");
+
+            assertThat(info.providerUserId()).isEqualTo("77");
+            assertThat(info.email()).isEqualTo("m@b.com");
+            server.verify();
+        }
+
+        @Test
+        @DisplayName("다른 카카오 앱에서 발급된 액세스 토큰은 거절한다")
+        void rejectsAccessTokenFromAnotherApp() {
+            KakaoOAuthClient client = client("kakao-key", null);
+            server.expect(requestTo(API_URL + "/v1/user/access_token_info"))
+                    .andRespond(withSuccess("{\"app_id\":99999}", MediaType.APPLICATION_JSON));
+
+            assertThatThrownBy(() -> client.fetchUserInfoFromAccessToken("foreign-at"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).errorCode())
+                    .isEqualTo(ErrorCode.UNAUTHORIZED);
+            server.verify();
+        }
+
+        @Test
+        @DisplayName("앱 ID 설정이 없으면 제공자를 호출하지 않고 500으로 끊는다")
+        void missingAppIdFailsFast() {
+            KakaoOAuthClient client = client("kakao-key", null, "");
+
+            assertThatThrownBy(() -> client.fetchUserInfoFromAccessToken("mobile-at"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).errorCode())
+                    .isEqualTo(ErrorCode.INTERNAL_ERROR);
+            server.verify();
+        }
     }
 
     // ==================================================================
@@ -215,6 +265,38 @@ class OAuthClientTest {
                             + "\"email_verified\":false}", MediaType.APPLICATION_JSON));
 
             assertThat(client.fetchUserInfo(new OAuthCodeExchange("c", "r", null)).email()).isNull();
+        }
+
+        @Test
+        @DisplayName("모바일 Google ID 토큰의 audience를 검증하고 사용자 정보를 돌려준다")
+        void fetchUserInfoFromIdToken() {
+            GoogleOAuthClient client = client("google-web-client-id");
+            server.expect(requestTo(AUTH_URL + "/tokeninfo?id_token=google-id-token"))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess("{\"aud\":\"google-web-client-id\",\"sub\":\"google-7\"," +
+                                    "\"email\":\"g@b.com\",\"email_verified\":true,\"name\":\"구글뚜비\"}",
+                            MediaType.APPLICATION_JSON));
+
+            OAuthUserInfo info = client.fetchUserInfoFromIdToken("google-id-token");
+
+            assertThat(info.providerUserId()).isEqualTo("google-7");
+            assertThat(info.email()).isEqualTo("g@b.com");
+            server.verify();
+        }
+
+        @Test
+        @DisplayName("다른 Google OAuth 클라이언트용 ID 토큰은 거절한다")
+        void rejectsIdTokenForAnotherAudience() {
+            GoogleOAuthClient client = client("google-web-client-id");
+            server.expect(requestTo(AUTH_URL + "/tokeninfo?id_token=foreign-token"))
+                    .andRespond(withSuccess("{\"aud\":\"another-client\",\"sub\":\"google-7\"}",
+                            MediaType.APPLICATION_JSON));
+
+            assertThatThrownBy(() -> client.fetchUserInfoFromIdToken("foreign-token"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).errorCode())
+                    .isEqualTo(ErrorCode.UNAUTHORIZED);
+            server.verify();
         }
 
         @Test

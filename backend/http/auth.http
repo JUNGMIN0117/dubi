@@ -280,6 +280,28 @@ Content-Type: application/json
   "deviceId": "{{deviceId}}"
 }
 
+### 카카오 모바일 SDK 로그인 — KAKAO_APP_ID와 실제 액세스 토큰이 있어야 동작
+# Flutter 카카오 SDK가 발급한 accessToken을 전달한다.
+# 백엔드는 /v1/user/access_token_info의 app_id를 KAKAO_APP_ID와 비교한 뒤 사용자 정보를 조회한다.
+POST {{host}}/api/v1/auth/oauth/token
+Content-Type: application/json
+
+{
+  "provider": "KAKAO",
+  "accessToken": "여기에-카카오-모바일-액세스-토큰",
+  "deviceId": "{{deviceId}}"
+}
+
+### Google 모바일 SDK 로그인 — GOOGLE_CLIENT_ID와 실제 ID 토큰 필요
+POST {{host}}/api/v1/auth/oauth/id-token
+Content-Type: application/json
+
+{
+  "provider": "GOOGLE",
+  "idToken": "여기에-Google-ID-토큰",
+  "deviceId": "{{deviceId}}"
+}
+
 ### 구글 소셜 로그인 — GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 필요
 # ⚠️ 콜백 URL 에서 code= 값만 잘라 쓴다. 뒤에 붙은 &scope=... &authuser=... 를 함께
 #    넣으면 제공자가 거절한다.

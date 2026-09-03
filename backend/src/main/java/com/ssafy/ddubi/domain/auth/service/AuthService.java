@@ -6,6 +6,8 @@ import com.ssafy.ddubi.domain.auth.dto.request.LocalLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LocalSignupRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.LogoutRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthUserResponse;
@@ -180,12 +182,32 @@ public class AuthService {
     public OAuthResult loginOAuth(OAuthLoginRequest request) {
         OAuthClient client = clientFor(request.provider());
         OAuthUserInfo info = client.fetchUserInfo(request.toExchange());
+        return loginOAuthUser(request.provider(), request.deviceId(), info);
+    }
+
+    /** 모바일 SDK 토큰 로그인. 계정 통합 규칙은 인가 코드 로그인과 동일하게 적용한다. */
+    @Transactional
+    public OAuthResult loginOAuthToken(OAuthAccessTokenLoginRequest request) {
+        OAuthClient client = clientFor(request.provider());
+        OAuthUserInfo info = client.fetchUserInfoFromAccessToken(request.accessToken());
+        return loginOAuthUser(request.provider(), request.deviceId(), info);
+    }
+
+    /** 모바일 OIDC SDK의 ID 토큰 로그인. */
+    @Transactional
+    public OAuthResult loginOAuthIdToken(OAuthIdTokenLoginRequest request) {
+        OAuthClient client = clientFor(request.provider());
+        OAuthUserInfo info = client.fetchUserInfoFromIdToken(request.idToken());
+        return loginOAuthUser(request.provider(), request.deviceId(), info);
+    }
+
+    private OAuthResult loginOAuthUser(AuthProvider provider, String deviceId, OAuthUserInfo info) {
 
         // ① 이미 연결된 소셜 계정 — 그냥 로그인
         Optional<UserAuth> linked =
-                userAuthRepository.findByProviderAndProviderUserId(request.provider(), info.providerUserId());
+                userAuthRepository.findByProviderAndProviderUserId(provider, info.providerUserId());
         if (linked.isPresent()) {
-            return new OAuthResult(issueTokens(linked.get().getUser(), request.deviceId(), request.provider()), false);
+            return new OAuthResult(issueTokens(linked.get().getUser(), deviceId, provider), false);
         }
 
         // ② 같은 이메일의 기존 계정 — user 를 새로 만들지 않고 인증 수단만 추가(계정 통합)
@@ -194,13 +216,13 @@ public class AuthService {
             if (existing.isPresent()) {
                 User user = existing.get();
                 userAuthRepository.save(
-                        UserAuth.ofSocial(user, request.provider(), info.providerUserId()));
-                log.info("계정 통합 — userId={} 에 {} 인증 수단 추가", user.getId(), request.provider());
-                return new OAuthResult(issueTokens(user, request.deviceId(), request.provider()), false);
+                        UserAuth.ofSocial(user, provider, info.providerUserId()));
+                log.info("계정 통합 — userId={} 에 {} 인증 수단 추가", user.getId(), provider);
+                return new OAuthResult(issueTokens(user, deviceId, provider), false);
             }
         } else {
             // 이메일이 없으면 통합 판단 자체가 불가능하다. 별도 계정이 생기는 것은 정상 동작이다.
-            log.info("{} 로그인에 이메일이 없어 계정 통합을 건너뜀 — 별도 계정 생성", request.provider());
+            log.info("{} 로그인에 이메일이 없어 계정 통합을 건너뜀 — 별도 계정 생성", provider);
         }
 
         // ③ 완전 신규
@@ -208,8 +230,8 @@ public class AuthService {
                 .email(info.email())
                 .nickname(resolveNickname(info))
                 .build());
-        userAuthRepository.save(UserAuth.ofSocial(user, request.provider(), info.providerUserId()));
-        return new OAuthResult(issueTokens(user, request.deviceId(), request.provider()), true);
+        userAuthRepository.save(UserAuth.ofSocial(user, provider, info.providerUserId()));
+        return new OAuthResult(issueTokens(user, deviceId, provider), true);
     }
 
     private String resolveNickname(OAuthUserInfo info) {

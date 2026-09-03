@@ -3,6 +3,8 @@ package com.ssafy.ddubi.domain.auth.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
+import com.ssafy.ddubi.global.exception.BusinessException;
+import com.ssafy.ddubi.global.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -58,6 +60,23 @@ public class KakaoOAuthClient extends AbstractOAuthClient {
     @Override
     protected String userInfoPath() {
         return "/v2/user/me";
+    }
+
+    @Override
+    public OAuthUserInfo fetchUserInfoFromAccessToken(String accessToken) {
+        if (!StringUtils.hasText(properties.appId())) {
+            log.error("카카오 모바일 로그인 설정 누락 — app id 없음");
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        }
+
+        JsonNode tokenInfo = fetchApiResource(
+                "/v1/user/access_token_info", accessToken, "액세스 토큰 검증");
+        String tokenAppId = tokenInfo.path("app_id").asText();
+        if (!properties.appId().equals(tokenAppId)) {
+            log.warn("카카오 액세스 토큰의 앱 ID 불일치");
+            throw unauthorized("액세스 토큰이 유효하지 않습니다.");
+        }
+        return fetchProfile(accessToken);
     }
 
     @Override

@@ -123,8 +123,11 @@ docker compose -f backend/docker-compose.dev.yml up -d
 6. **경로 선택 단일성**: 한 schedule에 `route.is_selected=true`는 최대 1건. `PUT .../selection` 트랜잭션에서 나머지를 false로.
 7. **추천은 불변 INSERT**: `recommendation`은 절대 UPDATE하지 않는다. 계산 계기는 `trigger_type`, 중요도→백분위 정책은 NORMAL=p50 / HIGH=p80 / CRITICAL=p95, `reasons` JSON에 후보 비교 요약 포함, `data_checked_at` 필수.
 8. **폴백**: 실시간(Redis) 데이터가 없거나 stale이면 `baseline_serving`으로 계산하고 `confidence=LOW`, 응답에 `fallbackUsed=true`. 아예 계산 불가일 때만 `503 REALTIME_DATA_UNAVAILABLE`.
-9. **알림은 무조건 행 생성**: 발송 억제(알림 끔, DND, 중복)여도 `notification` 행은 만들고 `status=SUPPRESSED`. 재발송 방지는 `suppress_key`(일정·이유·행동 해시) + Redis TTL. `read_at IS NULL` 개수 = 안읽음 뱃지.
-10. **영향 일정 역조회 경로**: 변경 `segment_id` → `route_segment(IX_RSEG_SEGMENT)` → `route(is_selected=true)` → `schedule(status=UPCOMING)`. 별도 schedule_segment 테이블 없음(합의됨).
+9. **알림은 무조건 행 생성**: 발송 억제(알림 끔, 중복)여도 `notification` 행은 만들고 `status=SUPPRESSED`. 재발송 방지는 `suppress_key`(일정·이유·행동 해시) + Redis TTL. `read_at IS NULL` 개수 = 안읽음 뱃지. 알림 on/off 는 사용자 토글(`PATCH /users/me` 의 `alarmEnabled`)이며 **서버가 시간대를 정해 자동 억제하는 DND 는 두지 않는다**(2026-09-03 확정) — 껐다 켜는 것은 사용자가 정하고, 서버가 임의로 막으면 새벽 일정의 출발 알림이 조용히 사라진다.
+10. **영향 일정 역조회 경로 (F-05)**: 변경 `segment_id` → `route_segment_edge(IX_RSEG_EDGE_SEGMENT)` → `route_segment` → `route(is_selected=true)` → `schedule(status=UPCOMING)`. 별도 schedule_segment 테이블 없음(합의됨).
+    - 외부 API 의 이동 step 하나가 **공식 인접구간 여러 개로 전개**되므로 실제 매핑은 `route_segment` 1 : N `route_segment_edge` 다. 실시간 상태도 인접구간 단위로 오므로 역조회 기준은 edge 다.
+    - `route_segment.segment_id` 는 **레거시 단일-edge 호환 열**이다. 신규 저장은 `route_segment_edge` 를 단일 진실로 쓰고, 이 열로 역조회하지 않는다.
+    - `segment_id` 채번은 `CanonicalSegmentIdFactory` 한 곳에서만 한다: `BUS:{routeId}:{fromNodeId}:{toNodeId}` / `SUB:{subwayId}:{fromNodeId}:{toNodeId}`. 서울 공식 마스터 ID 기반이라 동명 정류장·노선명 변경에 흔들리지 않는다. **문자열을 직접 조립하지 말 것** — Collector·Spark 와의 공용 키다.
 11. **일정 삭제(SCH-005)는 soft**: `status=CANCELED`. 물리 삭제는 탈퇴 CASCADE뿐.
 12. **updated_at은 서버가 갱신** (`BaseTimeEntity` + JPA Auditing). DDL의 `ON UPDATE CURRENT_TIMESTAMP`는 안전망일 뿐이고, JPA가 명시값을 쓰므로 발동하지 않는다 — 낙관적 잠금 비교값이라 갱신 주체가 하나여야 한다. `raw_response`(외부 API 원본)는 어떤 사용자 응답에도 노출 금지.
 13. **예약어 주의**: 컬럼은 `trigger_type`, `rank_no`다. `trigger`, `rank`를 새로 만들지 말 것.
@@ -144,7 +147,8 @@ docker compose -f backend/docker-compose.dev.yml up -d
 | | `schedule` | origin/dest 스냅샷, arrive_by, importance ENUM(NORMAL,HIGH,CRITICAL), consider_last_trip, is_customized, status ENUM(UPCOMING,DONE,CANCELED), UNIQUE(repeat_id,arrive_by) |
 | 경로·추천 | `route_request` | 외부 API 호출 1회당 1행, raw_response JSON 원본 보관 |
 | | `route` | route_request_id FK, base_duration_min, is_selected, rank_no(최신 순위 캐시) |
-| | `route_segment` | seq, mode ENUM(WALK,BUS,SUBWAY), segment_id(파이프라인 공용 키, WALK는 NULL), geometry JSON, UNIQUE(route_id,seq), **INDEX(segment_id)** |
+| | `route_segment` | 외부 API 의 이동 step 단위. seq, mode ENUM(WALK,BUS,SUBWAY), geometry JSON, UNIQUE(route_id,seq). `segment_id` 는 레거시 호환 열 |
+| | `route_segment_edge` | **공식 인접구간 목록 — 신규 저장의 단일 진실.** PK(route_segment_id, edge_seq), segment_id VARCHAR(180), mapping_version, policy_version, **INDEX(segment_id, route_segment_id)** ← F-05 역조회 |
 | | `recommendation` | depart_at, eta, buffer_min, percentile_used, confidence, reasons JSON, segment_status_snapshot JSON, data_checked_at, policy_version, trigger_type |
 | 알림 | `notification` | type ENUM(MORNING_BRIEF, DEPART_SOON, EARLY_DEPART, ROUTE_CHANGE, ON_TIME_UNLIKELY, LAST_TRIP, SCHEDULE_CONFLICT, DATA_STALE), suppress_key, status ENUM(SENT,FAILED,SUPPRESSED), read_at |
 | 리포트 | `report` / `report_detail` | 주간 집계 + 일정별 결과(proxy_* 는 미동의자, actual_arrival은 동의자만). P3 — 스키마만 우선 |
@@ -211,7 +215,7 @@ BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spa
 | 재계산 작업 상태 | `job:recalc:{jobId}` | 백엔드 |
 | 구간 최신 상태 | `segment:status:{segmentId}` TTL 300s (분산 담당 소유 — 값 스키마·직렬화는 확정 대기. 어댑터 인터페이스로 격리할 것) | Spark |
 | 후보 경로 캐시 | `route:candidates:{originHash}:{destinationHash}` TTL 600s | 백엔드 |
-- segment_id 채번 규칙(예: `BUS:{노선}:{정류장A}:{정류장B}`)은 계약 파일이 진실. **코드에 하드코딩 금지, SegmentIdResolver로 분리.**
+- segment_id 채번은 확정됐다: `BUS:{routeId}:{fromNodeId}:{toNodeId}` / `SUB:{subwayId}:{fromNodeId}:{toNodeId}` (서울 공식 마스터 ID). **문자열 조립은 `CanonicalSegmentIdFactory` 한 곳에서만** 한다 — Collector·Spark 와의 공용 키라 흩어지면 계약이 깨진다.
 
 ## 8. 구현 순서 (이 순서로 진행, 각 Phase 완료 시 테스트 + Swagger 갱신)
 1. **Phase 0 — 골격**: Maven 단일 모듈(`backend/pom.xml` + `mvnw` 래퍼), 패키지 구조(3.1장), 공통 응답 래퍼·오류 처리·requestId 필터, JPA 설정(Auditing·BaseTimeEntity), Flyway V1(ERD_master), `backend/docker-compose.dev.yml`(MySQL·Redis), Actuator/Swagger.

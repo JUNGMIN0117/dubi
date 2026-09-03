@@ -420,6 +420,47 @@ services:
       - spark-worker-1
       - spark-worker-2
 
+  # 부하 실험용 스트리밍 인스턴스 (experiment 프로필). 운영 잡과 같은 코드를 환경변수만 바꿔 띄운다:
+  #  - city.replay(재생 토픽)를 읽고 Redis 는 weather:replay:* 에만 써서 운영 키를 건드리지 않는다
+  #  - 체크포인트도 별도(weather_replay), 컨슈머 그룹 이름 고정 → Grafana 랙 그래프에서 식별 가능
+  #  - 처리량 상한(maxOffsetsPerTrigger)을 크게 풀어 worker 수 차이가 드러나게 한다
+  # 실험 중에는 운영 스트리밍(spark-streaming-weather)을 잠시 멈춰 워커 자원을 전부 넘기는 것을 권장
+  spark-streaming-replay:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-replay
+    profiles: ["experiment"]
+    restart: "no"
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command: ["sh", "submit.sh", "streaming/weather_latest.py"]
+    ports:
+      - "4041:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_JOB_NAME: weather_replay
+      SPARK_JOB_TOPIC: city.replay
+      REDIS_KEY_PREFIX: weather:replay
+      SPARK_KAFKA_GROUP_ID: spark-weather-replay
+      SPARK_MAX_OFFSETS_PER_TRIGGER: ${EXPERIMENT_MAX_OFFSETS_PER_TRIGGER:-200000}
+      SPARK_STARTING_OFFSETS: latest
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_EXECUTOR_MEMORY: ${EXPERIMENT_EXECUTOR_MEMORY:-1g}
+      SPARK_CORES_MAX: ${EXPERIMENT_CORES_MAX:-6}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+
   # 배치 잡 실행기 (일회성). 예: docker compose --profile batch run --rm spark-batch sh submit.sh batch/weather_baseline.py --days 28
   spark-batch:
     <<: *common

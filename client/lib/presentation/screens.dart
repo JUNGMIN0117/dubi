@@ -50,77 +50,89 @@ class LoginScreen extends StatelessWidget {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                const Spacer(),
-                const TtubeeEntrance(
-                  asset: 'assets/images/ttubee/welcome.png',
-                  semanticLabel: '반갑게 인사하는 뚜비',
-                ),
-                const SizedBox(height: 8),
-                Text('뚜비', style: Theme.of(c).textTheme.headlineLarge),
-                const SizedBox(height: 8),
-                const Text(
-                  '일정에 늦지 않게,\n뚜비가 먼저 알려드려요',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                _login(
-                  c,
-                  '●  카카오로 시작하기',
-                  const Color(0xFFFFD600),
-                  Colors.black,
-                  () => _social(c, '카카오'),
-                ),
-                _login(
-                  c,
-                  'G  Google로 시작하기',
-                  Colors.white,
-                  DdubiColors.navy,
-                  () => _social(c, 'Google'),
-                ),
-                _login(
-                  c,
-                  'N  네이버로 시작하기',
-                  const Color(0xFF03C75A),
-                  Colors.white,
-                  () => _social(c, '네이버'),
-                ),
-                _login(
-                  c,
-                  '✉  이메일로 시작하기',
-                  Colors.white,
-                  DdubiColors.navy,
-                  () => _open(
-                    c,
-                    EmailLoginScreen(
-                      repository: authRepository,
-                      onAuthenticated: () => _completeLogin(c),
-                    ),
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: (constraints.maxHeight - 48).clamp(
+                    0,
+                    double.infinity,
                   ),
                 ),
-                TextButton(
-                  onPressed: () =>
-                      _open(c, SignUpScreen(repository: authRepository)),
-                  child: const Text('아직 계정이 없으신가요?  회원가입'),
-                ),
-                const Spacer(),
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.lock_outline, size: 16),
-                    SizedBox(width: 7),
-                    Flexible(
-                      child: Text(
-                        '안전한 서비스 이용을 위해 최소한의 권한만 사용합니다.',
-                        style: TextStyle(fontSize: 11),
+                child: IntrinsicHeight(
+                  child: Column(
+                    children: [
+                      const Spacer(),
+                      const TtubeeEntrance(
+                        asset: 'assets/images/ttubee/welcome.png',
+                        semanticLabel: '반갑게 인사하는 뚜비',
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      Text('뚜비', style: Theme.of(c).textTheme.headlineLarge),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '일정에 늦지 않게,\n뚜비가 먼저 알려드려요',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      _login(
+                        c,
+                        '●  카카오로 시작하기',
+                        const Color(0xFFFFD600),
+                        Colors.black,
+                        () => _social(c, '카카오'),
+                      ),
+                      _login(
+                        c,
+                        'G  Google로 시작하기',
+                        Colors.white,
+                        DdubiColors.navy,
+                        () => _social(c, 'Google'),
+                      ),
+                      _login(
+                        c,
+                        'N  네이버로 시작하기',
+                        const Color(0xFF03C75A),
+                        Colors.white,
+                        () => _social(c, '네이버'),
+                      ),
+                      _login(
+                        c,
+                        '✉  이메일로 시작하기',
+                        Colors.white,
+                        DdubiColors.navy,
+                        () => _open(
+                          c,
+                          EmailLoginScreen(
+                            repository: authRepository,
+                            onAuthenticated: () => _completeLogin(c),
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            _open(c, SignUpScreen(repository: authRepository)),
+                        child: const Text('아직 계정이 없으신가요?  회원가입'),
+                      ),
+                      const Spacer(),
+                      const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.lock_outline, size: 16),
+                          SizedBox(width: 7),
+                          Flexible(
+                            child: Text(
+                              '안전한 서비스 이용을 위해 최소한의 권한만 사용합니다.',
+                              style: TextStyle(fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -415,7 +427,7 @@ class _HomeMetric extends StatelessWidget {
 
 class ScheduleListScreen extends StatefulWidget {
   const ScheduleListScreen({super.key, required this.repository, this.go});
-  final DdubiRepository repository;
+  final ScheduleRepository repository;
   final ValueChanged<int>? go;
   @override
   State<ScheduleListScreen> createState() => _ScheduleListScreenState();
@@ -699,10 +711,14 @@ class ScheduleFormScreen extends StatefulWidget {
   const ScheduleFormScreen({
     super.key,
     required this.repository,
+    required this.placeSearchService,
     this.initialDate,
+    this.schedule,
   });
-  final DdubiRepository repository;
+  final ScheduleRepository repository;
+  final PlaceSearchService placeSearchService;
   final DateTime? initialDate;
+  final Schedule? schedule;
   @override
   State<ScheduleFormScreen> createState() => _ScheduleFormScreenState();
 }
@@ -733,8 +749,9 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
   late DateTime startDate;
   late DateTime endDate;
   bool hasEndDate = false;
-  int importance = 1;
-  int transport = 0;
+  bool considerLastTrip = false;
+  ScheduleImportance importance = ScheduleImportance.high;
+  TransportPreferenceChoice transport = TransportPreferenceChoice.balanced;
 
   @override
   void initState() {
@@ -901,34 +918,33 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
         const SizedBox(height: 16),
         const Text('중요도', style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        SegmentedButton<int>(
+        SegmentedButton<ScheduleImportance>(
           segments: const [
-            ButtonSegment(value: 0, label: Text('일반')),
-            ButtonSegment(value: 1, label: Text('중요')),
-            ButtonSegment(value: 2, label: Text('절대 지각 불가')),
+            ButtonSegment(value: ScheduleImportance.normal, label: Text('일반')),
+            ButtonSegment(value: ScheduleImportance.high, label: Text('중요')),
+            ButtonSegment(
+              value: ScheduleImportance.critical,
+              label: Text('절대 지각 불가'),
+            ),
           ],
           selected: {importance},
           onSelectionChanged: (value) =>
               setState(() => importance = value.first),
         ),
+        const SizedBox(height: 12),
+        SwitchListTile(
+          key: const Key('repeatConsiderLastTripSwitch'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('막차 고려'),
+          subtitle: const Text('늦은 반복 일정의 막차 위험을 함께 확인해요.'),
+          value: considerLastTrip,
+          onChanged: (value) => setState(() => considerLastTrip = value),
+        ),
         const SizedBox(height: 18),
         const Text('교통수단 선호', style: TextStyle(fontWeight: FontWeight.w700)),
-        RadioGroup<int>(
-          groupValue: transport,
-          onChanged: (value) => setState(() => transport = value!),
-          child: Column(
-            children: ['지하철 우선', '버스 + 지하철', '버스 우선']
-                .asMap()
-                .entries
-                .map(
-                  (entry) => RadioListTile<int>(
-                    contentPadding: EdgeInsets.zero,
-                    value: entry.key,
-                    title: Text(entry.value),
-                  ),
-                )
-                .toList(),
-          ),
+        TransportPreferenceSelector(
+          value: transport,
+          onChanged: (value) => setState(() => transport = value),
         ),
       ],
     ),
@@ -1036,6 +1052,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
         weekdays: {...weekdays},
         untilDate: hasEndDate ? endDate : null,
         importance: importance,
+        considerLastTrip: considerLastTrip,
         preferredTransport: transport,
       ),
     );
@@ -1044,67 +1061,116 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
 }
 
 class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
-  int importance = 1, transport = 0;
+  late ScheduleImportance importance;
+  TransportPreferenceChoice transport = TransportPreferenceChoice.balanced;
+  late bool considerLastTrip;
+  late DateTime selectedDate;
   final formKey = GlobalKey<FormState>();
-  final title = TextEditingController(text: '잠실야구장');
-  final place = TextEditingController(text: '잠실야구장');
-  final time = TextEditingController(text: '19:30');
-  final departure = TextEditingController(text: '집 (서울 강남구 역삼동)');
+  late final TextEditingController title;
+  late final TextEditingController time;
+  PlaceLocation? origin;
+  PlaceLocation? destination;
+
+  @override
+  void initState() {
+    super.initState();
+    final schedule = widget.schedule;
+    title = TextEditingController(text: schedule?.title ?? '잠실야구장');
+    time = TextEditingController(text: schedule?.time ?? '19:30');
+    selectedDate = schedule?.date ?? widget.initialDate ?? DateTime.now();
+    origin = schedule?.origin;
+    destination = schedule?.destination;
+    importance = schedule?.importance ?? ScheduleImportance.high;
+    considerLastTrip = schedule?.considerLastTrip ?? false;
+    transport =
+        schedule?.preferredTransport ?? TransportPreferenceChoice.balanced;
+  }
 
   @override
   void dispose() {
     title.dispose();
-    place.dispose();
     time.dispose();
-    departure.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext c) => AppPage(
-    title: '일정 등록',
+    title: widget.schedule == null ? '일정 등록' : '일정 수정',
     child: Form(
       key: formKey,
       child: ListView(
         padding: _pad,
         children: [
           _field('일정 제목', title),
-          _field('도착지 검색', place, icon: Icons.search),
-          Text(
-            _fullDate(widget.initialDate ?? DateTime.now()),
-            style: Theme.of(c).textTheme.bodySmall,
+          PlaceSearchField(
+            key: const Key('destinationPlaceField'),
+            label: '도착지',
+            value: destination,
+            searchService: widget.placeSearchService,
+            onSelected: (value) => setState(() => destination = value),
           ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _fullDate(selectedDate),
+                  style: Theme.of(c).textTheme.bodySmall,
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('scheduleDateButton'),
+                onPressed: () => _pickDate(c),
+                icon: const Icon(Icons.calendar_month_outlined),
+                label: const Text('날짜 변경'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           _field('반드시 도착해야 하는 시간', time, icon: Icons.schedule),
-          _field('출발지', departure, icon: Icons.my_location),
+          PlaceSearchField(
+            key: const Key('originPlaceField'),
+            label: '출발지',
+            value: origin,
+            searchService: widget.placeSearchService,
+            onSelected: (value) => setState(() => origin = value),
+          ),
           const Text('중요도', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
-          SegmentedButton<int>(
+          SegmentedButton<ScheduleImportance>(
             segments: const [
-              ButtonSegment(value: 0, label: Text('일반')),
-              ButtonSegment(value: 1, label: Text('중요')),
-              ButtonSegment(value: 2, label: Text('절대 지각 불가')),
+              ButtonSegment(
+                value: ScheduleImportance.normal,
+                label: Text('일반'),
+              ),
+              ButtonSegment(value: ScheduleImportance.high, label: Text('중요')),
+              ButtonSegment(
+                value: ScheduleImportance.critical,
+                label: Text('절대 지각 불가'),
+              ),
             ],
             selected: {importance},
             onSelectionChanged: (v) => setState(() => importance = v.first),
           ),
           const SizedBox(height: 20),
           const Text('교통수단 선호', style: TextStyle(fontWeight: FontWeight.w700)),
-          RadioGroup<int>(
-            groupValue: transport,
-            onChanged: (v) => setState(() => transport = v!),
-            child: Column(
-              children: ['지하철 우선', '버스 + 지하철', '버스 우선']
-                  .asMap()
-                  .entries
-                  .map(
-                    (e) =>
-                        RadioListTile<int>(value: e.key, title: Text(e.value)),
-                  )
-                  .toList(),
-            ),
+          TransportPreferenceSelector(
+            value: transport,
+            onChanged: (value) => setState(() => transport = value),
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            key: const Key('considerLastTripSwitch'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('막차 고려'),
+            subtitle: const Text('늦은 일정의 막차 위험을 함께 확인해요.'),
+            value: considerLastTrip,
+            onChanged: (value) => setState(() => considerLastTrip = value),
           ),
           const SizedBox(height: 10),
-          PrimaryButton('저장하기', onPressed: _save),
+          PrimaryButton(
+            widget.schedule == null ? '저장하기' : '수정 완료',
+            onPressed: _save,
+          ),
         ],
       ),
     ),
@@ -1112,26 +1178,64 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
 
   Future<void> _save() async {
     if (!(formKey.currentState?.validate() ?? false)) return;
-    final date = widget.initialDate ?? DateTime.now();
-    final today = DateTime.now();
-    final isToday =
-        date.year == today.year &&
-        date.month == today.month &&
-        date.day == today.day;
-    await widget.repository.addSchedule(
-      Schedule(
-        id: 'schedule-${DateTime.now().microsecondsSinceEpoch}',
-        title: title.text.trim(),
-        place: place.text.trim(),
-        departurePlace: departure.text.trim(),
-        time: time.text.trim(),
-        dateLabel: isToday ? '오늘' : '${date.month}.${date.day}',
-        date: date,
-        importance: importance,
-        preferredTransport: transport,
-      ),
+    if (origin == null || destination == null) return;
+    final date = selectedDate;
+    final parts = time.text.trim().split(':');
+    final arriveBy = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      int.parse(parts.first),
+      int.parse(parts.last),
     );
-    if (mounted) context.pop(true);
+    final schedule = Schedule(
+      id:
+          widget.schedule?.id ??
+          'schedule-${DateTime.now().microsecondsSinceEpoch}',
+      title: title.text.trim(),
+      origin: origin!,
+      destination: destination!,
+      arriveBy: arriveBy,
+      importance: importance,
+      considerLastTrip: considerLastTrip,
+      preferredTransport: transport,
+      repeatLabel: widget.schedule?.repeatLabel,
+      updatedAt: widget.schedule?.updatedAt,
+    );
+    try {
+      if (widget.schedule == null) {
+        await widget.repository.addSchedule(schedule);
+      } else {
+        await widget.repository.updateSchedule(schedule);
+      }
+      if (mounted) context.pop(true);
+    } on ScheduleConflictException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('다른 기기에서 일정이 변경됐어요. 새로 고침 후 다시 시도해주세요.')),
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.schedule == null
+                ? '일정을 저장하지 못했어요. 입력값과 연결 상태를 확인해주세요.'
+                : '일정을 수정하지 못했어요. 잠시 후 다시 시도해주세요.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickDate(BuildContext context) async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+    );
+    if (selected != null && mounted) setState(() => selectedDate = selected);
   }
 
   Widget _field(
@@ -1150,8 +1254,15 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         const SizedBox(height: 6),
         TextFormField(
           controller: controller,
-          validator: (value) =>
-              (value ?? '').trim().isEmpty ? '필수 입력 항목입니다.' : null,
+          validator: (value) {
+            final text = (value ?? '').trim();
+            if (text.isEmpty) return '필수 입력 항목입니다.';
+            if (controller == time &&
+                !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(text)) {
+              return '시간을 HH:mm 형식으로 입력해주세요.';
+            }
+            return null;
+          },
           decoration: InputDecoration(
             suffixIcon: icon == null ? null : Icon(icon),
           ),
@@ -1167,7 +1278,7 @@ class ScheduleDetailScreen extends StatelessWidget {
     required this.repository,
     required this.scheduleId,
   });
-  final DdubiRepository repository;
+  final ScheduleRepository repository;
   final String scheduleId;
 
   @override
@@ -1308,6 +1419,20 @@ class ScheduleDetailScreen extends StatelessWidget {
           '추천 경로 보기',
           onPressed: () => c.push('/recommendations/mock-recommendation-1'),
         ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          key: const Key('editScheduleButton'),
+          onPressed: () async {
+            final changed = await c.push<bool>(
+              '/schedules/${schedule.id}/edit',
+            );
+            if (changed == true && c.mounted) {
+              c.go('/schedules/${schedule.id}');
+            }
+          },
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('일정 수정'),
+        ),
         const SizedBox(height: 18),
         const SectionHeader('한눈에 보기'),
         const SizedBox(height: 8),
@@ -1352,6 +1477,50 @@ class ScheduleDetailScreen extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+class ScheduleEditScreen extends StatelessWidget {
+  const ScheduleEditScreen({
+    super.key,
+    required this.repository,
+    required this.placeSearchService,
+    required this.scheduleId,
+  });
+
+  final ScheduleRepository repository;
+  final PlaceSearchService placeSearchService;
+  final String scheduleId;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Schedule?>(
+    future: repository.scheduleById(scheduleId),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return const AppPage(
+          title: '일정 수정',
+          child: DataLoadError(message: '일정을 불러오지 못했어요.'),
+        );
+      }
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const AppPage(
+          title: '일정 수정',
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+      final schedule = snapshot.data;
+      if (schedule == null) {
+        return const AppPage(
+          title: '일정 수정',
+          child: DataLoadError(message: '수정할 일정을 찾을 수 없어요.'),
+        );
+      }
+      return ScheduleFormScreen(
+        repository: repository,
+        placeSearchService: placeSearchService,
+        schedule: schedule,
+      );
+    },
   );
 }
 
@@ -2806,7 +2975,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  int selectedTransport = 1;
+  TransportPreferenceChoice selectedTransport =
+      TransportPreferenceChoice.balanced;
 
   @override
   Widget build(BuildContext c) => AppPage(
@@ -2937,45 +3107,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
-  Widget _transportSelector() => Row(
-    children: List.generate(4, (index) {
-      const labels = ['버스', '지하철', '도보', '택시'];
-      const icons = [
-        Icons.directions_bus,
-        Icons.directions_subway,
-        Icons.directions_walk,
-        Icons.local_taxi,
-      ];
-      final isSelected = selectedTransport == index;
-      return Expanded(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3),
-          child: InkWell(
-            onTap: () => setState(() => selectedTransport = index),
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: isSelected ? DdubiColors.blue : DdubiColors.border,
-                ),
-                color: isSelected ? const Color(0xFFF0F6FF) : Colors.white,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    icons[index],
-                    color: isSelected ? DdubiColors.blue : null,
-                  ),
-                  Text(labels[index], style: const TextStyle(fontSize: 11)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }),
+  Widget _transportSelector() => TransportPreferenceSelector(
+    value: selectedTransport,
+    onChanged: (value) => setState(() => selectedTransport = value),
   );
 
   Widget _permissionCard() => const InfoCard(

@@ -114,6 +114,9 @@ UNIQUE KEY UK_BASELINE_KEY (segment_id, dow, hour_slot, weather_bucket, data_ver
 
 `activate` 가 `pipeline_config.baseline_active_version` 을 씁니다. 그런데 ERD 와 BACKEND_CONVENTION.md 에는 **"소유: 분산 담당"** 으로 되어 있습니다. 이제 **Spring 이 쓰는 테이블**이므로 백엔드가 표기를 고치겠습니다.
 
+→ **반영 완료 (2026-09-02).** `baseline_serving`·`pipeline_config` 소유를 백엔드로 정정하고
+`baseline_last_activated_at` 키를 DDL 주석에 명시했습니다. `detection_log` 만 분산 소유로 남습니다.
+
 추가로, 계약에 **"마지막 활성화 시각"을 어디 저장할지가 없습니다.** `pipeline_config` 에 키를 하나 더 두는 것을 제안합니다.
 
 ```

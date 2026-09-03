@@ -17,7 +17,7 @@
 - **서비스**: 뚜비(뚜벅이 비서) — 일정과 실시간 교통·날씨·행사 데이터를 분석해 "늦지 않을 출발 시각 + 이동 경로"를 선제적으로 알려주는 대중교통 이동 비서 (SSAFY 특화, 도메인: 빅데이터·분산시스템)
 - **핵심 흐름**: 사용자가 "도착 시각(arrive_by)"이 있는 일정을 등록 → 외부 길찾기 API(카카오맵)로 후보 경로 확보 → 후보를 구간(segment) 단위로 분해 → Spark가 계산한 구간별 실시간 상태(Redis) + 평소값(baseline)으로 재평가 → 권장 출발 시각·추천 경로·이유를 응답 → 상황 변화 시 영향 일정만 재계산 후 FCM 알림
 - **백엔드(서비스) 담당 범위**: 회원/인증, 일정/반복일정/장소, 경로·추천, 알림, 도착·리포트, 내부(internal) API 전부 + 분산 계산 결과(Redis/baseline)를 프론트에 서빙하는 계층
-- **담당 밖**: 수집기(collector), Spark 잡, Flutter 클라이언트, 인프라(compose/CI). 단, `baseline_serving`·`detection_log`·`pipeline_config`와 internal API는 **백엔드가 스텁·스키마를 먼저 만들고 분산 담당이 수정**하는 방식이다.
+- **담당 밖**: 수집기(collector), Spark 잡, Flutter 클라이언트, 인프라(compose/CI). 단, `baseline_serving`·`pipeline_config`는 **백엔드 소유**다 — Spark 는 MySQL 직접 쓰기 대신 internal API 로 업로드하고 검증·적재·버전 전환은 백엔드가 한다(2026-09-01 인프라 합의). `detection_log` 만 분산 담당 소유.
 
 ## 2. 아키텍처 (확정)
 
@@ -111,7 +111,7 @@ docker compose -f backend/docker-compose.dev.yml up -d
 
 ### 잊지 말 것
 - `ddl-auto`는 영원히 `validate`다. `update`/`create`로 바꾸지 않는다 — 엔티티가 없는 파이프라인 테이블 3개가 조용히 사라지고 분산 담당과 스키마가 어긋난다.
-- `baseline_serving`·`detection_log`·`pipeline_config`는 분산 담당 소유다. 그쪽이 변경을 요청하면 마이그레이션은 백엔드가 작성하되 내용은 그쪽 확정을 따른다.
+- `baseline_serving`·`pipeline_config`는 백엔드 소유(internal API 로만 적재), `detection_log` 는 분산 담당 소유다. 분산 쪽 변경 요청 시 마이그레이션은 백엔드가 작성하되 내용은 그쪽 확정을 따른다.
 
 ## 4. 도메인 규칙 (DB 제약이 아닌 것은 서비스 계층이 반드시 보장)
 
@@ -148,9 +148,9 @@ docker compose -f backend/docker-compose.dev.yml up -d
 | | `recommendation` | depart_at, eta, buffer_min, percentile_used, confidence, reasons JSON, segment_status_snapshot JSON, data_checked_at, policy_version, trigger_type |
 | 알림 | `notification` | type ENUM(MORNING_BRIEF, DEPART_SOON, EARLY_DEPART, ROUTE_CHANGE, ON_TIME_UNLIKELY, LAST_TRIP, SCHEDULE_CONFLICT, DATA_STALE), suppress_key, status ENUM(SENT,FAILED,SUPPRESSED), read_at |
 | 리포트 | `report` / `report_detail` | 주간 집계 + 일정별 결과(proxy_* 는 미동의자, actual_arrival은 동의자만). P3 — 스키마만 우선 |
-| 파이프라인(분산 소유) | `baseline_serving` | segment_id×dow(1~7)×hour_slot(0~23)×weather_bucket(DRY,RAIN,SNOW)×data_version UNIQUE. p50/p80/p95 **단위: 초** |
-| | `detection_log` | 이상 감지 vs 공식 공지 선행 검증 |
-| | `pipeline_config` | key-value. `baseline_active_version`으로 활성 버전 스위칭 |
+| 파이프라인 | `baseline_serving` | **소유: 백엔드** (Spark 가 internal API 로 업로드). segment_id×dow(1~7)×hour_slot(0~23)×weather_bucket(DRY,RAIN,SNOW)×data_version UNIQUE. p50/p80/p95 **단위: 초** |
+| | `detection_log` | **소유: 분산 담당.** 이상 감지 vs 공식 공지 선행 검증 |
+| | `pipeline_config` | **소유: 백엔드.** key-value. `baseline_active_version`(활성 버전) + `baseline_last_activated_at`(마지막 활성화 시각 — DATA_STALE·confidence 강등 근거) |
 
 FK: user 하위 전부 `ON DELETE CASCADE`, notification의 schedule_id/recommendation_id는 `SET NULL`, schedule.repeat_id는 `SET NULL`.
 

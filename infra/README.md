@@ -37,7 +37,7 @@
 | `collect-pending` | collector-bus/subway/traffic/event | 미구현. 소스 구현 후 해당 서비스의 profiles 를 `collect` 로 옮긴다 |
 | `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
 | `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
-| `spark` | spark-master, spark-worker-1/2, spark-streaming-weather | |
+| `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
 | `batch` | spark-batch | 일회성 실행기. `run --rm`으로만 쓴다 |
 | `archive` | archiver | |
 | `monitoring` | prometheus, grafana, node-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
@@ -77,7 +77,8 @@
    ```
    - 로그에 `cycle ok records=14`가 나오면 Kafka까지 들어간 것입니다 (서울 25개 구가 공유하는 격자 14개 단위로 호출).
    - Kafka UI: http://localhost:8085 → Topics → city.raw
-   - Spark 드라이버: `docker logs spark-streaming-weather --tail 5` 에서 `batch=N grids=14`
+   - 기상 Spark 드라이버: `docker logs spark-streaming-weather --tail 5` 에서 `batch=N grids=14`
+   - 비기상 Spark 드라이버(기본 UI 4042): `docker logs spark-streaming-realtime --tail 5` 에서 `batch=N ... redisKeys=N`
    - Redis: `docker compose --profile data exec redis redis-cli -a <REDIS_PASSWORD> KEYS "weather:latest:*"` → 격자 14개
    - HDFS: http://localhost:9870 (Utilities → Browse) 에서 `/ddubi/archive`, `/ddubi/checkpoints`
 6. 상시 수집을 켜두려면:

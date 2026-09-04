@@ -43,6 +43,21 @@ x-collector-env: &collector-env
   SEOUL_API_KEY: ${SEOUL_API_KEY:-}
   DATA_GO_KR_API_KEY: ${DATA_GO_KR_API_KEY:-}
   KMA_API_KEY: ${KMA_API_KEY:-}
+  BUS_ROUTE_IDS: ${BUS_ROUTE_IDS:-}
+  SUBWAY_LINES: ${SUBWAY_LINES:-}
+  SUBWAY_STATIONS: ${SUBWAY_STATIONS:-}
+  TRAFFIC_LINK_IDS: ${TRAFFIC_LINK_IDS:-}
+  CITY_AREA_IDENTIFIERS: ${CITY_AREA_IDENTIFIERS:-}
+  CITY_AREA_REGISTRY_PATH: ${CITY_AREA_REGISTRY_PATH:-}
+  CITY_AREA_CODES: ${CITY_AREA_CODES:-}
+  SDOT_DISTRICTS: ${SDOT_DISTRICTS:-}
+  SDOT_SERVICE_NAME: ${SDOT_SERVICE_NAME:-}
+  SDOT_MAX_PAGES: ${SDOT_MAX_PAGES:-}
+  SDOT_EXPECTED_SENSOR_COUNT: ${SDOT_EXPECTED_SENSOR_COUNT:-}
+  SUBWAY_ALERT_API_URL: ${SUBWAY_ALERT_API_URL:-}
+  SUBWAY_ALERT_SERVICE_NAME: ${SUBWAY_ALERT_SERVICE_NAME:-}
+  TRAFFIC_INCIDENT_SERVICE_NAME: ${TRAFFIC_INCIDENT_SERVICE_NAME:-}
+  SEOUL_API_PAGE_SIZE: ${SEOUL_API_PAGE_SIZE:-}
 
 # Spark 3개 노드가 공유하는 마운트. 설정은 infra/spark/conf/ 디렉터리를 /opt/spark/conf 에 마운트
 # (파일 하나를 마운트하면 git pull 로 파일이 교체돼도 컨테이너는 옛 inode 를 계속 봐서 재생성 전엔 반영되지 않는다.
@@ -135,14 +150,14 @@ services:
 
   # =========================================================================
   # collect : Python 수집기 x5 (Kafka 발행만 담당)                [서버1]
-  #  - collect          : 구현되어 실제로 돌리는 수집기 (지금은 weather)
-  #  - collect-pending  : 미구현 수집기. 켜면 소스 없음으로 재시작을 반복하므로 배포에서 제외한다.
-  #                       구현이 끝나면 해당 서비스의 profiles 를 ["collect"] 로 바꾼다
+  #  - collect           : 항상 배포하는 weather
+  #  - collect-realtime  : 구현 완료된 비기상 수집기. API 키와 명시적 수집 범위를
+  #                        준비한 뒤 운영자가 별도로 활성화한다.
   # =========================================================================
   collector-bus:
     <<: *collector
     container_name: collector-bus
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: bus
@@ -150,7 +165,7 @@ services:
   collector-subway:
     <<: *collector
     container_name: collector-subway
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: subway
@@ -158,7 +173,7 @@ services:
   collector-traffic:
     <<: *collector
     container_name: collector-traffic
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: traffic
@@ -173,7 +188,7 @@ services:
   collector-event:
     <<: *collector
     container_name: collector-event
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: event
@@ -278,7 +293,15 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:-}
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      DDUBI_TRANSIT_MASTER_IMPORT_ENABLED: ${DDUBI_TRANSIT_MASTER_IMPORT_ENABLED:-false}
+      DDUBI_TRANSIT_MASTER_DATA_VERSION: ${DDUBI_TRANSIT_MASTER_DATA_VERSION:-}
+      DDUBI_TRANSIT_MASTER_BUS_WORKBOOK: ${DDUBI_TRANSIT_MASTER_BUS_WORKBOOK:-}
+      DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE: ${DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE:-}
+      DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS: ${DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS:-}
+      DDUBI_TRANSIT_MASTER_ALIASES: ${DDUBI_TRANSIT_MASTER_ALIASES:-}
       JAVA_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - ${TRANSIT_MASTER_DATA_DIR:-./transit-master}:/opt/ddubi/transit-master:ro
     depends_on:
       mysql:
         condition: service_healthy

@@ -101,3 +101,75 @@ FCM 발송 준비 완료
 
 `/actuator/health` 는 이 값들과 무관하게 UP 이라 **헬스체크로는 판별되지 않습니다.**
 로그를 봐 주세요.
+
+---
+
+## 정정 2건 (2026-09-04, 확인 후)
+
+### 1. backend 는 서버2 입니다
+
+두 서버 다 확인해 주신 것으로 이해했습니다. 다만 인용해 주신 로그가 "서버1 backend" 였는데,
+`.gitlab-ci.yml` 상 `backend` 는 `serving` 프로필이라 `deploy-server2` 로만 배포됩니다.
+서버1 은 core·collect·spark·archive·hdfs·exporters 만 받습니다.
+
+**서버1 에도 backend 컨테이너가 떠 있다면 제가 배포 구성을 잘못 이해한 것이니 알려 주세요.**
+아니라면 이후 확인은 서버2 쪽을 보시면 됩니다.
+
+### 2. GitLab CI/CD 변수만으로는 값이 서버에 닿지 않습니다
+
+처음에 제가 "CI/CD Variables 에 넣으면 된다" 고 했는데 **틀렸습니다.** 배포 잡이
+이렇게 생겼기 때문입니다.
+
+```
+ssh ubuntu@서버 "cd infra && docker compose up -d --build"
+```
+
+CI 변수는 러너 컨테이너 안에서만 존재합니다. `ssh` 로 넘어가는 순간 사라지고, 서버의
+compose 는 **서버에 있는 파일**만 읽습니다.
+
+---
+
+## 그래서 이렇게 고쳤습니다 (이 MR)
+
+**`deploy-server2` 잡이 CI 변수를 읽어 서버2에 `infra/.env.backend` 를 만듭니다.**
+compose 의 backend 서비스가 그 파일을 `env_file` 로 읽습니다.
+
+```yaml
+# infra/docker-compose.yml
+  backend:
+    env_file:
+      - path: .env.backend
+        required: false      # 파일이 없어도 기동은 된다
+```
+
+### 이 방식을 고른 이유
+
+- **공용 `.env` 를 건드리지 않습니다.** 비밀값이 다른 팀 설정과 섞이지 않고, 서버에서
+  `.env` 를 편집하다 실수로 날릴 위험도 없습니다
+- **`umask 077`** 로 만들어 소유자만 읽습니다
+- **값을 ssh 인자로 넘기지 않습니다.** 인자로 주면 서버의 `ps` 에 잠깐이라도 그대로
+  보입니다. 표준입력으로만 보냅니다
+- **`required: false`** — 파일이 없어도 배포가 실패하지 않습니다. 그때는 지금처럼
+  메일·푸시가 로그로만 남습니다
+
+### 인프라팀이 하실 일 — 없습니다
+
+`.gitlab-ci.yml` 이 인프라팀 파일이라 **검토만 부탁드립니다.** 머지되면 다음 배포부터
+자동으로 적용됩니다.
+
+### 제가 할 일
+
+GitLab **Settings → CI/CD → Variables** 에 아래를 등록합니다(전부 Masked + Protected).
+값은 제가 직접 넣겠습니다.
+
+```
+MAIL_USERNAME  MAIL_PASSWORD
+GOOGLE_CLIENT_ID  GOOGLE_CLIENT_SECRET
+NAVER_CLIENT_ID   NAVER_CLIENT_SECRET
+KAKAO_APP_ID      KAKAO_CLIENT_SECRET
+FIREBASE_CREDENTIALS_BASE64
+```
+
+> ⚠️ 배포 기준 브랜치가 `develop` 이고 `Protected` 변수는 **보호 브랜치에만** 주입됩니다.
+> `develop` 이 보호 브랜치로 설정돼 있는지 확인 부탁드립니다. 아니면 변수가 빈 값으로
+> 들어가서 지금과 똑같은 증상이 반복됩니다.

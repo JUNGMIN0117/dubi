@@ -278,6 +278,12 @@ services:
     container_name: backend
     profiles: ["serving"]
     mem_limit: 1g
+    # 비밀값은 공용 .env 가 아니라 이 파일에서 온다.
+    # 배포 잡(.gitlab-ci.yml deploy-server2)이 GitLab CI/CD 변수를 읽어 서버에 만들어 준다.
+    # required: false — 파일이 없어도 기동은 된다. 그때는 메일·푸시가 로그로만 남는다.
+    env_file:
+      - path: .env.backend
+        required: false
     environment:
       TZ: ${TZ:-Asia/Seoul}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
@@ -299,20 +305,6 @@ services:
       DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE: ${DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE:-}
       DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS: ${DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS:-}
       DDUBI_TRANSIT_MASTER_ALIASES: ${DDUBI_TRANSIT_MASTER_ALIASES:-}
-      KAKAO_APP_ID: ${KAKAO_APP_ID:-}
-      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
-      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
-      # 메일 — 없으면 인증 메일이 로그로만 남아 로컬 회원가입이 끝까지 진행되지 않는다
-      MAIL_HOST: ${MAIL_HOST:-}
-      MAIL_PORT: ${MAIL_PORT:-}
-      MAIL_USERNAME: ${MAIL_USERNAME:-}
-      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      # FCM — 배포에서는 파일 대신 base64 한 줄을 쓴다(볼륨 마운트가 필요 없다)
-      FIREBASE_CREDENTIALS_BASE64: ${FIREBASE_CREDENTIALS_BASE64:-}
-      FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH:-}
       JAVA_OPTS: -Xms256m -Xmx512m
     volumes:
       - ${TRANSIT_MASTER_DATA_DIR:-./transit-master}:/opt/ddubi/transit-master:ro

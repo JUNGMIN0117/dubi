@@ -3078,10 +3078,12 @@ class SettingsScreen extends StatefulWidget {
     this.go,
     required this.repository,
     required this.userApi,
+    required this.authRepository,
   });
   final ValueChanged<int>? go;
   final DdubiRepository repository;
   final UserApi userApi;
+  final AuthRepository authRepository;
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -3331,9 +3333,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: const Text('취소'),
         ),
         FilledButton(
-          onPressed: () {
+          onPressed: () async {
             Navigator.pop(dialogContext);
-            context.go('/login');
+            try {
+              await widget.authRepository.logout();
+              if (context.mounted) context.go('/login');
+            } on AuthException catch (error) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(error.message ?? '로그아웃하지 못했어요.')),
+              );
+            }
           },
           child: const Text('로그아웃'),
         ),

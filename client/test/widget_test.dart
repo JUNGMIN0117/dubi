@@ -18,13 +18,21 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('Mock 회원가입 계정으로 즉시 로그인할 수 있다', () async {
     final repository = MockAuthRepository();
-    await repository.signUp(email: 'new@ddubi.app', password: 'new-password');
+    await repository.signUp(
+      email: 'new@ddubi.app',
+      password: 'new-password',
+      nickname: '새 사용자',
+    );
     await expectLater(
       repository.login(email: 'new@ddubi.app', password: 'new-password'),
       completes,
     );
     await expectLater(
-      repository.signUp(email: 'new@ddubi.app', password: 'again'),
+      repository.signUp(
+        email: 'new@ddubi.app',
+        password: 'again',
+        nickname: '중복 사용자',
+      ),
       throwsA(isA<AuthException>()),
     );
   });

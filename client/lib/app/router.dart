@@ -102,8 +102,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/settings',
-            builder: (context, state) =>
-                SettingsScreen(repository: repository, userApi: userApi),
+            builder: (context, state) => SettingsScreen(
+              repository: repository,
+              userApi: userApi,
+              authRepository: authRepository,
+            ),
           ),
         ],
       ),

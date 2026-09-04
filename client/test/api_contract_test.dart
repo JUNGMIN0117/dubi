@@ -7,6 +7,13 @@ void main() {
   test('리소스 ID를 API 경로에 안전하게 조합한다', () {
     expect(ApiPaths.schedule('schedule-1'), '/schedules/schedule-1');
     expect(ApiPaths.login, '/auth/local/login');
+    expect(ApiPaths.emailVerification, '/auth/email/verification');
+    expect(
+      ApiPaths.emailVerificationConfirm,
+      '/auth/email/verification/confirm',
+    );
+    expect(ApiPaths.refresh, '/auth/refresh');
+    expect(ApiPaths.logout, '/auth/logout');
     expect(ApiPaths.oauthTokenLogin, '/auth/oauth/token');
     expect(ApiPaths.oauthIdTokenLogin, '/auth/oauth/id-token');
     expect(ApiPaths.placeSearch, '/places/search');

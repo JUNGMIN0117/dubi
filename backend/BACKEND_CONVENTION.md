@@ -202,7 +202,9 @@ BASE-001/002 `/internal/baselines`(조회/일괄 적재 — 적재 주체는 Spa
 6. 알림 type에 `SCHEDULE_CONFLICT` 포함.
 7. FCM 등록은 `UK_DEVICE_FCM` 기반 `INSERT ... ON DUPLICATE KEY UPDATE` upsert.
 8. AUTH-003에 계정 통합 분기 추가: 기존 이메일 일치 → user_auth 행 추가 + 200 / 완전 신규 → 201.
-9. ARRIVAL-001의 locationConsent 요청 필드는 쓰지 않는다 — 서버가 `user.history_consented_at`으로 판단.
+9. ARRIVAL-001의 `actual_arrival` 은 **`user.history_consented_at` 과 요청의 `locationConsent` 가 둘 다 있어야** 저장한다.
+   요청 필드는 권한을 주는 스위치가 아니라 이번 건에 대한 거부권이다. 미저장이어도 200 이고 `result` 도 함께 null 이다.
+   *(2026-09-04 수정. 이전 문구 "요청 필드는 쓰지 않는다" 는 명세서에 있는 입력을 사문화시켰다 — docs/contracts/api-spec-arrival-report-amendment.md C)*
 10. 문서의 "Flink" 표기는 전부 Spark 오기.
 
 ## 7. Redis 키 계약 (docs/contracts/redis-keys.yaml로 관리, 분산 담당과 공유)

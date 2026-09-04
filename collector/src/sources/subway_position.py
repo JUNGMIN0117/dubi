@@ -45,7 +45,9 @@ def records_from_body(line: str, body: dict[str, Any]) -> list[Record]:
     records = []
     for item in rows:
         train_id = str(first_value(item, ("trainNo", "trainId")) or "unknown")
-        station_id = str(first_value(item, ("statnId", "statnNm")) or "unknown")
+        # 역명은 동명이역·환승역 때문에 정적/실시간 ID가 될 수 없다. statnId가 누락되면
+        # 이름으로 가장하지 않고 unknown으로 남겨 crosswalk가 잘못 확정되는 것을 막는다.
+        station_id = str(first_value(item, ("statnId",)) or "unknown")
         records.append(
             Record(
                 key=f"{line}:{train_id}",

@@ -36,6 +36,79 @@ keys:
       districts 는 이 격자를 공유하는 구 목록. 서버에서 가동 중.
     valueExample: '{"districts":["종로구","중구"],"nx":60,"ny":127,"baseDate":"20260827","baseTime":"0900","observations":{"T1H":27.3,"REH":64.0},"occurredAt":"2026-08-27T09:00:00.000+09:00","collectedAt":"2026-08-27T09:10:00.000+09:00","eventId":"...","source":"kma.ultra-srt-ncst"}'
 
+  busPositionLatest:
+    pattern: "transit:latest:bus-position:{providerRouteId}:{providerVehicleId}"
+    ttlSeconds: 120
+    owner: spark
+    description: >-
+      Spark(streaming/realtime_latest)가 만든 서울 버스 차량별 최신 위치·운행 상태.
+      routeId/vehicleId는 서울 API provider ID이며 canonical segment_id가 아니다.
+      위치 API의 정상 수집주기(30초)가 끊기면 2분 후 자동 만료한다.
+
+  busArrivalLatest:
+    pattern: "transit:latest:bus-arrival:{providerRouteId}:{providerStopId}"
+    ttlSeconds: 120
+    owner: spark
+    description: >-
+      노선·정류장별 다음 두 차량의 도착예정 초와 메시지. 도착예정값은 현재 관측이지
+      실제 구간 운행시간 학습 정답이 아니며, 정적 마스터 crosswalk 적용 전 provider ID다.
+
+  subwayPositionLatest:
+    pattern: "transit:latest:subway-position:{providerLineId}:{providerTrainId}"
+    ttlSeconds: 120
+    owner: spark
+    description: >-
+      호선·열차별 최신 역, 방향, 종착역과 운행상태. 실시간 subwayId/statnId를
+      canonical 정적 ID로 간주하지 않으며 segmentIds가 있을 때만 매핑 가능으로 표시한다.
+
+  subwayArrivalLatest:
+    pattern: "transit:latest:subway-arrival:{providerLineId}:{providerStationId}:{providerTrainId}"
+    ttlSeconds: 120
+    owner: spark
+    description: >-
+      호선·역·열차별 도착예정 초와 도착상태. 동일 열차가 여러 역 조회에 포함되므로
+      역 ID까지 키에 포함하며, Backend가 provider ID 기반 최신값을 조회할 때 사용한다.
+
+  trafficFlowLatest:
+    pattern: "traffic:latest:flow:{providerLinkId}"
+    ttlSeconds: 900
+    owner: spark
+    description: >-
+      TOPIS 링크별 최신 속도(km/h), 통행시간(초), 소통상태. providerLinkId와 DDUBI
+      segment_id 사이의 crosswalk가 확정되기 전에는 segment:status를 만들지 않는다.
+
+  trafficIncidentLatest:
+    pattern: "traffic:latest:incident:{providerIncidentId}"
+    ttlSeconds: 600
+    owner: spark
+    description: >-
+      TOPIS 사고·통제별 최신 요약. 1분 수집이 중단되거나 현재 목록에서 사라진 이벤트가
+      오래 위험 신호로 남지 않도록 10분 후 만료하며 원문은 HDFS에서 eventId로 추적한다.
+
+  cityAreaLatest:
+    pattern: "city:latest:area:{providerAreaId}"
+    ttlSeconds: 900
+    owner: spark
+    description: >-
+      서울 주요 장소별 인구 혼잡도·인구 범위·평균 도로속도·기상 대표값.
+      5분 수집주기의 세 배 동안만 최신 상태로 제공하고 전체 통합 응답은 Redis에 저장하지 않는다.
+
+  sdotPopulationLatest:
+    pattern: "city:latest:sdot-population:{providerSensorId}"
+    ttlSeconds: 1800
+    owner: spark
+    description: >-
+      S-DoT 센서별 최신 유동인구 관측. 값의 visitorCount 단위는 명이며 10분 수집이
+      세 번 연속 실패하면 만료한다. 센서 좌표·행정구역 보강은 별도 마스터의 책임이다.
+
+  subwayAlertLatest:
+    pattern: "transit:latest:subway-alert:{providerAlertId}"
+    ttlSeconds: 600
+    owner: spark
+    description: >-
+      서울교통공사 이례상황 알림별 제목·내용·호선·종료시각 요약. 알림 자체는 지연 분의
+      정답이 아니며, 구간 crosswalk와 실제 관측 악화가 결합될 때 위험 원인으로 사용한다.
+
   # --- 백엔드 소유 ----------------------------------------------------
   authRefresh:
     pattern: "auth:refresh:{userId}:{deviceId}"

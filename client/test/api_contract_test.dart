@@ -10,6 +10,11 @@ void main() {
     expect(ApiPaths.oauthTokenLogin, '/auth/oauth/token');
     expect(ApiPaths.oauthIdTokenLogin, '/auth/oauth/id-token');
     expect(ApiPaths.placeSearch, '/places/search');
+    expect(ApiPaths.home, '/home');
+    expect(ApiPaths.notificationsReadAll, '/notifications/read-all');
+    expect(ApiPaths.notificationRead('7'), '/notifications/7/read');
+    expect(ApiPaths.scheduleRepeats, '/schedule-repeats');
+    expect(ApiPaths.scheduleConflicts, '/schedules/conflicts');
     expect(
       ApiPaths.latestRecommendation('schedule-1'),
       '/schedules/schedule-1/recommendations/latest',
@@ -69,5 +74,22 @@ void main() {
     expect(TransportPreferenceChoice.busFirst.apiTransportPrefs, [
       {'mode': 'BUS', 'preference': 'PREFER'},
     ]);
+  });
+
+  test('반복 일정 요청을 백엔드 rrule과 장소 좌표 계약으로 변환한다', () {
+    final request = RepeatScheduleRule(
+      id: 'local-id',
+      title: '평일 출근',
+      origin: const PlaceLocation(name: '집', lat: 37.5, lng: 127.0),
+      destination: const PlaceLocation(name: '회사', lat: 37.51, lng: 127.03),
+      time: '09:00',
+      startDate: DateTime(2026, 9, 7),
+      weekdays: const {1, 2, 3, 4, 5},
+    ).toCreateRequestJson();
+
+    expect(request['rrule'], 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR');
+    expect(request['startDate'], '2026-09-07');
+    expect((request['origin'] as Map)['lat'], 37.5);
+    expect((request['destination'] as Map)['name'], '회사');
   });
 }

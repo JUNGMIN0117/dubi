@@ -398,7 +398,11 @@ void main() {
   testWidgets('반복 일정 화면에서 요일 규칙을 저장해 일정들을 생성한다', (tester) async {
     final repository = MockDdubiRepository();
     final container = ProviderContainer(
-      overrides: [ddubiRepositoryProvider.overrideWithValue(repository)],
+      overrides: [
+        ddubiRepositoryProvider.overrideWithValue(repository),
+        repeatScheduleRepositoryProvider.overrideWithValue(repository),
+        placeApiProvider.overrideWithValue(const _FakePlaceSearchService()),
+      ],
     );
     addTearDown(container.dispose);
     await tester.pumpWidget(
@@ -411,11 +415,23 @@ void main() {
 
     expect(find.text('반복 일정 등록'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('repeatTitleField')), '평일 출근');
+    await tester.tap(find.byKey(const Key('repeatPlaceField')));
+    await tester.pumpAndSettle();
     await tester.enterText(
-      find.byKey(const Key('repeatPlaceField')),
+      find.byKey(const Key('placeSearchQuery')),
       'SSAFY 서울캠퍼스',
     );
-    await tester.enterText(find.byKey(const Key('repeatDepartureField')), '집');
+    await tester.tap(find.byKey(const Key('placeSearchButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('placeSearchResult0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('repeatDepartureField')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('placeSearchQuery')), '회사');
+    await tester.tap(find.byKey(const Key('placeSearchButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('placeSearchResult0')));
+    await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView).last, const Offset(0, -450));
     await tester.pumpAndSettle();
     expect(find.text('반복 요일'), findsOneWidget);

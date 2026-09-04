@@ -1,5 +1,6 @@
 package com.ssafy.ddubi.domain.report.repository;
 
+import com.ssafy.ddubi.domain.report.entity.ArrivalResult;
 import com.ssafy.ddubi.domain.report.entity.ReportDetail;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -42,4 +43,28 @@ public interface ReportDetailRepository extends JpaRepository<ReportDetail, Long
                                    @Param("from") LocalDateTime from,
                                    @Param("to") LocalDateTime to,
                                    Pageable pageable);
+
+    /**
+     * HISTORY-001 요약 — <b>페이지가 아니라 조회 구간 전체</b>를 센다.
+     *
+     * 판정 값을 파라미터로 받는 이유: JPQL 에 enum 을 상수로 쓰려면 패키지 전체 경로를 적어야
+     * 하는데, 클래스를 옮기면 컴파일이 아니라 실행 시점에 깨진다. 파라미터로 넘기면 컴파일러가 잡는다.
+     */
+    @Query("""
+            select count(d)                                              as totalCount,
+                   sum(case when d.result = :onTime then 1L else 0L end) as onTimeCount,
+                   sum(case when d.result = :tight  then 1L else 0L end) as tightCount,
+                   sum(case when d.result = :late   then 1L else 0L end) as lateCount,
+                   avg(d.proxyDurationMin)                               as avgDurationMin
+              from ReportDetail d
+              join d.schedule s
+             where s.user.id = :userId
+               and s.arriveBy between :from and :to
+            """)
+    HistoryStats summarizeHistory(@Param("userId") Long userId,
+                                  @Param("from") LocalDateTime from,
+                                  @Param("to") LocalDateTime to,
+                                  @Param("onTime") ArrivalResult onTime,
+                                  @Param("tight") ArrivalResult tight,
+                                  @Param("late") ArrivalResult late);
 }

@@ -119,6 +119,18 @@ def test_subway_position_uses_source_timestamp_and_provider_station():
     assert records[0].occurred_at.isoformat() == "2026-09-03T12:34:56+09:00"
 
 
+def test_subway_position_does_not_promote_station_name_to_provider_id():
+    """실시간 역 ID 누락을 역명으로 숨기면 canonical crosswalk가 잘못 확정될 수 있다."""
+    body = {
+        "errorMessage": {"status": 200},
+        "realtimePositionList": {"subwayId": "1002", "statnNm": "시청", "trainNo": "2210"},
+    }
+    cfg = settings("subway_position", keys={"SEOUL_API_KEY": "k"}, extra={"SUBWAY_LINES": "2호선"})
+    with json_client(body) as client:
+        records = subway_position.fetch(cfg, client)
+    assert records[0].payload["providerStationId"] == "unknown"
+
+
 def test_subway_position_uses_official_line_registry_by_default():
     calls = []
     body = {"errorMessage": {"status": 200}, "realtimePositionList": []}
@@ -138,6 +150,18 @@ def test_subway_arrival_builds_station_train_records():
         records = subway_arrival.fetch(cfg, client)
     assert records[0].key == "1002:0201:2210"
     assert records[0].event_type == "subway.arrival"
+
+
+def test_subway_arrival_does_not_use_route_description_as_train_id():
+    """같은 행선 문구를 공유하는 여러 열차가 하나의 최신값 키로 충돌하지 않아야 한다."""
+    body = {
+        "errorMessage": {"status": 200},
+        "realtimeArrivalList": [{"subwayId": "1002", "statnId": "0201", "trainLineNm": "성수행 - 내선"}],
+    }
+    cfg = settings("subway_arrival", keys={"SEOUL_API_KEY": "k"}, extra={"SUBWAY_STATIONS": "시청"})
+    with json_client(body) as client:
+        records = subway_arrival.fetch(cfg, client)
+    assert records[0].payload["providerTrainId"] == "unknown"
 
 
 def test_subway_aggregate_allows_only_one_configured_kind():
@@ -200,6 +224,15 @@ def test_sdot_population_extracts_service_rows():
         records = sdot_population.fetch(cfg, client)
     assert records[0].key == "D1"
     assert records[0].event_type == "sdot.population"
+
+
+def test_sdot_population_does_not_use_shared_model_name_as_sensor_id():
+    """기종명은 여러 장비가 공유하므로 센서 식별자가 없다는 품질 문제를 그대로 남긴다."""
+    records = sdot_population.records_from_rows(
+        [{"MODEL_NM": "SDOT-001", "SENSING_TIME": "20260903121000", "VISITOR_COUNT": "7"}]
+    )
+    assert records[0].key == "unknown"
+    assert records[0].payload["providerSensorId"] == "unknown"
 
 
 def test_sdot_population_keeps_only_latest_observation_per_sensor():

@@ -37,7 +37,9 @@ def records_from_rows(rows: list[dict[str, Any]]) -> list[Record]:
     latest: dict[str, Record] = {}
     for item in rows:
         sensor_id = str(
-            first_value(item, ("SENSOR_ID", "SENS_ID", "S_DOT_NO", "SERIAL_NO", "MODEL_NM"))
+            # MODEL_NM은 여러 센서가 공유하는 기종명이라 식별자로 사용할 수 없다. 실제 센서
+            # 식별 필드가 없으면 unknown으로 남겨 서로 다른 측정치가 한 키로 합쳐지지 않게 한다.
+            first_value(item, ("SENSOR_ID", "SENS_ID", "S_DOT_NO", "SERIAL_NO"))
             or "unknown"
         )
         occurred = parse_kst(first_value(item, ("SENSING_TIME", "REGIST_DT", "DATA_TIME")), fallback=received)

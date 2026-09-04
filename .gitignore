@@ -61,3 +61,8 @@ CLAUDE.md
 # Firebase 서비스 계정 키 — 이 파일 하나로 우리 프로젝트 이름의 푸시를 보낼 수 있다
 **/firebase-service-account.json
 **/*-firebase-adminsdk-*.json
+
+# Firebase 앱 설정 — APK 에 들어가는 파일이지만 공개 저장소에 두면
+# 남이 우리 프로젝트 앞으로 요청을 보낼 수 있다. 비밀 채널로 공유한다.
+**/google-services.json
+**/GoogleService-Info.plist

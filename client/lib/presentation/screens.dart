@@ -3085,6 +3085,66 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   );
 }
 
+class NotificationDetailScreen extends StatefulWidget {
+  const NotificationDetailScreen({
+    super.key,
+    required this.api,
+    required this.notificationId,
+  });
+
+  final NotificationApi api;
+  final String notificationId;
+
+  @override
+  State<NotificationDetailScreen> createState() =>
+      _NotificationDetailScreenState();
+}
+
+class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
+  late final Future<AppNotification> notification = _load();
+
+  Future<AppNotification> _load() async {
+    final item = await widget.api.getNotification(widget.notificationId);
+    if (item.isUnread) {
+      await widget.api.markRead(item.id);
+    }
+    return item;
+  }
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '알림 상세',
+    child: FutureBuilder<AppNotification>(
+      future: notification,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const DataLoadError(message: '알림을 불러오지 못했어요.');
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final item = snapshot.data!;
+        return ListView(
+          padding: _pad,
+          children: [
+            Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 12),
+            Text(item.body),
+            const SizedBox(height: 20),
+            if (item.scheduleId != null)
+              FilledButton.icon(
+                onPressed: () => context.go('/schedules/${item.scheduleId}'),
+                icon: const Icon(Icons.calendar_today_outlined),
+                label: const Text('연결된 일정 보기'),
+              ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,

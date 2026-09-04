@@ -79,14 +79,17 @@ class ScheduleConflictException implements Exception {
 
 class RouteSearchCondition {
   const RouteSearchCondition({
-    required this.departurePlace,
-    required this.destinationPlace,
+    required this.origin,
+    required this.destination,
     required this.desiredArrivalAt,
   });
 
-  final String departurePlace;
-  final String destinationPlace;
+  final PlaceLocation origin;
+  final PlaceLocation destination;
   final DateTime desiredArrivalAt;
+
+  String get departurePlace => origin.name;
+  String get destinationPlace => destination.name;
 }
 
 class Schedule {

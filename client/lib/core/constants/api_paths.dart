@@ -35,5 +35,6 @@ class ApiPaths {
   static String recommendationExplanation(String recommendationId) =>
       '/recommendations/$recommendationId/explanation';
   static String route(String routeId) => '/routes/$routeId';
+  static const String routeSearch = '/routes/search';
   static String routeMap(String routeId) => '${route(routeId)}/map';
 }

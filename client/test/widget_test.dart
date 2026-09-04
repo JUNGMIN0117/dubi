@@ -11,6 +11,8 @@ import 'package:ddubi/providers/app_providers.dart';
 import 'package:ddubi/services/kakao_login_service.dart';
 import 'package:ddubi/services/google_login_service.dart';
 import 'package:ddubi/services/naver_login_service.dart';
+import 'package:ddubi/services/recommendation_api.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -462,7 +464,12 @@ void main() {
   });
 
   testWidgets('경로 조건을 입력하면 Mock 추천 결과로 이동한다', (tester) async {
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        placeApiProvider.overrideWithValue(const _FakePlaceSearchService()),
+        recommendationApiProvider.overrideWithValue(_FakeRecommendationApi()),
+      ],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(container: container, child: const DdubiApp()),
@@ -472,16 +479,25 @@ void main() {
     router.go('/recommendations');
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byKey(const Key('routeDepartureField')), '강남역');
-    await tester.enterText(
-      find.byKey(const Key('routeDestinationField')),
-      '여의도역',
-    );
+    await tester.tap(find.byKey(const Key('routeDepartureField')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('placeSearchQuery')), '회사');
+    await tester.tap(find.byKey(const Key('placeSearchButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('placeSearchResult0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('routeDestinationField')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('placeSearchQuery')), '여의도역');
+    await tester.tap(find.byKey(const Key('placeSearchButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('placeSearchResult0')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('추천 경로 찾기'));
     await tester.pumpAndSettle();
 
     expect(find.text('추천 결과'), findsOneWidget);
-    expect(find.textContaining('강남역  →  여의도역'), findsOneWidget);
+    expect(find.textContaining('회사  →  서울병원'), findsOneWidget);
     expect(find.text('추천 경로'), findsOneWidget);
     expect(find.text('조건 수정'), findsOneWidget);
   });
@@ -492,7 +508,12 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        placeApiProvider.overrideWithValue(const _FakePlaceSearchService()),
+        recommendationApiProvider.overrideWithValue(_FakeRecommendationApi()),
+      ],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(container: container, child: const DdubiApp()),
@@ -507,8 +528,8 @@ void main() {
     router.go(
       '/recommendations/mock-recommendation-1',
       extra: RouteSearchCondition(
-        departurePlace: '강남역',
-        destinationPlace: '여의도역',
+        origin: const PlaceLocation(name: '강남역', lat: 37.49, lng: 127.02),
+        destination: const PlaceLocation(name: '여의도역', lat: 37.52, lng: 126.92),
         desiredArrivalAt: DateTime(2026, 9, 2, 10),
       ),
     );
@@ -559,7 +580,7 @@ void main() {
     expect(find.byKey(const Key('webNotificationsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webNotificationMetrics')), findsOneWidget);
     expect(find.byKey(const Key('mobileNotificationsLayout')), findsNothing);
-    expect(find.text('최근 이동 기록'), findsOneWidget);
+    expect(find.text('최근 알림'), findsOneWidget);
 
     router.go('/settings');
     await tester.pumpAndSettle();
@@ -605,8 +626,12 @@ void main() {
           repository: repository,
           selectedRoute: MockDdubiRepository.routeData.first,
           condition: RouteSearchCondition(
-            departurePlace: '강남역',
-            destinationPlace: '여의도역',
+            origin: const PlaceLocation(name: '강남역', lat: 37.49, lng: 127.02),
+            destination: const PlaceLocation(
+              name: '여의도역',
+              lat: 37.52,
+              lng: 126.92,
+            ),
             desiredArrivalAt: DateTime(2026, 9, 1, 10),
           ),
         ),
@@ -702,4 +727,13 @@ class _FakePlaceSearchService implements PlaceSearchService {
         lng: 127.014,
       ),
   ];
+}
+
+class _FakeRecommendationApi extends RecommendationApi {
+  _FakeRecommendationApi() : super(Dio());
+
+  @override
+  Future<List<RouteOption>> searchRoutes(
+    RouteSearchCondition condition,
+  ) async => MockDdubiRepository.routeData;
 }

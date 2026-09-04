@@ -13,6 +13,7 @@ import '../services/kakao_login_service.dart';
 import '../services/google_login_service.dart';
 import '../services/naver_login_service.dart';
 import '../services/app_api.dart';
+import '../services/recommendation_api.dart';
 import 'auth_screens.dart';
 import 'micro_animations.dart';
 import 'widgets.dart';
@@ -1668,10 +1669,12 @@ class RouteResultsScreen extends StatelessWidget {
   const RouteResultsScreen({
     super.key,
     required this.repository,
+    required this.api,
     this.condition,
     this.go,
   });
   final DdubiRepository repository;
+  final RecommendationApi api;
   final RouteSearchCondition? condition;
   final ValueChanged<int>? go;
   @override
@@ -1683,7 +1686,9 @@ class RouteResultsScreen extends StatelessWidget {
     onNav: go,
     actions: const [IconButton(onPressed: null, icon: Icon(Icons.refresh))],
     child: FutureBuilder<List<RouteOption>>(
-      future: repository.routes(condition: condition),
+      future: condition == null
+          ? repository.routes()
+          : api.searchRoutes(condition!),
       builder: (c, s) {
         if (s.hasError) {
           return const DataLoadError(message: '추천 경로를 불러오지 못했어요.');
@@ -1808,9 +1813,14 @@ class RouteResultsScreen extends StatelessWidget {
 }
 
 class RouteSearchScreen extends StatefulWidget {
-  const RouteSearchScreen({super.key, required this.repository});
+  const RouteSearchScreen({
+    super.key,
+    required this.repository,
+    required this.placeSearchService,
+  });
 
   final DdubiRepository repository;
+  final PlaceSearchService placeSearchService;
 
   @override
   State<RouteSearchScreen> createState() => _RouteSearchScreenState();
@@ -1818,8 +1828,8 @@ class RouteSearchScreen extends StatefulWidget {
 
 class _RouteSearchScreenState extends State<RouteSearchScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _departure = TextEditingController(text: '집');
-  final _destination = TextEditingController(text: 'SSAFY 서울캠퍼스');
+  PlaceLocation? _origin;
+  PlaceLocation? _destination;
   late DateTime _desiredArrivalAt;
   late final TextEditingController _arrival;
 
@@ -1833,8 +1843,6 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
 
   @override
   void dispose() {
-    _departure.dispose();
-    _destination.dispose();
     _arrival.dispose();
     super.dispose();
   }
@@ -1921,18 +1929,18 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
   );
 
   Widget _placeField(bool departure) {
-    final controller = departure ? _departure : _destination;
-    return TextFormField(
+    return PlaceSearchField(
       key: Key(departure ? 'routeDepartureField' : 'routeDestinationField'),
-      controller: controller,
-      textInputAction: departure ? TextInputAction.next : TextInputAction.done,
-      validator: (value) => (value ?? '').trim().isEmpty ? '장소를 입력해주세요.' : null,
-      decoration: InputDecoration(
-        labelText: departure ? '출발지' : '도착지',
-        prefixIcon: Icon(
-          departure ? Icons.my_location_outlined : Icons.location_on_outlined,
-        ),
-      ),
+      label: departure ? '출발지' : '도착지',
+      value: departure ? _origin : _destination,
+      searchService: widget.placeSearchService,
+      onSelected: (value) => setState(() {
+        if (departure) {
+          _origin = value;
+        } else {
+          _destination = value;
+        }
+      }),
     );
   }
 
@@ -1963,9 +1971,14 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
 
   void _search() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_origin == null || _destination == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('출발지와 도착지를 검색해 선택해주세요.')));
+      return;
+    }
     final condition = RouteSearchCondition(
-      departurePlace: _departure.text.trim(),
-      destinationPlace: _destination.text.trim(),
+      origin: _origin!,
+      destination: _destination!,
       desiredArrivalAt: _desiredArrivalAt,
     );
     context.push('/recommendations/mock-recommendation-1', extra: condition);

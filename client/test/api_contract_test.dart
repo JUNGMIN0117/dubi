@@ -22,6 +22,7 @@ void main() {
     expect(ApiPaths.notificationRead('7'), '/notifications/7/read');
     expect(ApiPaths.scheduleRepeats, '/schedule-repeats');
     expect(ApiPaths.scheduleConflicts, '/schedules/conflicts');
+    expect(ApiPaths.routeSearch, '/routes/search');
     expect(
       ApiPaths.latestRecommendation('schedule-1'),
       '/schedules/schedule-1/recommendations/latest',

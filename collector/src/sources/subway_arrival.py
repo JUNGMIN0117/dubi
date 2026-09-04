@@ -22,7 +22,10 @@ def records_from_body(station: str, body: dict[str, Any]) -> list[Record]:
     received = now_kst()
     records = []
     for item in rows:
-        train_id = str(first_value(item, ("btrainNo", "trainLineNm")) or "unknown")
+        # trainLineNm은 "성수행 - 내선" 같은 표시 문구이지 열차 ID가 아니다. 열차번호가 없는
+        # 응답을 문구로 키잉하면 방향 문구가 같은 여러 열차가 덮어써지므로 unknown으로 남겨
+        # 후속 Spark 최신값 서빙에서 제외하고, 원문은 Kafka/HDFS에서 품질 분석할 수 있게 한다.
+        train_id = str(first_value(item, ("btrainNo", "trainNo")) or "unknown")
         station_id = str(first_value(item, ("statnId",)) or station)
         line_id = str(first_value(item, ("subwayId",)) or "unknown")
         records.append(

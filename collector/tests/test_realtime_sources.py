@@ -231,8 +231,21 @@ def test_sdot_population_does_not_use_shared_model_name_as_sensor_id():
     records = sdot_population.records_from_rows(
         [{"MODEL_NM": "SDOT-001", "SENSING_TIME": "20260903121000", "VISITOR_COUNT": "7"}]
     )
-    assert records[0].key == "unknown"
-    assert records[0].payload["providerSensorId"] == "unknown"
+    assert records[0].key.startswith("unidentified:")
+    assert records[0].payload["providerSensorId"] is None
+    assert records[0].payload["identityStatus"] == "MISSING"
+
+
+def test_sdot_population_preserves_every_row_without_sensor_id():
+    """센서 ID가 없는 서로 다른 두 관측이 ``unknown`` 한 건으로 축약되는 데이터 유실을 막는다."""
+    rows = [
+        {"MODEL_NM": "SDOT-001", "SENSING_TIME": "20260903120000", "VISITOR_COUNT": "7"},
+        {"MODEL_NM": "SDOT-001", "SENSING_TIME": "20260903121000", "VISITOR_COUNT": "9"},
+    ]
+    records = sdot_population.records_from_rows(rows)
+    assert len(records) == 2
+    assert len({record.key for record in records}) == 2
+    assert [record.payload["raw"]["VISITOR_COUNT"] for record in records] == ["7", "9"]
 
 
 def test_sdot_population_keeps_only_latest_observation_per_sensor():

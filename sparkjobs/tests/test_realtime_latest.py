@@ -11,7 +11,7 @@ import pytest
 from pyspark.sql import SparkSession
 
 from common.kafka_source import parse_envelope
-from common.redis_sink import KEY_COL, TTL_COL, VALUE_COL
+from common.redis_sink import COLLECTED_TIME_COL, EVENT_TIME_COL, KEY_COL, TTL_COL, VALUE_COL
 from streaming.realtime_latest import latest_per_provider, to_redis_rows, transform
 
 
@@ -175,6 +175,8 @@ def test_redis_key_and_ttl_match_contract(spark, event_type, payload, expected_k
 
     assert row[KEY_COL] == expected_key
     assert row[TTL_COL] == expected_ttl
+    assert row[EVENT_TIME_COL] == "2026-09-04T12:00:00.000+09:00"
+    assert row[COLLECTED_TIME_COL] == "2026-09-04T12:00:10.000+09:00"
     assert value["canonicalMappingAvailable"] is False
     assert value["eventType"] == event_type
     assert value["providerKey"]

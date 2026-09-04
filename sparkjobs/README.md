@@ -24,6 +24,10 @@ sh submit.sh streaming/weather_latest.py
 sh submit.sh streaming/realtime_latest.py
 ```
 
+현재 저장소의 Compose에는 날씨 잡만 등록돼 있다. 비기상 잡의 자동 기동에 필요한 인프라 변경은
+[배포 요청 문서](../docs/meetings/2026-09-04-realtime-latest-deployment-handoff.md)에 서비스 정의와
+검증 절차까지 정리했으며, 인프라 담당자가 적용하기 전에는 위 명령으로 수동 실행해야 한다.
+
 공통 필수 환경변수는 `KAFKA_BOOTSTRAP_SERVERS`, `REDIS_HOST`, `SPARK_CHECKPOINT_DIR`이며,
 Redis 인증을 사용하면 `REDIS_PASSWORD`도 넣는다. 비기상 잡은 기본적으로 두 원본 토픽을 모두
 구독한다. Replay나 격리 점검 때만 `SPARK_JOB_TOPICS`, `SPARK_JOB_NAME`을 바꾸고 운영 잡과

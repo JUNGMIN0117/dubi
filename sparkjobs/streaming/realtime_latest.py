@@ -28,7 +28,14 @@ from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 from common.kafka_source import read_events_stream
-from common.redis_sink import KEY_COL, TTL_COL, VALUE_COL, write_with_row_ttl
+from common.redis_sink import (
+    COLLECTED_TIME_COL,
+    EVENT_TIME_COL,
+    KEY_COL,
+    TTL_COL,
+    VALUE_COL,
+    write_latest_with_row_ttl,
+)
 from common.settings import Settings
 
 JOB_NAME = os.environ.get("SPARK_JOB_NAME", "realtime_latest")
@@ -259,7 +266,13 @@ def latest_per_provider(df: DataFrame) -> DataFrame:
         F.col("kafkaOffset").desc(),
     )
     return (
-        df.filter(F.col("providerKey").isNotNull())
+        # 시각을 파싱할 수 없는 행은 최신 여부를 증명할 수 없다. Redis에는 쓰지 않되 원문은
+        # HDFS에 남고 process_batch의 invalidTimestamp 건수로 운영자가 확인한다.
+        df.filter(
+            F.col("providerKey").isNotNull()
+            & F.col("occurredAt").isNotNull()
+            & F.col("collectedAt").isNotNull()
+        )
         .withColumn("rowNumber", F.row_number().over(order))
         .filter(F.col("rowNumber") == 1)
         .drop("rowNumber")
@@ -297,6 +310,10 @@ def to_redis_rows(df: DataFrame) -> DataFrame:
             )
         ).alias(VALUE_COL),
         ttl.cast("int").alias(TTL_COL),
+        # Redis Lua 비교가 문자열 정렬만으로도 시간순과 일치하도록 KST·밀리초 형식을 고정한다.
+        # 모든 Collector 시각 계약이 Asia/Seoul이므로 서로 다른 offset을 섞어 비교하지 않는다.
+        F.date_format("occurredAt", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX").alias(EVENT_TIME_COL),
+        F.date_format("collectedAt", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX").alias(COLLECTED_TIME_COL),
     )
 
 
@@ -309,7 +326,11 @@ def main() -> int:
         stream=sys.stdout,
     )
     settings = Settings.from_env()
-    spark = SparkSession.builder.appName(f"ddubi-{JOB_NAME}").getOrCreate()
+    spark = (
+        SparkSession.builder.appName(f"ddubi-{JOB_NAME}")
+        .config("spark.sql.session.timeZone", "Asia/Seoul")
+        .getOrCreate()
+    )
     spark.sparkContext.setLogLevel("WARN")
 
     def process_batch(batch_df: DataFrame, batch_id: int) -> None:
@@ -319,22 +340,28 @@ def main() -> int:
         try:
             supported_count = normalized.count()
             valid_count = normalized.filter(F.col("providerKey").isNotNull()).count()
+            valid_timestamp_count = normalized.filter(
+                F.col("occurredAt").isNotNull() & F.col("collectedAt").isNotNull()
+            ).count()
             latest = latest_per_provider(normalized).cache()
             rows = to_redis_rows(latest).cache()
             output_count = rows.count()
             if output_count:
-                write_with_row_ttl(
+                write_latest_with_row_ttl(
                     rows,
                     settings.redis_host,
                     settings.redis_port,
                     settings.redis_password,
                 )
             log.info(
-                "batch=%d supported=%d validIdentity=%d invalidIdentity=%d redisKeys=%d",
+                "batch=%d supported=%d validIdentity=%d invalidIdentity=%d "
+                "validTimestamp=%d invalidTimestamp=%d redisKeys=%d",
                 batch_id,
                 supported_count,
                 valid_count,
                 supported_count - valid_count,
+                valid_timestamp_count,
+                supported_count - valid_timestamp_count,
                 output_count,
             )
         finally:

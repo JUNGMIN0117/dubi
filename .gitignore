@@ -42,6 +42,7 @@ client/.metadata
 
 # Runtime data
 data/
+infra/transit-master/
 logs/
 *.log
 *.pid

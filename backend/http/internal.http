@@ -1,0 +1,98 @@
+### 기준선 적재 internal API (서버1 Spark 전용)
+#
+# 계약: docs/contracts/internal-api.yaml
+# 운영에서는 서버1 이 http://172.26.6.220/internal/... 로 부른다(nginx 가 서버1 IP 만 허용).
+# 로컬에서는 nginx 없이 8080 으로 직접 친다.
+#
+# 사전 준비: backend/.env 에 INTERNAL_API_KEY 를 넣고 앱 재시작.
+#   키가 비어 있으면 아래 요청이 전부 503 이다(의도된 동작 — 열어두지 않는다).
+
+@host = http://localhost:8080
+@key = local-dev-internal-key
+@version = 2026-09-01
+
+### ① 키 없이 호출 — 401 이어야 한다
+POST {{host}}/internal/baselines/segment/versions/{{version}}/rows
+Content-Type: application/json
+
+{ "rows": [] }
+
+### ② 행 업로드 — 200
+POST {{host}}/internal/baselines/segment/versions/{{version}}/rows
+X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "segmentId": "BUS:100100609:123456:123789", "dow": 3, "hourSlot": 8,
+      "weatherBucket": "DRY",  "p50": 1200, "p80": 1380, "p95": 1620, "sampleCount": 142 },
+    { "segmentId": "BUS:100100609:123456:123789", "dow": 3, "hourSlot": 8,
+      "weatherBucket": "RAIN", "p50": 1500, "p80": 1740, "p95": 2100, "sampleCount": 38 },
+    { "segmentId": "SUB:2:0222:0223", "dow": 3, "hourSlot": 8,
+      "weatherBucket": "DRY",  "p50": 180,  "p80": 195,  "p95": 210,  "sampleCount": 260 }
+  ]
+}
+
+> {%
+    client.test("적재된다", function () {
+        client.assert(response.status === 200, "status=" + response.status);
+        client.assert(response.body.data.received === 3, "received=" + response.body.data.received);
+    });
+%}
+
+### ③ 같은 청크 재전송 — 행이 늘지 않아야 한다 (업서트)
+POST {{host}}/internal/baselines/segment/versions/{{version}}/rows
+X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "segmentId": "BUS:100100609:123456:123789", "dow": 3, "hourSlot": 8,
+      "weatherBucket": "DRY", "p50": 1250, "p80": 1400, "p95": 1650, "sampleCount": 150 }
+  ]
+}
+
+> {%
+    client.test("versionTotal 이 3 그대로여야 한다", function () {
+        client.assert(response.body.data.versionTotal === 3,
+            "versionTotal=" + response.body.data.versionTotal + " — 재전송이 행을 늘렸다");
+    });
+%}
+
+### ④ 백분위 역전 — 400
+POST {{host}}/internal/baselines/segment/versions/{{version}}/rows
+X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "segmentId": "SUB:2:0222:0223", "dow": 3, "hourSlot": 9,
+      "weatherBucket": "DRY", "p50": 900, "p80": 600, "p95": 1200, "sampleCount": 10 }
+  ]
+}
+
+### ⑤ 활성화 — 여기까지 와야 추천이 새 값을 본다
+POST {{host}}/internal/baselines/segment/versions/{{version}}/activate
+X-DDUBI-API-KEY: {{key}}
+
+> {%
+    client.test("활성 버전이 바뀐다", function () {
+        client.assert(response.body.data.activeVersion === "2026-09-01");
+    });
+%}
+
+### ⑥ 서빙 중인 버전에 덮어쓰기 — 409 성격의 오류
+POST {{host}}/internal/baselines/segment/versions/{{version}}/rows
+X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{
+  "rows": [
+    { "segmentId": "SUB:2:0222:0223", "dow": 3, "hourSlot": 10,
+      "weatherBucket": "DRY", "p50": 200, "p80": 220, "p95": 240, "sampleCount": 5 }
+  ]
+}
+
+### ⑦ 행 0건 버전 활성화 — 거절되어야 한다
+POST {{host}}/internal/baselines/segment/versions/2099-01-01/activate
+X-DDUBI-API-KEY: {{key}}

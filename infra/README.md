@@ -123,14 +123,17 @@ docker run --rm -v "$(pwd)/sparkjobs:/jobs:ro" -w /jobs ddubi/spark:0.1.0 sh -c 
 
 Windows Git Bash에서는 `-v` 경로 변환 문제로 앞에 `MSYS_NO_PATHCONV=1`을 붙이고 경로를 `c:/Users/...` 형식으로 씁니다.
 
-## HDFS 되돌리기 (kill switch)
+## 장애 시 로컬 볼륨 임시 전환
 
-HDFS가 불안정하면 `.env`에서 두 값만 바꾸고 archiver·spark를 다시 띄우면 로컬 볼륨으로 돌아갑니다.
+HDFS 는 확정된 저장 계층입니다(2026-09-04). 아래는 HDFS 장애로 쓰기가 오래 막힐 때만 쓰는 **임시 조치**입니다.
+`.env`에서 두 값만 바꾸고 archiver·spark를 다시 띄우면 서버 로컬 볼륨에 씁니다.
 
 ```
 ARCHIVE_URI=file:///opt/ddubi/archive
 SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
 ```
+
+전환 중에 쓰인 아카이브는 HDFS 에 없습니다. HDFS 가 복구되면 값을 되돌린 뒤, 그 기간의 로컬 파일을 HDFS 로 옮겨야 원본이 빠지지 않습니다.
 
 ## 알려진 제약
 

@@ -134,7 +134,7 @@ SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
 
 ## 알려진 제약
 
-- Spark 워커 메모리(1536m)를 스트리밍 실행기(1g)와 배치 실행기(480m)가 나눠 씁니다. 배치가 자원을 못 받으면 마스터 UI(http://localhost:8080)에서 WAITING으로 보입니다. 워커 메모리를 늘리면 `BATCH_EXECUTOR_MEMORY`도 함께 올립니다.
+- Spark 워커 메모리(2560m, 컨테이너 상한 3g)를 스트리밍 두 잡(각 768m·코어 1)과 배치 실행기(480m·코어 2)가 나눠 씁니다. 잡이 자원을 못 받으면 마스터 UI(http://localhost:8080)에서 WAITING으로 보이고 드라이버 로그에 "Initial job has not accepted any resources"가 반복됩니다. 잡을 추가하면 executor 메모리 합계가 워커 메모리 안에 드는지 먼저 계산합니다.
 - Spark 이미지의 파이썬은 3.8입니다. sparkjobs 코드는 3.8 문법을 지켜야 합니다.
 - **설정 파일 마운트와 반영 시점**: 디렉터리로 마운트한 설정(`infra/spark/conf/`, `infra/monitoring/prometheus/`, nginx templates, grafana provisioning)은 배포(git pull) 뒤 컨테이너를 **재시작**하면 새 내용이 보입니다.
   파일 하나를 마운트한 HDFS 설정(`infra/hdfs/*.xml`)은 git 이 파일을 교체하면 컨테이너가 옛 파일을 계속 보므로, 고친 뒤에는 **재생성**이 필요합니다: `docker compose ... up -d --force-recreate hdfs-namenode hdfs-datanode1` (서버2는 `hdfs-datanode2`).

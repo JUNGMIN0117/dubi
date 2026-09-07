@@ -22,6 +22,10 @@ server {
         allow ${SERVER1_PRIVATE_IP};
         deny all;
         client_max_body_size 20m;
+        # 기준선 업로드는 청크(최대 5000행) 하나 처리에 시간이 걸릴 수 있다. 기본 60초면 nginx 가 먼저 끊어
+        # 502 가 나고 Spark 는 성공 여부를 모른 채 재시도한다 → 300초 (backend 요청, 2026-09-07. 실측 후 조정)
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
         proxy_pass http://backend:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -68,6 +72,10 @@ server {
         allow ${SERVER1_PRIVATE_IP};
         deny all;
         client_max_body_size 20m;
+        # 기준선 업로드는 청크(최대 5000행) 하나 처리에 시간이 걸릴 수 있다. 기본 60초면 nginx 가 먼저 끊어
+        # 502 가 나고 Spark 는 성공 여부를 모른 채 재시도한다 → 300초 (backend 요청, 2026-09-07. 실측 후 조정)
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
         proxy_pass http://backend:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

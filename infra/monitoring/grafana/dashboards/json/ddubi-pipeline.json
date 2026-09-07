@@ -47,7 +47,7 @@
       "gridPos": { "x": 16, "y": 0, "w": 8, "h": 10 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset{topic=~\"city.raw|transport.raw|segment.status\"}[5m]))", "legendFormat": "{{topic}}", "refId": "A" }
+        { "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset{topic=~\"city.raw|transport.raw|segment.status\"}[$__rate_interval]))", "legendFormat": "{{topic}}", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 12 } }, "overrides": [] }
     },
@@ -58,7 +58,7 @@
       "gridPos": { "x": 0, "y": 10, "w": 8, "h": 9 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "100 - avg by (server) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100", "legendFormat": "{{server}}", "refId": "A" }
+        { "expr": "100 - avg by (server) (rate(node_cpu_seconds_total{mode=\"idle\"}[$__rate_interval])) * 100", "legendFormat": "{{server}}", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "fillOpacity": 12 } }, "overrides": [] }
     },
@@ -94,7 +94,7 @@
       "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "expr": "sum by (server) (rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m]))", "legendFormat": "{{server}} 송신", "refId": "A" }
+        { "expr": "sum by (server) (rate(node_network_transmit_bytes_total{device!=\"lo\"}[$__rate_interval]))", "legendFormat": "{{server}} 송신", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps", "custom": { "fillOpacity": 12 } }, "overrides": [] }
     },

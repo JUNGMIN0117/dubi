@@ -10,6 +10,12 @@ server {
     listen 80;
     server_name _;
 
+    # backend 컨테이너 주소를 매번 다시 찾는다. 고정 주소(proxy_pass http://backend:8080)는 nginx 기동 때 한 번만
+    # IP 를 풀어 backend 재생성으로 IP 가 바뀌면 502 가 났다(2026-09-03·09-07 재현). 변수로 두면 resolver 규칙대로
+    # 도커 내부 DNS(127.0.0.11)에 10초마다 다시 묻는다. 부수 효과: backend 가 없어도 nginx 가 기동된다.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $backend_upstream http://backend:8080;
+
     # Let's Encrypt 도메인 검증 파일 (certbot 이 webroot 볼륨에 놓는다)
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -26,7 +32,7 @@ server {
         # 502 가 나고 Spark 는 성공 여부를 모른 채 재시도한다 → 300초 (backend 요청, 2026-09-07. 실측 후 조정)
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
-        proxy_pass http://backend:8080;
+        proxy_pass $backend_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -51,6 +57,12 @@ server {
     http2 on;
     server_name ${PUBLIC_DOMAIN};
 
+    # backend 컨테이너 주소를 매번 다시 찾는다. 고정 주소(proxy_pass http://backend:8080)는 nginx 기동 때 한 번만
+    # IP 를 풀어 backend 재생성으로 IP 가 바뀌면 502 가 났다(2026-09-03·09-07 재현). 변수로 두면 resolver 규칙대로
+    # 도커 내부 DNS(127.0.0.11)에 10초마다 다시 묻는다. 부수 효과: backend 가 없어도 nginx 가 기동된다.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $backend_upstream http://backend:8080;
+
     ssl_certificate     /etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${PUBLIC_DOMAIN}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -60,7 +72,7 @@ server {
 
     # 사용자 API — backend 로 프록시. /api 접두사는 보존된다 (트레일링 슬래시 없음)
     location /api/ {
-        proxy_pass http://backend:8080;
+        proxy_pass $backend_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -76,7 +88,7 @@ server {
         # 502 가 나고 Spark 는 성공 여부를 모른 채 재시도한다 → 300초 (backend 요청, 2026-09-07. 실측 후 조정)
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
-        proxy_pass http://backend:8080;
+        proxy_pass $backend_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

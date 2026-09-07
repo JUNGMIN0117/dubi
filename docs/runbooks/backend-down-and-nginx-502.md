@@ -42,10 +42,10 @@ $DC2 --profile data --profile serving up -d mysql backend
 ```
 3. 2 를 한 뒤에는 반드시 B 도 확인한다 (backend 가 새로 만들어졌으므로 IP 가 바뀐다).
 
-**B. nginx 가 옛 IP 를 기억** — nginx 는 시작할 때 `backend` 라는 이름을 IP 로 한 번 바꿔 두고 다시 묻지 않는다.
-backend 가 같은 IP 를 다시 받으면 502 가 나지 않지만(도커가 빈 IP 를 재사용), 다른 컨테이너가 그 사이 만들어졋으면 IP 가 바뀌어 502 가 난다. 배포 뒤에는 항상 `/api` 를 확인한다.
+**B. nginx 가 옛 IP 를 기억** — 2026-09-07 이후 nginx 템플릿은 `resolver 127.0.0.11 valid=10s` 와 변수 upstream 을 써서 backend 주소를 10초마다 다시 찾는다. 그래서 backend 재생성 뒤 502 는 **최대 10초 안에 스스로 풀린다**.
+10초가 지나도 502 가 계속되면 nginx 가 옛 템플릿으로 떠 있는 것이다. 배포 잡은 끝에 `scripts/post-deploy.sh server2` 로 템플릿을 다시 적용하고 reload 한 뒤 `/api` 가 401 인지 확인하므로, 이 경우는 배포 잡이 실패로 표시된다. 손으로 같은 일을 하려면 아래 명령을 쓴다.
 ```
-docker exec nginx nginx -s reload
+cd ~/S15P21E202/infra && bash scripts/post-deploy.sh server2      # 템플릿 재적용 + reload + backend·/api 확인
 curl -s -o /dev/null -w "%{http_code}\n" https://j15e202.p.ssafy.io/api/health    # 401 이면 해소
 ```
 
@@ -64,7 +64,7 @@ docker logs backend 2>&1 | grep -c "미설정"                                  
 
 - 배포 후 확인은 항상 `/api` 응답 코드(401)로 한다. `/healthz` 로 확인하면 backend 다운을 놓친다 (2026-09-03 에 70분 동안 몰랐던 이유).
 - 배포된 마이그레이션은 수정하지 않는다는 규칙을 backend 팀과 공유했다 (infra-guide 4절).
-- nginx IP 캐시는 두 가지 중 하나로 없앨 예정: nginx 설정에 `resolver 127.0.0.11` 을 두고 upstream 을 변수로 써서 매번 다시 조회하게 하거나, deploy-server2 잡 끝에 `nginx -s reload` 를 넣는다.
+- nginx IP 캐시는 2026-09-07 에 `resolver 127.0.0.11 valid=10s` + 변수 upstream 으로 해결했다. nginx 템플릿(`infra/nginx/templates/`)은 마운트라 git pull 만으로는 반영되지 않고 **컨테이너 재시작**이 필요하다.
 - backend 헬스를 Prometheus 가 감시하게 하면 이 상황이 알림으로 온다 (모니터링 확장 항목).
 
 ## 연습 기록

@@ -25,7 +25,7 @@ docker exec kafka du -sh /var/lib/kafka/data                    # 토픽 데이�
 |---|---|---|
 | `OOMKilled=true` | 힙(-Xmx1g)·컨테이너 제한(2g) 초과. 파티션·연결 수가 늘었을 때 | compose 의 `KAFKA_HEAP_OPTS`·`mem_limit` 상향 후 배포 |
 | `No space left on device` | 디스크 가득 | 보존 설정 확인, 큰 토픽(실험 토픽 등) 삭제 |
-| `unhealthy` 인데 로그는 정상 | 헬스체크(자바 CLI)가 10초 안에 응답 못 함. 부하 순간 | 잠시 대기. 반복되면 헬스체크 간격 조정 |
+| `unhealthy` 인데 로그는 정상 | 헬스체크(9092 포트 TCP 연결)가 5초 안에 안 됨. 브로커가 멈췼거나 기동 중 | 로그에서 기동 진행·오류 확인. 기동 중이면 대기 |
 | 로그에 오류 없이 재시작 | 누가 `restart` 했거나 호스트 재부팅 | 아래 복구 확인만 |
 
 ## 조치
@@ -58,7 +58,7 @@ docker logs archiver --since 15m 2>&1 | grep -ciE "error|exception"             
 ## 예방·후속
 
 - Kafka 데이터 볼륨(`ddubi_kafka-data`)은 지우면 21일치 대기열이 사라진다. 아카이브(HDFS)에는 남아 있으므로 재처리로 복구할 수 있다 ([reprocess-from-archive.md](reprocess-from-archive.md)).
-- 헬스체크가 10초마다 자바 CLI 를 띄워 CPU 를 잠깐 쓴다. 포트 확인 방식으로 바꾸는 것이 개선 항목이다.
+- 헬스체크는 9092 포트 TCP 연결만 확인한다(2026-09-07, 자바 CLI 방식의 CPU 스파이크 제거). 포트가 열려도 요청 처리 준비까지 몇 초 걸릴 수 있으므로, 새 서비스가 `depends_on: service_healthy` 만 믿고 바로 요청하면 첫 시도가 실패할 수 있다. 재시도를 넣는다.
 - transport 수집기가 켜지면 유입량이 크게 늘어 `retention.bytes`(1GiB/파티션) 가 21일보다 먼저 걸릴 수 있다. 가동 후 유입량을 재고 조정한다.
 
 ## 연습 기록

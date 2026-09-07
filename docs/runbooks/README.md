@@ -39,6 +39,12 @@ DC2="docker compose -f docker-compose.yml -f docker-compose.server2.yml"   # 서
 
 ## 정상 상태를 빨리 확인하는 명령
 
+가장 빠른 방법은 배포 잡이 끝에 돌리는 확인 스크립트를 직접 실행하는 것입니다. kafka·네임노드(서버1), nginx·backend·`/api`(서버2)를 확인하고 죽은 컨테이너를 보고합니다.
+```
+cd ~/S15P21E202/infra && bash scripts/post-deploy.sh server1    # 서버1에서 (서버2에서는 server2)
+```
+
+세부 항목을 따로 볼 때:
 ```
 # 서버1
 docker ps -a --format "{{.Names}}\t{{.Status}}"                     # 전부 Up 이어야 함 (spark-streaming-replay 는 Exited 가 정상)

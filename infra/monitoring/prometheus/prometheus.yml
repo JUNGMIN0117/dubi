@@ -23,4 +23,12 @@ scrape_configs:
       - targets: ["172.26.15.35:9308"]
         labels: { server: server1-data }
 
-  # 이후 추가 예정: Spring actuator(backend 가 생기면), mysqld-exporter, redis-exporter
+  # backend(Spring actuator). 같은 도커 네트워크 안에서 직접 읽는다 — nginx 는 /api·/internal 만 열어 두어
+  # /actuator 는 바깥에서 닿지 않는다. up{job="backend"} 가 0 이면 backend 가 죽은 것 (2026-09-07 추가)
+  - job_name: backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8080"]
+        labels: { server: server2-service }
+
+  # 이후 추가 예정: Spark 지표, mysqld-exporter, redis-exporter, HDFS(JMX)

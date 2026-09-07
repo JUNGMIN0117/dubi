@@ -269,7 +269,8 @@ deploy-server1:
       "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
        && cd infra && docker compose -f docker-compose.yml -f docker-compose.server1.yml
        --profile core --profile collect --profile spark --profile archive --profile hdfs --profile exporters
-       up -d --build"
+       up -d --build
+       && bash scripts/post-deploy.sh server1"
 
 deploy-server2:
   extends: .deploy
@@ -279,7 +280,8 @@ deploy-server2:
       "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
        && cd infra && docker compose -f docker-compose.yml -f docker-compose.server2.yml
        --profile data --profile serving --profile hdfs2 --profile monitoring
-       up -d --build"
+       up -d --build
+       && bash scripts/post-deploy.sh server2"
 
 # 후속 작업
 # - backend/**: 이미지 빌드 검증 잡 (backend/Dockerfile 은 있음, backend 팀 요청 시 build 단계에 추가)

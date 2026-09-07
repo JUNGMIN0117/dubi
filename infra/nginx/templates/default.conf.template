@@ -70,6 +70,14 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # 응답 보안 헤더 (2026-09-07). server 수준에 두면 add_header 가 없는 location 이 상속한다.
+    # nosniff: 브라우저가 파일 형식을 임의로 추측하지 않게 / SAMEORIGIN: 다른 사이트가 우리 페이지를 iframe 에 끼우지 못하게
+    # Referrer-Policy: 다른 사이트로 나갈 때 URL 전체를 넘기지 않게.
+    # HSTS 는 넣지 않는다(2026-09-07 결정): 브라우저가 기억하는 동안 인증서 사고 시 우회 불가라 발표용 서비스에는 위험이 더 크다.
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
     # 사용자 API — backend 로 프록시. /api 접두사는 보존된다 (트레일링 슬래시 없음)
     location /api/ {
         proxy_pass $backend_upstream;

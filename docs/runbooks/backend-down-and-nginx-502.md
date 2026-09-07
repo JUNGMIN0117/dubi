@@ -43,9 +43,9 @@ $DC2 --profile data --profile serving up -d mysql backend
 3. 2 를 한 뒤에는 반드시 B 도 확인한다 (backend 가 새로 만들어졌으므로 IP 가 바뀐다).
 
 **B. nginx 가 옛 IP 를 기억** — 2026-09-07 이후 nginx 템플릿은 `resolver 127.0.0.11 valid=10s` 와 변수 upstream 을 써서 backend 주소를 10초마다 다시 찾는다. 그래서 backend 재생성 뒤 502 는 **최대 10초 안에 스스로 풀린다**.
-10초가 지나도 502 가 계속되면 nginx 가 옛 템플릿으로 떠 있는 것이다(배포 뒤 재시작 누락). 아래 리로드는 임시 해소이고, 근본 조치는 `docker restart nginx` 로 새 템플릿을 적용하는 것이다. 배포 뒤에는 항상 `/api` 를 확인한다.
+10초가 지나도 502 가 계속되면 nginx 가 옛 템플릿으로 떠 있는 것이다. 배포 잡은 끝에 `scripts/post-deploy.sh server2` 로 템플릿을 다시 적용하고 reload 한 뒤 `/api` 가 401 인지 확인하므로, 이 경우는 배포 잡이 실패로 표시된다. 손으로 같은 일을 하려면 아래 명령을 쓴다.
 ```
-docker exec nginx nginx -s reload
+cd ~/S15P21E202/infra && bash scripts/post-deploy.sh server2      # 템플릿 재적용 + reload + backend·/api 확인
 curl -s -o /dev/null -w "%{http_code}\n" https://j15e202.p.ssafy.io/api/health    # 401 이면 해소
 ```
 

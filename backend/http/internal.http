@@ -6,6 +6,12 @@
 #
 # 사전 준비: backend/.env 에 INTERNAL_API_KEY 를 넣고 앱 재시작.
 #   키가 비어 있으면 아래 요청이 전부 503 이다(의도된 동작 — 열어두지 않는다).
+#
+# !! 주의 !! 이 API 만 /api/v1 을 붙이지 않는다.
+#   O  http://localhost:8080/internal/baselines/...
+#   X  http://localhost:8080/api/v1/internal/baselines/...
+#      -> 401 "인증이 필요합니다" 가 나온다. 키 문제가 아니라 경로 문제다.
+#   nginx 가 location /internal/ 을 서버1 IP 로 제한하고 URI 를 그대로 넘기기 때문이다.
 
 @host = http://localhost:8080
 @key = local-dev-internal-key

@@ -157,18 +157,22 @@ compose 의 backend 서비스가 그 파일을 `env_file` 로 읽습니다.
 `.gitlab-ci.yml` 이 인프라팀 파일이라 **검토만 부탁드립니다.** 머지되면 다음 배포부터
 자동으로 적용됩니다.
 
-### 제가 할 일
+### 값은 어디서 오나 — 둘로 나눴습니다
 
-GitLab **Settings → CI/CD → Variables** 에 아래를 등록합니다(전부 Masked + Protected).
-값은 제가 직접 넣겠습니다.
+| 값 | 두는 곳 | 담당 |
+| --- | --- | --- |
+| `KAKAO_*` `GOOGLE_*` `NAVER_*` | 서버 `infra/.env` | PM (이미 전달·설정됨) |
+| `MAIL_USERNAME` `MAIL_PASSWORD` `FIREBASE_CREDENTIALS_BASE64` | GitLab CI/CD 변수 | 백엔드(손정민) |
 
-```
-MAIL_USERNAME  MAIL_PASSWORD
-GOOGLE_CLIENT_ID  GOOGLE_CLIENT_SECRET
-NAVER_CLIENT_ID   NAVER_CLIENT_SECRET
-KAKAO_APP_ID      KAKAO_CLIENT_SECRET
-FIREBASE_CREDENTIALS_BASE64
-```
+소셜 키는 이미 서버 `.env` 에 있으니 그대로 씁니다. compose 의 `environment:` 에
+이름만 추가하면 컨테이너로 전달됩니다 — 지금까지는 그 줄이 없어서 값이 있어도
+전달되지 않았습니다.
+
+메일·FCM 만 CI 변수로 넣고 배포 잡이 `.env.backend` 로 심습니다.
+
+> ⚠️ **한 값을 양쪽에 두면 안 됩니다.** compose 는 `environment:` 가 `env_file` 보다
+> 우선이라, `.env` 에 값이 없으면 빈 문자열이 `.env.backend` 값을 덮어씁니다.
+> 그래서 두 목록이 겹치지 않게 나눴습니다.
 
 > ⚠️ 배포 기준 브랜치가 `develop` 이고 `Protected` 변수는 **보호 브랜치에만** 주입됩니다.
 > `develop` 이 보호 브랜치로 설정돼 있는지 확인 부탁드립니다. 아니면 변수가 빈 값으로

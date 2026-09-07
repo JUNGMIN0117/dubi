@@ -275,7 +275,11 @@ deploy-server2:
   extends: .deploy
   environment: { name: server2-service }
   script:
-    # backend 비밀값을 서버에 먼저 심는다.
+    # 메일·FCM 자격증명을 서버에 먼저 심는다.
+    #
+    # 소셜 키(GOOGLE/NAVER/KAKAO)는 여기 없다 — 서버 infra/.env 에 이미 있고
+    # compose 의 environment: 로 전달된다. 두 곳에 두면 environment 가 이겨서
+    # 빈 값이 덮어쓴다.
     #
     # CI/CD 변수는 러너 컨테이너 안에서만 산다. ssh 로 넘어가면 사라지고, 서버의
     # docker compose 는 서버에 있는 파일만 읽는다. 그래서 파일로 만들어 보낸다.
@@ -288,12 +292,6 @@ deploy-server2:
         echo "MAIL_PORT=${MAIL_PORT:-587}"
         echo "MAIL_USERNAME=$MAIL_USERNAME"
         echo "MAIL_PASSWORD=$MAIL_PASSWORD"
-        echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
-        echo "GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET"
-        echo "NAVER_CLIENT_ID=$NAVER_CLIENT_ID"
-        echo "NAVER_CLIENT_SECRET=$NAVER_CLIENT_SECRET"
-        echo "KAKAO_APP_ID=$KAKAO_APP_ID"
-        echo "KAKAO_CLIENT_SECRET=$KAKAO_CLIENT_SECRET"
         echo "FIREBASE_CREDENTIALS_BASE64=$FIREBASE_CREDENTIALS_BASE64"
       } | ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220 "umask 077 && cat > ~/S15P21E202/infra/.env.backend"
     - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220

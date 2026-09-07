@@ -66,6 +66,7 @@ flutter:
     - assets/images/ttubee-guide.png
     - assets/images/ttubee-moving.png
     - assets/images/ttubee/
+    - assets/images/auth/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

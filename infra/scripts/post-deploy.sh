@@ -26,11 +26,14 @@ wait_for() {
 
 health() { docker inspect "$1" --format '{{.State.Health.Status}}' 2>/dev/null | grep -qx healthy; }
 
-# 정상적으로 Exited 인 일회성 컨테이너는 제외하고, 죽었거나 재시작 반복 중인 컨테이너를 보고한다.
+# 우리 compose 프로젝트(ddubi) 컨테이너 중 죽었거나 재시작 반복 중인 것을 보고한다.
+# 라벨로 거르는 이유: 서버2에는 GitLab 러너가 잡마다 만드는 보조 컨테이너(runner-…, Exited 0)가 잠깐 남아
+# 이름으로 거르면 배포 잡이 자기 러너 컨테이너를 보고 실패했다(2026-09-07 첫 배포). 일회성(run --rm) 컨테이너도 제외.
 report_bad_containers() {
   local bad
-  bad=$(docker ps -a --filter status=restarting --filter status=exited --filter status=dead \
-        --format '{{.Names}}\t{{.Status}}' | grep -vE '^(spark-streaming-replay|spark-batch|replay-producer|certbot)\b' || true)
+  bad=$(docker ps -a --filter label=com.docker.compose.project=ddubi \
+        --filter status=restarting --filter status=exited --filter status=dead \
+        --format '{{.Names}}\t{{.Status}}' | grep -vE '^(spark-streaming-replay|spark-batch|replay-producer|certbot)\b|-run-' || true)
   if [ -n "$bad" ]; then
     echo "WARN: 정상이 아닌 컨테이너:"; echo "$bad"
     return 1

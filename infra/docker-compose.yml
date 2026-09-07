@@ -123,9 +123,12 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      # 브로커 포트(9092)에 TCP 연결이 되는지만 본다. 이전의 자바 CLI 방식은 10초마다 JVM 을 띄워
+      # CPU 가 순간 227%·메모리 +90MiB 튀었다(2026-09-07 실측). 포트 확인은 JVM 없이 끝난다.
+      # 포트가 열린 뒤 요청 처리까지 몇 초 차이가 날 수 있지만, 의존 서비스는 모두 자체 재시도가 있다.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9092"]
       interval: 10s
-      timeout: 10s
+      timeout: 5s
       retries: 12
       start_period: 20s
 

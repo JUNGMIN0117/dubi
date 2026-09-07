@@ -11,7 +11,7 @@
       "id": 1,
       "type": "stat",
       "title": "수집 대상 생존 (up)",
-      "description": "4가 아니면 어딘가 죽어 있다. prometheus / 서버1·2 node / 서버1 kafka-exporter",
+      "description": "5가 아니면 어딘가 죽어 있다. prometheus / 서버1·2 node / 서버1 kafka-exporter / 서버2 backend",
       "gridPos": { "x": 0, "y": 0, "w": 4, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [ { "expr": "sum(up)", "legendFormat": "살아있는 대상", "refId": "A" } ],
@@ -19,9 +19,30 @@
         "defaults": {
           "thresholds": { "mode": "absolute", "steps": [
             { "color": "red", "value": null },
-            { "color": "yellow", "value": 3 },
-            { "color": "green", "value": 4 }
+            { "color": "yellow", "value": 4 },
+            { "color": "green", "value": 5 }
           ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "backend 생존",
+      "description": "up{job=\"backend\"}. 0 이면 backend 가 죽었거나 /actuator/prometheus 에 답하지 않는다 → runbooks/backend-down-and-nginx-502.md",
+      "gridPos": { "x": 0, "y": 5, "w": 4, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "up{job=\"backend\"}", "legendFormat": "backend", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ] },
+          "mappings": [ { "type": "value", "options": { "0": { "text": "다운", "color": "red" }, "1": { "text": "정상", "color": "green" } } } ],
+          "noValue": "수집 안 됨"
         },
         "overrides": []
       },

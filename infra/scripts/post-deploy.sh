@@ -56,6 +56,10 @@ case "$target" in
     docker exec nginx nginx -t
     docker exec nginx nginx -s reload
     echo "OK: nginx 템플릿 재적용·reload"
+    # Prometheus 설정도 디렉터리 마운트라 파일은 바뀌지만 프로세스는 옛 설정을 쓴다. 문법 검사 뒤 SIGHUP 으로 재적재(중단 없음).
+    docker exec prometheus promtool check config /etc/prometheus/ddubi/prometheus.yml >/dev/null
+    docker exec prometheus kill -HUP 1
+    echo "OK: prometheus 설정 재적재"
     # 2) backend 기동 대기 (재빌드됐으면 Spring 기동에 40~90초)
     wait_for "backend healthy" 180 health backend
     # 3) 바깥에서 본 응답: 인증 없이 /api/health 를 부르면 401 이 정상. 502·000 이면 nginx→backend 경로 문제.

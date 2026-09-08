@@ -134,7 +134,7 @@ public class BaselineIngestService {
      * 조회와 전환이 겹치는 찰나를 견디고, 문제가 생기면 직전 버전으로 되돌릴 수 있어야 한다.
      */
     @Transactional
-    public BaselineActivateResponse activate(String dataVersion) {
+    public BaselineActivateResponse activate(String dataVersion, long claimedRows) {
         validateVersion(dataVersion);
 
         long rowCount = baselineRepository.countByDataVersion(dataVersion);
@@ -145,6 +145,8 @@ public class BaselineIngestService {
         }
 
         String currentActive = readConfig(PipelineConfigKey.BASELINE_ACTIVE_VERSION).orElse(null);
+        verifyRowCount(dataVersion, rowCount, claimedRows);
+        verifyNoSharpDrop(dataVersion, rowCount, currentActive);
         LocalDateTime activatedAt = BusinessTime.nowMicros();
 
         if (dataVersion.equals(currentActive)) {
@@ -167,6 +169,45 @@ public class BaselineIngestService {
         log.info("기준선 활성화 version={} previous={} rows={} purged={}",
                 dataVersion, currentActive, rowCount, purged);
         return new BaselineActivateResponse(dataVersion, currentActive, rowCount, activatedAt, purged);
+    }
+
+    /**
+     * 배치가 주장하는 행 수와 실제 저장된 수를 대조한다 (2026-09-01 합의).
+     *
+     * 업로드와 활성화를 나눈 것은 <b>배치가 죽는 경우</b>만 막아 준다 — activate 가 안 오니까.
+     * 하지만 청크 하나가 조용히 유실됐는데 배치는 성공했다고 믿고 activate 를 부르면,
+     * <b>반쪽 기준선이 그대로 서빙된다.</b> 그 경우를 잡는 것이 이 대조다.
+     */
+    private void verifyRowCount(String dataVersion, long stored, long claimed) {
+        if (stored != claimed) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, String.format(
+                    "행 수가 맞지 않습니다. 보냈다고 한 수=%d, 저장된 수=%d (version=%s). "
+                            + "청크가 유실됐을 수 있으니 새 dataVersion 으로 다시 올려 주세요.",
+                    claimed, stored, dataVersion));
+        }
+    }
+
+    /**
+     * 직전 활성 버전 대비 절반 미만으로 줄었으면 거절한다 (2026-09-01 합의).
+     *
+     * 행 수가 맞아떨어져도 배치 입력 자체가 부실했을 수 있다. 구간 수가 갑자기 반토막 나면
+     * 기준선이 없는 구간이 대량으로 생기고, 추천은 그걸 "폴백" 으로 조용히 넘긴다.
+     * 사고가 눈에 안 띄는 형태라 여기서 막는다.
+     *
+     * <p>구간 마스터가 실제로 줄어드는 정상적인 경우도 있을 수 있다. 그때는 계약을 고쳐
+     * 예외 수단을 두기로 하고, 지금은 합의대로 무조건 거절한다.
+     */
+    private void verifyNoSharpDrop(String dataVersion, long rowCount, String currentActive) {
+        if (currentActive == null || currentActive.equals(dataVersion)) {
+            return;   // 첫 활성화이거나 같은 버전 재활성화면 비교 대상이 없다
+        }
+        long activeRows = baselineRepository.countByDataVersion(currentActive);
+        if (activeRows > 0 && rowCount * 2 < activeRows) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, String.format(
+                    "행 수가 직전 활성 버전의 절반 미만입니다. 새 버전=%d행(%s), 활성 버전=%d행(%s). "
+                            + "배치 입력을 확인해 주세요.",
+                    rowCount, dataVersion, activeRows, currentActive));
+        }
     }
 
     /**

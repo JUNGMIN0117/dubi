@@ -56,12 +56,15 @@ endpoints:
       p50: "소요시간 중앙값, 단위 초"
       p80: "80퍼센타일, 단위 초"
       p95: "95퍼센타일, 단위 초"
-      sampleCount: "집계에 쓰인 표본 수, 1 이상"
+      sampleCount: "집계에 쓰인 표본 수, 0 이상 (2026-09-08 정정: 표본이 없었다는 것도 사실이라 0 을 허용)"
     constraints:
       - "한 요청당 rows 최대 5000개"
-      - "검증 실패 시 요청 전체 거부 (부분 저장 없음): p50 ≤ p80 ≤ p95, sampleCount ≥ 1, weatherBucket enum, 필수 필드 누락"
+      - "검증 실패 시 요청 전체 거부 (부분 저장 없음): p50 ≤ p80 ≤ p95, sampleCount ≥ 0, weatherBucket enum, 필수 필드 누락"
     responses:
-      "200": '{"accepted": 5000, "dataVersion": "2026-09-01"}'
+      "200": '{"dataVersion": "2026-09-01", "received": 5000, "versionTotal": 252000}'
+         # 2026-09-08 정정: 계약 초안의 accepted 대신 구현이 실제로 주는 필드로 맞춤.
+         #   received     이번 요청에 담겨 온 행 수
+         #   versionTotal 이 버전에 지금까지 쌓인 총 행 수 (배치가 스스로 대조할 수 있게)
       "400": "검증 실패. body 에 어긴 규칙과 첫 위반 행 인덱스"
       "401": "API 키 없음/불일치"
       "409": "이미 활성화된 dataVersion 에 추가 업로드 시도"
@@ -80,7 +83,8 @@ endpoints:
       Content-Type: application/json
       {"totalRows": 252000}
     responses:
-      "200": '{"activated": "2026-09-01", "previous": "2026-08-31", "deletedVersions": ["2026-08-30"]}'
+      "200": '{"activeVersion": "2026-09-01", "previousVersion": "2026-08-31", "rowCount": 252000, "activatedAt": "2026-09-01T03:12:44.123456", "purgedVersions": ["2026-08-30"]}'
+         # 2026-09-08 정정: 계약 초안의 activated/previous/deletedVersions 를 구현 필드명으로 맞춤
       "409": "행 수 불일치 또는 급감 감지. 활성 버전은 바뀌지 않음"
       "401": "API 키 없음/불일치"
 

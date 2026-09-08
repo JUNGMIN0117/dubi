@@ -1,5 +1,6 @@
 package com.ssafy.ddubi.domain.pipeline.controller;
 
+import com.ssafy.ddubi.domain.pipeline.dto.request.BaselineActivateRequest;
 import com.ssafy.ddubi.domain.pipeline.dto.request.BaselineRowsRequest;
 import com.ssafy.ddubi.domain.pipeline.dto.response.BaselineActivateResponse;
 import com.ssafy.ddubi.domain.pipeline.dto.response.BaselineUploadResponse;
@@ -57,15 +58,18 @@ public class InternalBaselineController {
     @Operation(summary = "기준선 버전 활성화",
             description = """
                     그 버전을 서빙 대상으로 전환한다. 행이 0건이면 400.
+                    본문의 totalRows 와 저장된 행 수가 다르면 409 — 청크 유실을 잡는 체크섬이다.
+                    직전 활성 버전의 절반 미만으로 줄어도 409.
                     직전 버전은 롤백용으로 보존하고, 48시간 지난 고아 버전은 함께 정리한다.
                     같은 버전 재활성화는 멱등하다.
                     """)
     @PostMapping("/{baselineType}/versions/{dataVersion}/activate")
     public ApiResponse<BaselineActivateResponse> activate(
             @PathVariable String baselineType,
-            @PathVariable String dataVersion) {
+            @PathVariable String dataVersion,
+            @Valid @RequestBody BaselineActivateRequest request) {
         requireSupportedType(baselineType);
-        return ApiResponse.success(baselineIngestService.activate(dataVersion));
+        return ApiResponse.success(baselineIngestService.activate(dataVersion, request.totalRows()));
     }
 
     private void requireSupportedType(String baselineType) {

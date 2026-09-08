@@ -77,9 +77,20 @@ Content-Type: application/json
   ]
 }
 
-### ⑤ 활성화 — 여기까지 와야 추천이 새 값을 본다
+### ⑤-a 행 수를 틀리게 보내면 409 — 청크 유실을 잡는 체크섬
 POST {{host}}/internal/baselines/segment/versions/{{version}}/activate
 X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{ "totalRows": 99 }
+
+### ⑤ 활성화 — 여기까지 와야 추천이 새 값을 본다
+# totalRows 는 ②③ 에서 실제로 들어간 행 수(3)와 같아야 한다.
+POST {{host}}/internal/baselines/segment/versions/{{version}}/activate
+X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{ "totalRows": 3 }
 
 > {%
     client.test("활성 버전이 바뀐다", function () {
@@ -102,3 +113,6 @@ Content-Type: application/json
 ### ⑦ 행 0건 버전 활성화 — 거절되어야 한다
 POST {{host}}/internal/baselines/segment/versions/2099-01-01/activate
 X-DDUBI-API-KEY: {{key}}
+Content-Type: application/json
+
+{ "totalRows": 0 }

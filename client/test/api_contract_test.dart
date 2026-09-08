@@ -1,6 +1,7 @@
 import 'package:ddubi/core/constants/api_paths.dart';
 import 'package:ddubi/core/network/api_error_response.dart';
 import 'package:ddubi/domain/models.dart';
+import 'package:ddubi/services/device_token_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -53,6 +54,18 @@ void main() {
     expect(response.fieldErrors.single.field, 'email');
     expect(response.fieldErrors.single.reason, '올바른 이메일 형식이 아닙니다.');
     expect(response.requestId, 'request-1');
+  });
+
+  test('FCM data를 알림 상세 또는 일정 경로로 변환한다', () {
+    expect(
+      notificationLocationFromData({
+        'notificationId': '27',
+        'scheduleId': '12',
+      }),
+      '/notifications/27',
+    );
+    expect(notificationLocationFromData({'scheduleId': '12'}), '/schedules/12');
+    expect(notificationLocationFromData(const {}), '/notifications');
   });
 
   test('일정 조회 응답에서 좌표와 updatedAt을 잃지 않는다', () {

@@ -91,6 +91,13 @@ class NotificationApi {
     );
   }
 
+  Future<AppNotification> getNotification(String id) async {
+    final data = _successData(
+      await _dio.get<Map<String, dynamic>>(ApiPaths.notification(id)),
+    );
+    return AppNotification.fromJson(data);
+  }
+
   Future<void> markRead(String id) async {
     if (_sessionStore.accessToken == null) return;
     await _dio.patch<Map<String, dynamic>>(ApiPaths.notificationRead(id));

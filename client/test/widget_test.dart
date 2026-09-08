@@ -17,6 +17,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+Future<void> _skipIntro(WidgetTester tester) async {
+  expect(find.text('건너뛰기'), findsOneWidget);
+  await tester.tap(find.text('건너뛰기'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   test('Mock 회원가입 계정으로 즉시 로그인할 수 있다', () async {
     final repository = MockAuthRepository();
@@ -56,12 +62,13 @@ void main() {
       ),
     );
     expect(find.text('뚜비'), findsOneWidget);
-    expect(find.textContaining('카카오로 시작하기'), findsOneWidget);
-    expect(find.textContaining('네이버로 시작하기'), findsOneWidget);
-    expect(find.textContaining('Apple로 시작하기'), findsNothing);
-    expect(find.textContaining('이메일로 시작하기'), findsOneWidget);
-    expect(find.byKey(const Key('debugHomeButton')), findsOneWidget);
-    await tester.tap(find.textContaining('이메일로 시작하기'));
+    await _skipIntro(tester);
+    expect(find.text('K'), findsOneWidget);
+    expect(find.text('G'), findsOneWidget);
+    expect(find.text('N'), findsOneWidget);
+    expect(find.text('Apple'), findsNothing);
+    expect(find.text('이메일을 입력해주세요'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '로그인'));
     await tester.pumpAndSettle();
     expect(find.text('이메일로 로그인'), findsOneWidget);
     expect(find.text('이메일을 잊으셨나요?'), findsOneWidget);
@@ -79,7 +86,8 @@ void main() {
 
   testWidgets('이메일 로그인은 잘못된 입력을 한국어로 안내한다', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
-    await tester.tap(find.textContaining('이메일로 시작하기'));
+    await _skipIntro(tester);
+    await tester.tap(find.widgetWithText(FilledButton, '로그인'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, 'abc@');
     await tester.tap(find.text('로그인'));
@@ -100,7 +108,9 @@ void main() {
         child: const DdubiApp(),
       ),
     );
-    await tester.tap(find.textContaining('카카오로 시작하기'));
+    await _skipIntro(tester);
+    await tester.ensureVisible(find.text('K'));
+    await tester.tap(find.text('K'));
     await tester.pumpAndSettle();
     expect(find.text('카카오 로그인'), findsOneWidget);
     expect(find.text('카카오 계정으로 계속하기'), findsOneWidget);
@@ -122,7 +132,9 @@ void main() {
         child: const DdubiApp(),
       ),
     );
-    await tester.tap(find.textContaining('네이버로 시작하기'));
+    await _skipIntro(tester);
+    await tester.ensureVisible(find.text('N'));
+    await tester.tap(find.text('N'));
     await tester.pumpAndSettle();
     expect(find.text('네이버 로그인'), findsOneWidget);
     expect(find.text('네이버 계정으로 계속하기'), findsOneWidget);
@@ -144,7 +156,9 @@ void main() {
         child: const DdubiApp(),
       ),
     );
-    await tester.tap(find.textContaining('Google로 시작하기'));
+    await _skipIntro(tester);
+    await tester.ensureVisible(find.text('G'));
+    await tester.tap(find.text('G'));
     await tester.pumpAndSettle();
     expect(find.text('Google 로그인'), findsOneWidget);
     expect(find.text('Google 계정으로 계속하기'), findsOneWidget);
@@ -399,7 +413,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
-    await tester.pump();
+    await _skipIntro(tester);
 
     expect(find.byType(SingleChildScrollView), findsWidgets);
     expect(tester.takeException(), isNull);

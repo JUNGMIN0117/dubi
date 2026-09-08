@@ -33,11 +33,11 @@
 |---|---|---|
 | `core` | kafka, kafka-ui | 가장 먼저 띄운다 |
 | `data` | mysql, redis | |
-| `collect` | collector-weather | 구현된 수집기만. 배포 잡이 이 프로필을 켠다 |
-| `collect-pending` | collector-bus/subway/traffic/event | 미구현. 소스 구현 후 해당 서비스의 profiles 를 `collect` 로 옮긴다 |
+| `collect` | collector-weather | 배포 잡이 항상 켜는 기상 수집기 |
+| `collect-realtime` | collector-bus/subway/traffic/event | 구현 완료. API 키와 명시적 수집 범위를 준비한 뒤 별도 활성화 |
 | `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
 | `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
-| `spark` | spark-master, spark-worker-1/2, spark-streaming-weather | |
+| `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
 | `batch` | spark-batch | 일회성 실행기. `run --rm`으로만 쓴다 |
 | `archive` | archiver | |
 | `monitoring` | prometheus, grafana, node-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
@@ -77,13 +77,27 @@
    ```
    - 로그에 `cycle ok records=14`가 나오면 Kafka까지 들어간 것입니다 (서울 25개 구가 공유하는 격자 14개 단위로 호출).
    - Kafka UI: http://localhost:8085 → Topics → city.raw
-   - Spark 드라이버: `docker logs spark-streaming-weather --tail 5` 에서 `batch=N grids=14`
+   - 기상 Spark 드라이버: `docker logs spark-streaming-weather --tail 5` 에서 `batch=N grids=14`
+   - 비기상 Spark 드라이버(기본 UI 4042, executor 480m): `docker logs spark-streaming-realtime --tail 5` 에서 `batch=N ... redisKeys=N`
    - Redis: `docker compose --profile data exec redis redis-cli -a <REDIS_PASSWORD> KEYS "weather:latest:*"` → 격자 14개
    - HDFS: http://localhost:9870 (Utilities → Browse) 에서 `/ddubi/archive`, `/ddubi/checkpoints`
 6. 상시 수집을 켜두려면:
    ```
    docker compose --profile core --profile collect up -d collector-weather   # 10분 주기
    ```
+   비기상 수집기는 `.env`에 필요한 API 키와 범위를 먼저 설정한 뒤 대상 서비스만 켭니다.
+   범위가 없는 서비스를 한꺼번에 시작하면 호출량이 커지거나 설정 오류로 재시작할 수 있으므로
+   운영 배포 잡에서는 자동 활성화하지 않습니다.
+   ```
+   docker compose --profile core --profile collect-realtime up -d collector-bus
+   docker compose --profile core --profile collect-realtime up -d collector-subway
+   docker compose --profile core --profile collect-realtime up -d collector-traffic
+   docker compose --profile core --profile collect-realtime up -d collector-event
+   ```
+
+   서버2의 대중교통 정적 마스터는 `infra/transit-master`에 공식 XLSX/CSV를 두고 `.env`의
+   `DDUBI_TRANSIT_MASTER_*` 경로와 버전을 확인한 다음 import를 한 번만 활성화합니다.
+   적재 성공과 활성 버전을 확인한 뒤 `DDUBI_TRANSIT_MASTER_IMPORT_ENABLED=false`로 되돌립니다.
 7. 기준선 배치(일회성):
    ```
    docker compose --profile batch --profile spark run --rm spark-batch sh submit.sh batch/weather_baseline.py --days 28

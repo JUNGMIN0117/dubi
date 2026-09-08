@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 import httpx
@@ -26,6 +28,31 @@ from sources.api_utils import (
 from sources.base import Record, SourceSpec, now_kst
 
 
+def _sensor_id(item: dict[str, Any]) -> str | None:
+    """응답 행에서 실제 장비를 구분할 수 있는 provider 센서 ID만 읽는다.
+
+    ``MODEL_NM``은 여러 장비가 공유하는 기종명이라 ID 후보에서 제외한다. ID가 없다는 사실을
+    ``unknown``이라는 가짜 공용 ID로 바꾸면 서로 다른 행이 한 센서로 합쳐지므로 ``None``을
+    반환하고, 호출자가 미식별 원문 보존 경로로 분리한다.
+    """
+
+    value = first_value(item, ("SENSOR_ID", "SENS_ID", "S_DOT_NO", "SERIAL_NO"))
+    return str(value) if value not in (None, "") else None
+
+
+def _unidentified_key(item: dict[str, Any]) -> str:
+    """센서 ID가 없는 원문 행을 Kafka/HDFS에서 개별 보존하기 위한 안정적 지문을 만든다.
+
+    정렬 JSON의 SHA-256 앞 24자를 사용하므로 같은 원문 재수집은 같은 partition key를 갖고,
+    서로 다른 시각·측정값의 행은 별도 이벤트로 남는다. 이 키는 canonical ID나 센서 ID가
+    아니며 payload에도 ``identityStatus=MISSING``을 명시해 Redis 매핑에 사용되지 않게 한다.
+    """
+
+    canonical = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
+    return f"unidentified:{digest}"
+
+
 def records_from_rows(rows: list[dict[str, Any]]) -> list[Record]:
     """원본 행을 센서별 최신 이벤트로 축약한다.
 
@@ -35,22 +62,39 @@ def records_from_rows(rows: list[dict[str, Any]]) -> list[Record]:
     """
     received = now_kst()
     latest: dict[str, Record] = {}
+    unidentified: list[Record] = []
     for item in rows:
-        sensor_id = str(
-            first_value(item, ("SENSOR_ID", "SENS_ID", "S_DOT_NO", "SERIAL_NO", "MODEL_NM"))
-            or "unknown"
-        )
+        sensor_id = _sensor_id(item)
         occurred = parse_kst(first_value(item, ("SENSING_TIME", "REGIST_DT", "DATA_TIME")), fallback=received)
+
+        # ID가 없는 여러 행을 ``latest['unknown']`` 하나로 축약하지 않는다. 모두 Kafka/HDFS에
+        # 남겨 제공처 품질 문제와 원본 건수를 재현하되 providerSensorId=None으로 두어 후속
+        # Spark가 최신 Redis 키를 발급하지 못하게 보수적으로 실패시킨다.
+        if sensor_id is None:
+            unidentified.append(
+                Record(
+                    key=_unidentified_key(item),
+                    event_type="sdot.population",
+                    occurred_at=occurred,
+                    payload={
+                        "providerSensorId": None,
+                        "identityStatus": "MISSING",
+                        "raw": item,
+                    },
+                )
+            )
+            continue
+
         record = Record(
             key=sensor_id,
             event_type="sdot.population",
             occurred_at=occurred,
-            payload={"providerSensorId": sensor_id, "raw": item},
+            payload={"providerSensorId": sensor_id, "identityStatus": "IDENTIFIED", "raw": item},
         )
         previous = latest.get(sensor_id)
         if previous is None or record.occurred_at > previous.occurred_at:
             latest[sensor_id] = record
-    return list(latest.values())
+    return list(latest.values()) + unidentified
 
 
 def _positive_setting(settings: Settings, name: str, default: int, maximum: int) -> int:
@@ -89,7 +133,10 @@ def fetch(settings: Settings, client: httpx.Client) -> list[Record]:
 
             # 전체 서울 조회는 공식 센서 수를 만족하면 과거 월 자료를 더 읽지 않는다. 자치구
             # 필터는 센서 수를 알 수 없으므로 짧은 페이지·전체 행 수·최대 페이지로 종료한다.
-            if not district and len(records_from_rows(rows)) >= expected_sensors:
+            # 미식별 원문 행은 모두 보존하지만 공식 센서 수 충족 계산에는 포함하지 않는다.
+            # 포함하면 ID 없는 행이 많을 때 아직 읽지 않은 정상 센서가 있어도 조기 종료한다.
+            identified_sensor_count = len({sensor_id for item in rows if (sensor_id := _sensor_id(item))})
+            if not district and identified_sensor_count >= expected_sensors:
                 break
             count = total_count(body, service)
             if len(page_rows) < size or (count is not None and end >= count):

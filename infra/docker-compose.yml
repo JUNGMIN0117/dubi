@@ -43,6 +43,21 @@ x-collector-env: &collector-env
   SEOUL_API_KEY: ${SEOUL_API_KEY:-}
   DATA_GO_KR_API_KEY: ${DATA_GO_KR_API_KEY:-}
   KMA_API_KEY: ${KMA_API_KEY:-}
+  BUS_ROUTE_IDS: ${BUS_ROUTE_IDS:-}
+  SUBWAY_LINES: ${SUBWAY_LINES:-}
+  SUBWAY_STATIONS: ${SUBWAY_STATIONS:-}
+  TRAFFIC_LINK_IDS: ${TRAFFIC_LINK_IDS:-}
+  CITY_AREA_IDENTIFIERS: ${CITY_AREA_IDENTIFIERS:-}
+  CITY_AREA_REGISTRY_PATH: ${CITY_AREA_REGISTRY_PATH:-}
+  CITY_AREA_CODES: ${CITY_AREA_CODES:-}
+  SDOT_DISTRICTS: ${SDOT_DISTRICTS:-}
+  SDOT_SERVICE_NAME: ${SDOT_SERVICE_NAME:-}
+  SDOT_MAX_PAGES: ${SDOT_MAX_PAGES:-}
+  SDOT_EXPECTED_SENSOR_COUNT: ${SDOT_EXPECTED_SENSOR_COUNT:-}
+  SUBWAY_ALERT_API_URL: ${SUBWAY_ALERT_API_URL:-}
+  SUBWAY_ALERT_SERVICE_NAME: ${SUBWAY_ALERT_SERVICE_NAME:-}
+  TRAFFIC_INCIDENT_SERVICE_NAME: ${TRAFFIC_INCIDENT_SERVICE_NAME:-}
+  SEOUL_API_PAGE_SIZE: ${SEOUL_API_PAGE_SIZE:-}
 
 # Spark 3개 노드가 공유하는 마운트. 설정은 infra/spark/conf/ 디렉터리를 /opt/spark/conf 에 마운트
 # (파일 하나를 마운트하면 git pull 로 파일이 교체돼도 컨테이너는 옛 inode 를 계속 봐서 재생성 전엔 반영되지 않는다.
@@ -135,14 +150,14 @@ services:
 
   # =========================================================================
   # collect : Python 수집기 x5 (Kafka 발행만 담당)                [서버1]
-  #  - collect          : 구현되어 실제로 돌리는 수집기 (지금은 weather)
-  #  - collect-pending  : 미구현 수집기. 켜면 소스 없음으로 재시작을 반복하므로 배포에서 제외한다.
-  #                       구현이 끝나면 해당 서비스의 profiles 를 ["collect"] 로 바꾼다
+  #  - collect           : 항상 배포하는 weather
+  #  - collect-realtime  : 구현 완료된 비기상 수집기. API 키와 명시적 수집 범위를
+  #                        준비한 뒤 운영자가 별도로 활성화한다.
   # =========================================================================
   collector-bus:
     <<: *collector
     container_name: collector-bus
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: bus
@@ -150,7 +165,7 @@ services:
   collector-subway:
     <<: *collector
     container_name: collector-subway
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: subway
@@ -158,7 +173,7 @@ services:
   collector-traffic:
     <<: *collector
     container_name: collector-traffic
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: traffic
@@ -173,7 +188,7 @@ services:
   collector-event:
     <<: *collector
     container_name: collector-event
-    profiles: ["collect-pending"]   # 미구현
+    profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: event
@@ -278,7 +293,15 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:-}
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      DDUBI_TRANSIT_MASTER_IMPORT_ENABLED: ${DDUBI_TRANSIT_MASTER_IMPORT_ENABLED:-false}
+      DDUBI_TRANSIT_MASTER_DATA_VERSION: ${DDUBI_TRANSIT_MASTER_DATA_VERSION:-}
+      DDUBI_TRANSIT_MASTER_BUS_WORKBOOK: ${DDUBI_TRANSIT_MASTER_BUS_WORKBOOK:-}
+      DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE: ${DDUBI_TRANSIT_MASTER_SUBWAY_TIMETABLE:-}
+      DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS: ${DDUBI_TRANSIT_MASTER_SUBWAY_REALTIME_STATIONS:-}
+      DDUBI_TRANSIT_MASTER_ALIASES: ${DDUBI_TRANSIT_MASTER_ALIASES:-}
       JAVA_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - ${TRANSIT_MASTER_DATA_DIR:-./transit-master}:/opt/ddubi/transit-master:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -439,6 +462,43 @@ services:
       SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
       SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
       SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ./spark/conf:/opt/spark/conf:ro
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+    depends_on:
+      - spark-master
+      - spark-worker-1
+      - spark-worker-2
+
+  # 비기상 실시간 이벤트(버스·지하철·도로·도시·S-DoT) 최신값 Redis 적재 잡.
+  spark-streaming-realtime:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-realtime
+    profiles: ["spark"]
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command: ["sh", "submit.sh", "streaming/realtime_latest.py"]
+    ports:
+      - "${SPARK_REALTIME_DRIVER_UI_PORT:-4042}:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      SPARK_JOB_TOPICS: transport.raw,city.raw
+      # 날씨 잡이 각 워커의 1GiB를 사용하므로 남은 512MiB 안에 executor가 배치되게 한다.
+      SPARK_EXECUTOR_MEMORY: ${REALTIME_EXECUTOR_MEMORY:-480m}
+      SPARK_CORES_MAX: ${REALTIME_CORES_MAX:-2}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}

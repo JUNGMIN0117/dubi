@@ -22,7 +22,6 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -178,21 +177,16 @@ public class BaselineIngestService {
      */
     private List<String> purgeOrphans(String activeVersion, String previousVersion) {
         LocalDateTime cutoff = BusinessTime.nowMicros().minus(ORPHAN_RETENTION);
-        List<String> purged = new ArrayList<>();
+        List<String> keep = previousVersion == null
+                ? List.of(activeVersion)
+                : List.of(activeVersion, previousVersion);
 
-        for (String version : baselineRepository.findAllDataVersions()) {
-            if (version.equals(activeVersion) || version.equals(previousVersion)) {
-                continue;
-            }
-            LocalDateTime lastCreated = baselineRepository.findLastCreatedAt(version);
-            if (lastCreated == null || lastCreated.isAfter(cutoff)) {
-                continue;   // 아직 활성화를 기다리는 중일 수 있다
-            }
+        List<String> purgeable = baselineRepository.findPurgeableVersions(cutoff, keep);
+        for (String version : purgeable) {
             int deleted = baselineRepository.deleteByDataVersion(version);
-            purged.add(version);
-            log.info("고아 기준선 버전 삭제 version={} rows={} lastCreated={}", version, deleted, lastCreated);
+            log.info("고아 기준선 버전 삭제 version={} rows={}", version, deleted);
         }
-        return purged;
+        return purgeable;
     }
 
     // ------------------------------------------------------------------

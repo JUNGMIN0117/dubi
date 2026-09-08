@@ -66,8 +66,8 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
                                     FilterChain chain) throws ServletException, IOException {
         if (!StringUtils.hasText(apiKey)) {
             log.error("INTERNAL_API_KEY 미설정 — /internal 요청을 거절합니다. uri={}", request.getRequestURI());
-            write(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE, ErrorCode.INTERNAL_ERROR,
-                    "내부 API 가 설정되지 않았습니다.");
+            write(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE, ErrorCode.SERVICE_NOT_CONFIGURED,
+                    "내부 API 키가 설정되지 않았습니다.");
             return;
         }
 

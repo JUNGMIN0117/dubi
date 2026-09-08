@@ -45,6 +45,8 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     private PipelineConfigRepository configRepository;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private jakarta.validation.Validator validator;
 
     private static BaselineRowsRequest.Row row(String segmentId, int hour, int p50) {
         return new BaselineRowsRequest.Row(segmentId, 3, hour, WeatherBucket.DRY,
@@ -208,5 +210,44 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
 
         assertThat(configRepository.findById(PipelineConfigKey.BASELINE_ACTIVATED_AT))
                 .isPresent();
+    }
+
+    // ------------------------------------------------------------------
+    // 청크 상한 경계값
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("정확히 상한(20,000행)은 통과한다 — 경계에서 막히면 분산팀이 청크를 못 채운다")
+    void acceptsExactlyMaxRows() {
+        BaselineRowsRequest exact = generate(BaselineRowsRequest.MAX_ROWS_PER_CHUNK);
+
+        BaselineUploadResponse response = service.upload("2026-09-10", exact);
+
+        assertThat(response.received()).isEqualTo(BaselineRowsRequest.MAX_ROWS_PER_CHUNK);
+        assertThat(response.versionTotal()).isEqualTo(BaselineRowsRequest.MAX_ROWS_PER_CHUNK);
+    }
+
+    @Test
+    @DisplayName("상한을 1행 넘기면 @Size 로 걸러진다 — nginx 가 끊기 전에 서버가 이유를 알려준다")
+    void rejectsOneRowOverMax() {
+        BaselineRowsRequest tooMany = generate(BaselineRowsRequest.MAX_ROWS_PER_CHUNK + 1);
+
+        var violations = validator.validate(tooMany);
+
+        assertThat(violations).hasSize(1);
+        assertThat(violations.iterator().next().getMessage()).contains("청크를 나눠");
+    }
+
+    /** 서로 다른 키를 갖는 유효한 행 n개. 업서트로 합쳐지지 않게 조합을 흩어 놓는다. */
+    private static BaselineRowsRequest generate(int n) {
+        List<BaselineRowsRequest.Row> rows = new java.util.ArrayList<>(n);
+        WeatherBucket[] buckets = WeatherBucket.values();
+        for (int i = 0; i < n; i++) {
+            rows.add(new BaselineRowsRequest.Row(
+                    "BUS:" + (100100000 + i / 504) + ":" + (100000 + i) + ":" + (200000 + i),
+                    (i % 7) + 1, i % 24, buckets[i % buckets.length],
+                    300, 420, 600, 10));
+        }
+        return new BaselineRowsRequest(rows);
     }
 }

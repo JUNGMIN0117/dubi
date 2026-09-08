@@ -275,6 +275,25 @@ deploy-server2:
   extends: .deploy
   environment: { name: server2-service }
   script:
+    # 메일·FCM 자격증명을 서버에 먼저 심는다.
+    #
+    # 소셜 키(GOOGLE/NAVER/KAKAO)는 여기 없다 — 서버 infra/.env 에 이미 있고
+    # compose 의 environment: 로 전달된다. 두 곳에 두면 environment 가 이겨서
+    # 빈 값이 덮어쓴다.
+    #
+    # CI/CD 변수는 러너 컨테이너 안에서만 산다. ssh 로 넘어가면 사라지고, 서버의
+    # docker compose 는 서버에 있는 파일만 읽는다. 그래서 파일로 만들어 보낸다.
+    #
+    # 값을 ssh 인자로 넘기지 않고 표준입력으로 보내는 이유: 인자는 서버의 프로세스
+    # 목록(ps)에 잠깐이라도 그대로 보인다.
+    - |
+      {
+        echo "MAIL_HOST=${MAIL_HOST:-smtp.gmail.com}"
+        echo "MAIL_PORT=${MAIL_PORT:-587}"
+        echo "MAIL_USERNAME=$MAIL_USERNAME"
+        echo "MAIL_PASSWORD=$MAIL_PASSWORD"
+        echo "FIREBASE_CREDENTIALS_BASE64=$FIREBASE_CREDENTIALS_BASE64"
+      } | ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220 "umask 077 && cat > ~/S15P21E202/infra/.env.backend"
     - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220
       "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
        && cd infra && docker compose -f docker-compose.yml -f docker-compose.server2.yml

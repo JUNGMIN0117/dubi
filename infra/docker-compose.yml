@@ -278,6 +278,17 @@ services:
     container_name: backend
     profiles: ["serving"]
     mem_limit: 1g
+    # 메일·FCM 자격증명만 이 파일에서 온다. 배포 잡(.gitlab-ci.yml deploy-server2)이
+    # GitLab CI/CD 변수를 읽어 서버에 만들어 준다.
+    #
+    # 소셜 키와 나뉘어 있는 이유: 소셜 키는 서버 .env 에 이미 있고 PM 이 관리한다.
+    # 같은 이름을 environment: 에도 두면 안 된다 — environment 가 env_file 보다
+    # 우선이라, .env 에 값이 없을 때 빈 문자열이 이 파일 값을 덮어쓴다.
+    #
+    # required: false — 파일이 없어도 기동은 된다. 그때는 메일·푸시가 로그로만 남는다.
+    env_file:
+      - path: .env.backend
+        required: false
     environment:
       TZ: ${TZ:-Asia/Seoul}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
@@ -293,6 +304,14 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:-}
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      # 소셜 로그인 — 서버의 infra/.env 에서 온다 (PM 이 관리).
+      # 값이 없으면 해당 provider 로그인만 실패하고 기동은 된다.
+      KAKAO_APP_ID: ${KAKAO_APP_ID:-}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
       # 서버1(Spark) 이 /internal/baselines 를 부를 때 쓰는 키.
       # 서버1·서버2 .env 에 같은 값이 있어야 한다 (2026-09-07 인프라 확인).
       # 비어 있으면 backend 가 /internal 을 503 으로 닫는다.

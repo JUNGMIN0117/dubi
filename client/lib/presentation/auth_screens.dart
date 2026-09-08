@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
@@ -610,6 +611,14 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
 
   Future<void> _submit() async {
     setState(() => serverError = null);
+    // Local UI preview only: reuse normal navigation without creating a session
+    // or sending these credentials to the authentication repository.
+    if (kDebugMode &&
+        email.text == 'localadmin' &&
+        password.text == 'local1234') {
+      widget.onAuthenticated();
+      return;
+    }
     if (!(formKey.currentState?.validate() ?? false)) return;
     setState(() => loading = true);
     try {

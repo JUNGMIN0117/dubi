@@ -123,6 +123,14 @@ ddubi:
     # 둘 다 비우면 로그 발송기로 대체된다(PushConfig). 키 없이도 개발이 된다.
     credentials-path: ${FIREBASE_CREDENTIALS_PATH:}
     credentials-base64: ${FIREBASE_CREDENTIALS_BASE64:}
+  internal:
+    # 서버1(Spark) 전용 API 키. 비어 있으면 /internal 전체를 503 으로 닫는다.
+    # 메일·FCM 과 달리 "없으면 로그로 대체"가 아니다 —
+    # 열어두면 네트워크 안에 들어온 누구나 기준선을 통째로 갈아치울 수 있다.
+    api-key: ${INTERNAL_API_KEY:}
+  pipeline:
+    # 기준선 업서트를 몇 행씩 끊어 보낼지. 크면 메모리·패킷이, 작으면 왕복이 늘어난다.
+    baseline-batch-size: 1000
   report:
     # 목표 시각 대비 이만큼 이상 일찍 도착해야 ON_TIME, 그 안쪽은 TIGHT.
     # 배차 간격을 생각하면 여유가 이보다 적을 때는 한 대만 놓쳐도 지각이다.

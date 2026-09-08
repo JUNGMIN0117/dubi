@@ -372,7 +372,8 @@ CREATE TABLE baseline_serving (
     created_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
-    UNIQUE KEY UK_BASELINE_KEY (segment_id, dow, hour_slot, weather_bucket, data_version)
+    UNIQUE KEY UK_BASELINE_KEY (segment_id, dow, hour_slot, weather_bucket, data_version),
+    KEY IX_BASELINE_VERSION (data_version) COMMENT '버전 단위 집계·삭제·정리용. UK 에서는 data_version 이 마지막이라 단독 조회에 못 쓴다'
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '평소 이동시간 baseline (소유: 백엔드 — Spark 가 internal API 로 업로드)';
 
 -- ---------------------------------------------------------------------

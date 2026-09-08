@@ -123,6 +123,11 @@ ddubi:
     # 둘 다 비우면 로그 발송기로 대체된다(PushConfig). 키 없이도 개발이 된다.
     credentials-path: ${FIREBASE_CREDENTIALS_PATH:}
     credentials-base64: ${FIREBASE_CREDENTIALS_BASE64:}
+  report:
+    # 목표 시각 대비 이만큼 이상 일찍 도착해야 ON_TIME, 그 안쪽은 TIGHT.
+    # 배차 간격을 생각하면 여유가 이보다 적을 때는 한 대만 놓쳐도 지각이다.
+    # 데이터가 쌓인 뒤 조정할 값이라 코드에 박지 않는다.
+    on-time-margin: 10m
   baseline:
     # 마지막 기준선 활성화가 이보다 오래되면 HOME dataState=STALE.
     stale-threshold: 48h

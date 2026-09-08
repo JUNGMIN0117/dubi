@@ -746,6 +746,9 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # 알림 수신처(Mattermost 수신 웹훅, Slack 호환). monitoring/grafana/alerting/contact-points.yaml 이 ${GF_ALERT_WEBHOOK_URL} 로 읽는다.
+      # 값은 서버 .env 에만. 비어 있으면(로컬) 무해한 자리표시 주소로 두어 Grafana 기동이 막히지 않게 한다
+      GF_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-https://example.invalid/hooks/unset}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning:ro

@@ -165,6 +165,15 @@ SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
   ```
 - **GitLab 러너는 서버2의 단독 컨테이너**(gitlab-runner, docker executor, privileged)로 돌고 있습니다. compose 소속이 아니며, `docker compose down` 의 영향을 받지 않습니다.
 
+## 모니터링·알림 (2026-09-08 확장)
+
+- **수집**: Prometheus(서버2)가 15초마다 읽습니다. 대상 12개 — prometheus, node-exporter 2대, kafka-exporter, backend(actuator), Spark(master·드라이버 2·executor 2), HDFS(json_exporter 가 네임노드 /jmx 변환), Redis(redis-exporter), MySQL(mysqld-exporter, 전용 최소 권한 계정 `exporter`).
+- **대시보드**: Grafana `DDUBI 파이프라인` 한 장. 위에서부터 서비스(서버2) / 데이터 파이프라인(서버1) / 서버 자원 행. 각 패널 설명(ⓘ)에 "정상 모양"과 이상 시 볼 절차서를 적어 두었습니다.
+- **알림 규칙**: `monitoring/grafana/alerting/rules.yaml` 11개(backend·MySQL·Redis 다운, Redis 메모리 90%, 수집 중단 30분, 아카이버 랙 252 초과, Spark 잡 부족, HDFS 데이터노드 1대·Missing 블록, 디스크 80%, 수집 대상 DOWN). Grafana → Alerting → Alert rules 에서 상태가 보입니다.
+- **알림 채널**: Mattermost 수신 웹훅(`alerting/contact-points.yaml`, Slack 호환 형식). 웹훅 URL 은 서버2 `.env` 의 `GRAFANA_ALERT_WEBHOOK_URL` → grafana 컨테이너 환경변수로 넘어갑니다. 같은 알림은 4시간마다 한 번만 다시 오고, 해결되면 "Resolved" 메시지가 옵니다. 채널을 바꾸려면 웹훅 URL 만 바꿔 grafana 를 재생성합니다.
+- **반영 시점**: Prometheus 설정은 배포 잡의 post-deploy 가 재적재하고, Grafana 대시보드·알림 파일은 10초마다 다시 읽습니다. Spark 지표 설정(`spark/conf/metrics.properties`)만 Spark 프로세스 재시작이 필요합니다.
+- 파일로 프로비저닝한 대시보드·알림은 화면에서 고쳐도 저장되지 않습니다. 저장소 파일을 고쳐 MR 로 올리는 것이 기준입니다.
+
 ## HTTPS (Let's Encrypt)
 
 - 인증서는 certbot 컨테이너(serving 프로필)가 **자동 갱신**합니다: 12시간마다 깨어나 만료 30일 전이면

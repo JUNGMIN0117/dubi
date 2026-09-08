@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
 
 import '../core/constants/layout_constants.dart';
@@ -3542,6 +3543,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   TransportPreferenceChoice selectedTransport =
       TransportPreferenceChoice.balanced;
   late Future<UserProfile> profile;
+  int? _selectedProfileCharacter = 0;
+  Uint8List? _selectedProfileBytes;
+  bool _photoAccessExplained = false;
 
   @override
   void initState() {
@@ -3561,13 +3565,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   @override
-  Widget build(BuildContext c) => AppPage(
-    title: '이동 설정',
-    webTitle: '서비스 설정',
-    webSubtitle: '경로 추천 방식과 앱 권한, 계정 상태를 관리하세요.',
-    index: widget.go == null ? null : 4,
-    onNav: widget.go,
-    child: FutureBuilder<UserProfile>(
+  Widget build(BuildContext context) {
+    final isWide =
+        MediaQuery.sizeOf(context).width >=
+        LayoutConstants.dashboardScreenBreakpoint;
+    final content = FutureBuilder<UserProfile>(
       future: profile,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -3576,33 +3578,121 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide =
-                constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
-            return isWide
-                ? _webLayout(context, snapshot.data!)
-                : _mobileLayout(context, snapshot.data!);
-          },
-        );
+        return isWide
+            ? _webLayout(context, snapshot.data!)
+            : _mobileLayout(context, snapshot.data!);
       },
-    ),
-  );
+    );
+
+    if (isWide) {
+      return AppPage(
+        title: '이동 설정',
+        webTitle: '서비스 설정',
+        webSubtitle: '경로 추천 방식과 앱 권한, 계정 상태를 관리하세요.',
+        child: content,
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5FBFD),
+      body: SafeArea(child: content),
+      bottomNavigationBar: widget.go == null
+          ? null
+          : DdubiBottomNav(index: 4, onTap: widget.go!),
+    );
+  }
 
   Widget _mobileLayout(BuildContext context, UserProfile user) => ListView(
     key: const Key('mobileSettingsLayout'),
-    padding: _pad,
+    padding: EdgeInsets.zero,
     children: [
-      _accountCard(context, user),
-      const SizedBox(height: 18),
-      const SectionHeader('교통수단 선호'),
-      const SizedBox(height: 10),
-      _transportSelector(),
-      const SizedBox(height: 16),
-      _permissionCard(),
-      const SizedBox(height: 14),
-      _serviceStatus(context),
+      _mobileHeader(context),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Transform.translate(
+              offset: const Offset(0, -18),
+              child: _mobileAccountCard(context, user),
+            ),
+            const SizedBox(height: 2),
+            _settingsSectionTitle('교통수단 선호'),
+            const SizedBox(height: 10),
+            _mobileTransportSelector(),
+            const SizedBox(height: 16),
+            _mobilePermissionCard(),
+            const SizedBox(height: 14),
+            _mobileServiceStatus(context),
+            const SizedBox(height: 14),
+            _logoutCard(context),
+          ],
+        ),
+      ),
     ],
+  );
+
+  Widget _mobileHeader(BuildContext context) => Container(
+    height: 164,
+    padding: const EdgeInsets.fromLTRB(22, 20, 18, 16),
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFFF7FCFF), Color(0xFFE2F8F7)],
+      ),
+    ),
+    child: Stack(
+      children: [
+        Positioned(
+          right: 2,
+          bottom: -22,
+          child: Opacity(
+            opacity: .96,
+            child: Image.asset(
+              'assets/images/ttubee/celebrate.png',
+              width: 132,
+              height: 132,
+              fit: BoxFit.contain,
+              semanticLabel: '이동 설정을 안내하는 뚜비',
+            ),
+          ),
+        ),
+        const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '이동 설정',
+              style: TextStyle(
+                color: Color(0xFF102454),
+                fontSize: 30,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -.8,
+              ),
+            ),
+            SizedBox(height: 7),
+            Text(
+              '더 편리한 이동을 위한 설정을 관리해요.',
+              style: TextStyle(
+                color: Color(0xFF5D6B89),
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Widget _settingsSectionTitle(String title) => Text(
+    title,
+    style: const TextStyle(
+      color: Color(0xFF102454),
+      fontSize: 21,
+      fontWeight: FontWeight.w900,
+      letterSpacing: -.4,
+    ),
   );
 
   Widget _webLayout(BuildContext context, UserProfile user) => ListView(
@@ -3676,6 +3766,483 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ],
   );
 
+  Widget _mobileAccountCard(BuildContext context, UserProfile user) =>
+      _settingsCard(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 70,
+                      height: 70,
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFD9F8F3),
+                        shape: BoxShape.circle,
+                      ),
+                      child: ClipOval(
+                        child: _profileImage(
+                          characterIndex: _selectedProfileCharacter,
+                          bytes: _selectedProfileBytes,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: Material(
+                        color: const Color(0xFF14B8A6),
+                        shape: CircleBorder(
+                          side: BorderSide(color: Colors.white, width: 2),
+                        ),
+                        child: InkWell(
+                          key: const Key('changeProfileImageButton'),
+                          onTap: () => _showProfileImageSheet(context),
+                          customBorder: const CircleBorder(),
+                          child: const SizedBox(
+                            width: 29,
+                            height: 29,
+                            child: Icon(
+                              Icons.add_rounded,
+                              color: Colors.white,
+                              size: 19,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        user.nickname,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF102454),
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        user.email ?? '연결된 소셜 계정',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF64708B),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Divider(height: 1, color: Color(0xFFE1E9EE)),
+            ),
+            const Row(
+              children: [
+                Icon(Icons.settings_rounded, color: Color(0xFF10B8A5)),
+                SizedBox(width: 8),
+                Text(
+                  '계정 관리',
+                  style: TextStyle(
+                    color: Color(0xFF102454),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Padding(
+              padding: EdgeInsets.only(left: 32),
+              child: Text(
+                '비밀번호를 확인한 후 아래 메뉴를 이용할 수 있어요.',
+                style: TextStyle(color: Color(0xFF64708B), fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 13),
+            const Row(
+              children: [
+                Expanded(
+                  child: _SettingsAccountAction(
+                    icon: Icons.person_outline_rounded,
+                    label: '닉네임 변경',
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: _SettingsAccountAction(
+                    icon: Icons.lock_outline_rounded,
+                    label: '비밀번호 변경',
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: _SettingsAccountAction(
+                    icon: Icons.delete_outline_rounded,
+                    label: '탈퇴하기',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+
+  Widget _profileImage({required int? characterIndex, Uint8List? bytes}) =>
+      bytes != null
+      ? Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          semanticLabel: '갤러리에서 선택한 사용자 프로필',
+        )
+      : _ProfileCharacterImage(index: characterIndex ?? 0);
+
+  Future<void> _showProfileImageSheet(BuildContext context) async {
+    final selection = await showModalBottomSheet<_ProfileImageSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _ProfileImageSheet(
+        initialCharacterIndex: _selectedProfileCharacter,
+        initialBytes: _selectedProfileBytes,
+        onPickGallery: () => _pickGalleryImage(sheetContext),
+      ),
+    );
+    if (selection == null || !mounted) return;
+    setState(() {
+      _selectedProfileCharacter = selection.characterIndex;
+      _selectedProfileBytes = selection.bytes;
+    });
+  }
+
+  Future<Uint8List?> _pickGalleryImage(BuildContext context) async {
+    if (!_photoAccessExplained) {
+      final allowed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Text(
+            '사진 접근 권한이 필요해요',
+            style: TextStyle(
+              color: Color(0xFF102454),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          content: const Text(
+            '프로필 사진을 선택하려면 갤러리 접근 권한이 필요해요.\n권한은 프로필 사진을 선택할 때만 사용돼요.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('나중에'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF12B8A6),
+              ),
+              child: const Text('허용하기'),
+            ),
+          ],
+        ),
+      );
+      if (allowed != true) return null;
+      _photoAccessExplained = true;
+    }
+
+    try {
+      final image = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 88,
+        maxWidth: 1600,
+        maxHeight: 1600,
+      );
+      if (image == null) return null;
+      return await image.readAsBytes();
+    } on Object {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('갤러리 접근 권한을 확인해주세요.')),
+        );
+      }
+      return null;
+    }
+  }
+
+  Widget _mobileTransportSelector() =>
+      RadioGroup<TransportPreferenceChoice>(
+        groupValue: selectedTransport,
+        onChanged: (choice) {
+          if (choice != null) _updateTransportPreference(choice);
+        },
+        child: Column(
+          children: TransportPreferenceChoice.values.map((choice) {
+            final selected = choice == selectedTransport;
+            final icon = choice == TransportPreferenceChoice.subwayFirst
+                ? Icons.subway_rounded
+                : choice == TransportPreferenceChoice.busFirst
+                ? Icons.directions_bus_rounded
+                : Icons.commute_rounded;
+            final description = switch (choice) {
+              TransportPreferenceChoice.subwayFirst =>
+                '지하철을 우선으로 경로를 안내해요.',
+              TransportPreferenceChoice.balanced =>
+                '버스와 지하철을 모두 고려해 최적의 경로를 안내해요.',
+              TransportPreferenceChoice.busFirst => '버스를 우선으로 경로를 안내해요.',
+            };
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: selected ? const Color(0xFFE8FBF8) : Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                child: InkWell(
+                  key: Key('transportPreference-${choice.name}'),
+                  onTap: () => _updateTransportPreference(choice),
+                  borderRadius: BorderRadius.circular(18),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.fromLTRB(14, 13, 8, 13),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: selected
+                            ? const Color(0xFF12B8A6)
+                            : const Color(0xFFE8EEF2),
+                        width: selected ? 1.5 : 1,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x0D174B61),
+                          blurRadius: 14,
+                          offset: Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFDDF8F3),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            icon,
+                            color: const Color(0xFF10AD9E),
+                            size: 27,
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                choice.label,
+                                style: const TextStyle(
+                                  color: Color(0xFF102454),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                description,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF64708B),
+                                  fontSize: 12,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Radio<TransportPreferenceChoice>(value: choice),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(growable: false),
+        ),
+      );
+
+  Widget _mobilePermissionCard() => _settingsCard(
+    child: const Column(
+      children: [
+        _SettingsPermissionRow(
+          icon: Icons.location_on_outlined,
+          title: '위치 권한',
+          subtitle: '현재 위치 기반 경로 안내에 사용',
+          status: '항상 허용',
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 4),
+          child: Divider(height: 1, color: Color(0xFFE1E9EE)),
+        ),
+        _SettingsPermissionRow(
+          icon: Icons.notifications_none_rounded,
+          title: '알림 권한',
+          subtitle: '출발 시간과 지연 안내에 사용',
+          status: '허용됨',
+        ),
+      ],
+    ),
+  );
+
+  Widget _mobileServiceStatus(BuildContext context) => _settingsCard(
+    color: const Color(0xFFFFFCFA),
+    child: Stack(
+      children: [
+        Positioned(
+          right: -8,
+          bottom: -18,
+          child: Opacity(
+            opacity: .92,
+            child: Image.asset(
+              'assets/images/ttubee/concerned.png',
+              width: 88,
+              height: 88,
+              fit: BoxFit.contain,
+              semanticLabel: '서비스 상태를 안내하는 뚜비',
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 60),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _settingsSectionTitle('서비스 상태'),
+              const SizedBox(height: 10),
+              const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.cloud_off_outlined,
+                    color: Color(0xFFFF6B35),
+                    size: 20,
+                  ),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '최근 교통 정보 업데이트가 지연됐어요.',
+                      style: TextStyle(
+                        color: Color(0xFFFF5A2A),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 7),
+              const Text(
+                '최신 교통정보가 부족하면 Mock 경로로 화면을 확인할 수 있어요.',
+                style: TextStyle(
+                  color: Color(0xFF64708B),
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _open(
+                  context,
+                  DelayAlertScreen(repository: MockDdubiRepository()),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF0FAE9F),
+                  side: const BorderSide(color: Color(0xFF37C7BA)),
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 15),
+                ),
+                iconAlignment: IconAlignment.end,
+                icon: const Icon(Icons.chevron_right_rounded, size: 19),
+                label: const Text(
+                  '상세 확인',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _logoutCard(BuildContext context) => Material(
+    color: const Color(0xFFFFF3F5),
+    borderRadius: BorderRadius.circular(19),
+    child: InkWell(
+      onTap: () => _showLogoutDialog(context),
+      borderRadius: BorderRadius.circular(19),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+        child: Row(
+          children: [
+            Icon(Icons.logout_rounded, color: Color(0xFFFF4765), size: 27),
+            SizedBox(width: 13),
+            Expanded(
+              child: Text(
+                '로그아웃',
+                style: TextStyle(
+                  color: Color(0xFFFF4765),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: Color(0xFF667085)),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _settingsCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(17),
+    Color color = Colors.white,
+  }) => Container(
+    padding: padding,
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: const Color(0xFFE5EEF3)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x101A6275),
+          blurRadius: 18,
+          offset: Offset(0, 7),
+        ),
+      ],
+    ),
+    child: child,
+  );
+
   Widget _accountCard(BuildContext context, UserProfile user) => InfoCard(
     child: Column(
       children: [
@@ -3723,6 +4290,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     },
   );
+
+  Future<void> _updateTransportPreference(
+    TransportPreferenceChoice value,
+  ) async {
+    final previous = selectedTransport;
+    setState(() => selectedTransport = value);
+    try {
+      final updated = await widget.userApi.update(
+        transportPrefs: value.apiTransportPrefs,
+      );
+      if (mounted) setState(() => profile = Future.value(updated));
+    } on Object {
+      if (!mounted) return;
+      setState(() => selectedTransport = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('교통수단 설정을 저장하지 못했어요.')),
+      );
+    }
+  }
 
   Widget _permissionCard() => const InfoCard(
     child: Column(
@@ -3796,6 +4382,462 @@ class _SettingsScreenState extends State<SettingsScreen> {
             }
           },
           child: const Text('로그아웃'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ProfileCharacterImage extends StatelessWidget {
+  const _ProfileCharacterImage({required this.index});
+
+  static const _assets = [
+    'assets/images/ttubee/profiles/profile_01.png',
+    'assets/images/ttubee/profiles/profile_02.png',
+    'assets/images/ttubee/profiles/profile_03.png',
+    'assets/images/ttubee/profiles/profile_04.png',
+    'assets/images/ttubee/profiles/profile_05.png',
+    'assets/images/ttubee/profiles/profile_06.png',
+    'assets/images/ttubee/profiles/profile_07.png',
+    'assets/images/ttubee/profiles/profile_08.png',
+    'assets/images/ttubee/profiles/profile_09.png',
+    'assets/images/ttubee/profiles/profile_10.png',
+  ];
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    image: true,
+    label: '프로필 캐릭터 ${index + 1}',
+    child: Image.asset(
+      _assets[index],
+      fit: BoxFit.cover,
+      filterQuality: FilterQuality.high,
+      excludeFromSemantics: true,
+    ),
+  );
+}
+
+class _ProfileImageSelection {
+  const _ProfileImageSelection({required this.characterIndex, this.bytes});
+
+  final int? characterIndex;
+  final Uint8List? bytes;
+}
+
+class _ProfileImageSheet extends StatefulWidget {
+  const _ProfileImageSheet({
+    required this.initialCharacterIndex,
+    required this.initialBytes,
+    required this.onPickGallery,
+  });
+
+  final int? initialCharacterIndex;
+  final Uint8List? initialBytes;
+  final Future<Uint8List?> Function() onPickGallery;
+
+  @override
+  State<_ProfileImageSheet> createState() => _ProfileImageSheetState();
+}
+
+class _ProfileImageSheetState extends State<_ProfileImageSheet> {
+  int? selectedCharacterIndex;
+  Uint8List? selectedBytes;
+  bool pickingImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    selectedCharacterIndex = widget.initialCharacterIndex;
+    selectedBytes = widget.initialBytes;
+  }
+
+  Widget _image({required int? characterIndex, Uint8List? bytes}) =>
+      bytes != null
+      ? Image.memory(bytes, fit: BoxFit.cover)
+      : _ProfileCharacterImage(index: characterIndex ?? 0);
+
+  @override
+  Widget build(BuildContext context) => FractionallySizedBox(
+    heightFactor: .9,
+    child: Material(
+      color: Colors.white,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          const SizedBox(height: 11),
+          Container(
+            width: 44,
+            height: 5,
+            decoration: BoxDecoration(
+              color: const Color(0xFFDCE4E8),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '프로필 이미지 변경',
+                    style: TextStyle(
+                      color: Color(0xFF102454),
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -.5,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  const Text(
+                    '마음에 드는 이미지를 선택해보세요.',
+                    style: TextStyle(color: Color(0xFF65718B), fontSize: 14),
+                  ),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 112,
+                          height: 112,
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE5FAF7),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: const Color(0xFF18B8A7),
+                              width: 2,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x2412A997),
+                                blurRadius: 18,
+                                offset: Offset(0, 7),
+                              ),
+                            ],
+                          ),
+                          child: ClipOval(
+                            child: _image(
+                              characterIndex: selectedCharacterIndex,
+                              bytes: selectedBytes,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '현재 프로필',
+                          style: TextStyle(
+                            color: Color(0xFF102454),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  const Text(
+                    '기본 이미지',
+                    style: TextStyle(
+                      color: Color(0xFF102454),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 11),
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                        ),
+                    itemCount: 10,
+                    itemBuilder: (context, index) {
+                      final selected =
+                          selectedBytes == null &&
+                          index == selectedCharacterIndex;
+                      return Material(
+                        color: const Color(0xFFF4FAFC),
+                        borderRadius: BorderRadius.circular(18),
+                        child: InkWell(
+                          key: Key('profileAsset-$index'),
+                          onTap: () => setState(() {
+                            selectedCharacterIndex = index;
+                            selectedBytes = null;
+                          }),
+                          borderRadius: BorderRadius.circular(18),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: selected
+                                          ? const Color(0xFF12B8A6)
+                                          : const Color(0xFFE2EAEE),
+                                      width: selected ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: _ProfileCharacterImage(index: index),
+                                  ),
+                                ),
+                              ),
+                              if (selected)
+                                const Positioned(
+                                  right: 4,
+                                  bottom: 4,
+                                  child: CircleAvatar(
+                                    radius: 10,
+                                    backgroundColor: Color(0xFF12B8A6),
+                                    child: Icon(
+                                      Icons.check_rounded,
+                                      color: Colors.white,
+                                      size: 14,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 22),
+                  const Text(
+                    '내 사진 사용하기',
+                    style: TextStyle(
+                      color: Color(0xFF102454),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Material(
+                    color: const Color(0xFFEAF9F8),
+                    borderRadius: BorderRadius.circular(17),
+                    child: InkWell(
+                      key: const Key('pickProfileImageFromGallery'),
+                      onTap: pickingImage
+                          ? null
+                          : () async {
+                              setState(() => pickingImage = true);
+                              final bytes = await widget.onPickGallery();
+                              if (!mounted) return;
+                              setState(() {
+                                pickingImage = false;
+                                if (bytes != null) {
+                                  selectedCharacterIndex = null;
+                                  selectedBytes = bytes;
+                                }
+                              });
+                            },
+                      borderRadius: BorderRadius.circular(17),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 15,
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.photo_library_outlined,
+                              color: Color(0xFF10AD9E),
+                              size: 25,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                pickingImage ? '사진을 불러오는 중...' : '갤러리에서 사진 선택',
+                                style: const TextStyle(
+                                  color: Color(0xFF17304D),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            const Icon(
+                              Icons.chevron_right_rounded,
+                              color: Color(0xFF64708B),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE7EEF2))),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF5F6D89),
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text('취소'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: FilledButton(
+                    key: const Key('applyProfileImageButton'),
+                    onPressed: pickingImage
+                        ? null
+                        : () => Navigator.pop(
+                            context,
+                            _ProfileImageSelection(
+                              characterIndex: selectedCharacterIndex,
+                              bytes: selectedBytes,
+                            ),
+                          ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF12B8A6),
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      '적용하기',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _SettingsAccountAction extends StatelessWidget {
+  const _SettingsAccountAction({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 54,
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF2F8FC),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, color: const Color(0xFF17243F), size: 20),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF17243F),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 1),
+        const Icon(
+          Icons.chevron_right_rounded,
+          color: Color(0xFF62708B),
+          size: 17,
+        ),
+      ],
+    ),
+  );
+}
+
+class _SettingsPermissionRow extends StatelessWidget {
+  const _SettingsPermissionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.status,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String status;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 9),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 39,
+          child: Icon(icon, color: const Color(0xFF17243F), size: 27),
+        ),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Color(0xFF102454),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF64708B),
+                  fontSize: 12,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          status,
+          style: const TextStyle(
+            color: Color(0xFF5F6D89),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 2),
+        const Icon(
+          Icons.chevron_right_rounded,
+          color: Color(0xFF65718B),
+          size: 20,
         ),
       ],
     ),

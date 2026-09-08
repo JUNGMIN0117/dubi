@@ -121,7 +121,14 @@ docker compose -f backend/docker-compose.dev.yml up -d
 4. **탈퇴 = 하드 삭제**: `DELETE user` 1건 → FK CASCADE로 전체 삭제. 보관·마스킹 없음. Redis 세션도 전부 폐기. 탈퇴자 관련 추적은 불가(팀 합의).
 5. **반복 일정 2단 구조**: `schedule_repeat`(규칙) → `schedule`(인스턴스, `UNIQUE(repeat_id, arrive_by)`). 인스턴스를 개별 수정하면 `is_customized=true`로 세팅하고, 반복 전체 수정(REPEAT-004)은 `is_customized=true` 행을 건너뛴다. 반복 중지는 `is_active=false`(행 삭제 아님), 기존 인스턴스는 유지.
 6. **경로 선택 단일성**: 한 schedule에 `route.is_selected=true`는 최대 1건. `PUT .../selection` 트랜잭션에서 나머지를 false로.
-7. **추천은 불변 INSERT**: `recommendation`은 절대 UPDATE하지 않는다. 계산 계기는 `trigger_type`, 중요도→백분위 정책은 NORMAL=p50 / HIGH=p80 / CRITICAL=p95, `reasons` JSON에 후보 비교 요약 포함, `data_checked_at` 필수.
+7. **추천은 불변 INSERT**: `recommendation`은 절대 UPDATE하지 않는다. 계산 계기는 `trigger_type`, `reasons` JSON에 후보 비교 요약 포함, `data_checked_at` 필수.
+   - ~~중요도→백분위 정책 NORMAL=p50 / HIGH=p80 / CRITICAL=p95~~ → **보류** (2026-09-08 ML 연동안 결정).
+     여유시간은 중요도와 무관하게 **검증된 공통 안전 여유** 하나를 쓴다. 중요도는 백분위가 아니라
+     **감시·재계산·알림 빈도**에만 쓴다(CRITICAL 일수록 자주 다시 계산하고 더 민감하게 알린다).
+     이유: ML(`traffic_t03`)이 p50/p80/p95 를 아직 `null` 로 준다. **커버리지 검증 전의 "p95" 는
+     이름만 p95** 라, 그 값으로 CRITICAL 일정의 출발 시각을 정하면 정확히 늦으면 안 되는 사람이 늦는다.
+   - `baseline_serving` 의 p50/p80/p95 자체는 계속 쓴다 — ML 실패 시 fallback 3단계(구간 기준선)다.
+   - ML 백분위 커버리지 검증이 끝나면 이 항목을 되살릴 수 있다. 그래서 지우지 않고 보류로 남긴다.
 8. **폴백**: 실시간(Redis) 데이터가 없거나 stale이면 `baseline_serving`으로 계산하고 `confidence=LOW`, 응답에 `fallbackUsed=true`. 아예 계산 불가일 때만 `503 REALTIME_DATA_UNAVAILABLE`.
 9. **알림은 무조건 행 생성**: 발송 억제(알림 끔, 중복)여도 `notification` 행은 만들고 `status=SUPPRESSED`. 재발송 방지는 `suppress_key`(일정·이유·행동 해시) + Redis TTL. `read_at IS NULL` 개수 = 안읽음 뱃지. 알림 on/off 는 사용자 토글(`PATCH /users/me` 의 `alarmEnabled`)이며 **서버가 시간대를 정해 자동 억제하는 DND 는 두지 않는다**(2026-09-03 확정) — 껐다 켜는 것은 사용자가 정하고, 서버가 임의로 막으면 새벽 일정의 출발 알림이 조용히 사라진다.
 10. **영향 일정 역조회 경로 (F-05)**: 변경 `segment_id` → `route_segment_edge(IX_RSEG_EDGE_SEGMENT)` → `route_segment` → `route(is_selected=true)` → `schedule(status=UPCOMING)`. 별도 schedule_segment 테이블 없음(합의됨).

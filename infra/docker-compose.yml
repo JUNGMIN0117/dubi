@@ -613,6 +613,9 @@ services:
       # 기준선 업로드 API (비우면 업로드 생략 — 구간 기준선 배치에서 사용 예정)
       INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
+      # 정상 축소(노선 폐지 등)를 운영자가 한 번만 허용할 때: 실행 직전 .env 에 넣고 끝나면 지운다 (docs/runbooks/reprocess-from-archive.md)
+      BASELINE_ALLOW_SHRINK: ${BASELINE_ALLOW_SHRINK:-}
+      BASELINE_SHRINK_REASON: ${BASELINE_SHRINK_REASON:-}
       # 스트리밍 실행기(1g x2)가 워커 메모리(1536m x2)를 먼저 쓰고 있어, 배치는 남는 몫(≈500m) 안에서 돈다.
       # 더 크게 잡으면 자원을 못 받아 무한 대기하고, Spark 최소값(450m) 보다 작으면 시작을 거부한다. 워커 메모리를 늘리면 함께 올린다.
       SPARK_EXECUTOR_MEMORY: ${BATCH_EXECUTOR_MEMORY:-480m}
@@ -839,7 +842,7 @@ services:
       - --mysqld.address=mysql:3306
       - --mysqld.username=exporter
     environment:
-      MYSQLD_EXPORTER_PASSWORD: ${MYSQL_EXPORTER_PASSWORD}
+      MYSQLD_EXPORTER_PASSWORD: ${MYSQL_EXPORTER_PASSWORD:-}   # 서버2 .env 에만 있음. 빈 기본값을 두어 서버1에서 compose 명령 시 경고가 나지 않게
 
 networks:
   ddubi-network:

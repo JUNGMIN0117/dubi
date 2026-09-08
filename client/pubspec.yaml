@@ -40,6 +40,7 @@ dependencies:
   cupertino_icons: ^1.0.9
   firebase_core: ^4.14.0
   firebase_messaging: ^16.6.0
+  image_picker: ^1.2.3
 
 dev_dependencies:
   flutter_test:
@@ -66,6 +67,8 @@ flutter:
     - assets/images/ttubee-guide.png
     - assets/images/ttubee-moving.png
     - assets/images/ttubee/
+    - assets/images/auth/
+    - assets/images/ttubee/profiles/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

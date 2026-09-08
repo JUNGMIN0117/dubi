@@ -47,7 +47,16 @@ public enum ErrorCode {
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
     // 카카오 길찾기 연결 실패·응답 손상처럼 우리 서버 밖의 길찾기 제공자 문제
     ROUTE_PROVIDER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "외부 길찾기 서비스를 사용할 수 없습니다."),
-    REALTIME_DATA_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "실시간 교통 데이터를 사용할 수 없습니다.");
+    REALTIME_DATA_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "실시간 교통 데이터를 사용할 수 없습니다."),
+
+    /**
+     * 필요한 설정이 없어 그 기능만 닫아 둔 상태.
+     *
+     * INTERNAL_ERROR 와 구분하는 이유: 서버가 고장 난 것이 아니라 <b>운영자가 값을 넣으면
+     * 해결되는</b> 상태다. 모니터링에서 장애로 집계되면 안 되고, 받는 쪽도 재시도가
+     * 의미 없다는 것을 알아야 한다.
+     */
+    SERVICE_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "필요한 설정이 없어 사용할 수 없습니다.");
 
     private final HttpStatus status;
     private final String defaultMessage;

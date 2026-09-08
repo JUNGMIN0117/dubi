@@ -281,6 +281,17 @@ services:
     container_name: backend
     profiles: ["serving"]
     mem_limit: 1g
+    # 메일·FCM 자격증명만 이 파일에서 온다. 배포 잡(.gitlab-ci.yml deploy-server2)이
+    # GitLab CI/CD 변수를 읽어 서버에 만들어 준다.
+    #
+    # 소셜 키와 나뉘어 있는 이유: 소셜 키는 서버 .env 에 이미 있고 PM 이 관리한다.
+    # 같은 이름을 environment: 에도 두면 안 된다 — environment 가 env_file 보다
+    # 우선이라, .env 에 값이 없을 때 빈 문자열이 이 파일 값을 덮어쓴다.
+    #
+    # required: false — 파일이 없어도 기동은 된다. 그때는 메일·푸시가 로그로만 남는다.
+    env_file:
+      - path: .env.backend
+        required: false
     environment:
       TZ: ${TZ:-Asia/Seoul}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
@@ -296,6 +307,18 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:-}
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      # 소셜 로그인 — 서버의 infra/.env 에서 온다 (PM 이 관리).
+      # 값이 없으면 해당 provider 로그인만 실패하고 기동은 된다.
+      KAKAO_APP_ID: ${KAKAO_APP_ID:-}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      # 서버1(Spark) 이 /internal/baselines 를 부를 때 쓰는 키.
+      # 서버1·서버2 .env 에 같은 값이 있어야 한다 (2026-09-07 인프라 확인).
+      # 비어 있으면 backend 가 /internal 을 503 으로 닫는다.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       DDUBI_TRANSIT_MASTER_IMPORT_ENABLED: ${DDUBI_TRANSIT_MASTER_IMPORT_ENABLED:-false}
       DDUBI_TRANSIT_MASTER_DATA_VERSION: ${DDUBI_TRANSIT_MASTER_DATA_VERSION:-}
       DDUBI_TRANSIT_MASTER_BUS_WORKBOOK: ${DDUBI_TRANSIT_MASTER_BUS_WORKBOOK:-}
@@ -746,6 +769,9 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # 알림 수신처(Mattermost 수신 웹훅, Slack 호환). monitoring/grafana/alerting/contact-points.yaml 이 ${GF_ALERT_WEBHOOK_URL} 로 읽는다.
+      # 값은 서버 .env 에만. 비어 있으면(로컬) 무해한 자리표시 주소로 두어 Grafana 기동이 막히지 않게 한다
+      GF_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-https://example.invalid/hooks/unset}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning:ro
@@ -777,6 +803,43 @@ services:
       - /:/host:ro,rslave
     ports:
       - "9100:9100"
+
+  hdfs-exporter:
+    <<: *common
+    image: prometheuscommunity/json-exporter:${JSON_EXPORTER_VERSION:-v0.7.0}
+    container_name: hdfs-exporter
+    # 네임노드 /jmx(JSON) 를 Prometheus 형식으로 바꾼다. 서버1 exporters 프로필. 서버2 Prometheus 가 7979 원격 스크랩
+    profiles: ["exporters"]
+    mem_limit: 128m
+    command:
+      - --config.file=/config/hdfs.yml
+    volumes:
+      - ./monitoring/json-exporter:/config:ro
+    ports:
+      - "7979:7979"
+
+  redis-exporter:
+    <<: *common
+    image: oliver006/redis_exporter:${REDIS_EXPORTER_VERSION:-v1.66.0}
+    container_name: redis-exporter
+    profiles: ["monitoring"]
+    mem_limit: 128m
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # 포트 비공개: prometheus 와 같은 도커 네트워크에서 redis-exporter:9121 로 읽는다
+
+  mysqld-exporter:
+    <<: *common
+    image: prom/mysqld-exporter:${MYSQLD_EXPORTER_VERSION:-v0.16.0}
+    container_name: mysqld-exporter
+    profiles: ["monitoring"]
+    mem_limit: 128m
+    command:
+      - --mysqld.address=mysql:3306
+      - --mysqld.username=exporter
+    environment:
+      MYSQLD_EXPORTER_PASSWORD: ${MYSQL_EXPORTER_PASSWORD}
 
 networks:
   ddubi-network:

@@ -127,6 +127,20 @@ public class Schedule extends BaseTimeEntity {
         this.status = ScheduleStatus.CANCELED;
     }
 
+    /**
+     * 도착 보고가 들어오면 완료 처리한다 (ARRIVAL-001).
+     *
+     * 이미 DONE 이어도 예외를 던지지 않는다 — 같은 일정을 두 번 보고하는 일은
+     * 앱 재시도로 실제로 생기고, 여기서 막으면 클라이언트가 재시도할 방법이 없다.
+     * 취소한 일정에 도착이 있을 수는 없으므로 그때만 거부한다.
+     */
+    public void markDone() {
+        if (status == ScheduleStatus.CANCELED) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, "취소된 일정은 도착을 기록할 수 없습니다.");
+        }
+        this.status = ScheduleStatus.DONE;
+    }
+
     /** UPCOMING 이 아니면 수정을 거부한다 — 끝난·취소된 일정의 수정은 의미가 없다. */
     public void requireEditable() {
         if (status != ScheduleStatus.UPCOMING) {

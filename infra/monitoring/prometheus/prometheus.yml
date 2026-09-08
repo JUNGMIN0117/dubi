@@ -31,4 +31,48 @@ scrape_configs:
       - targets: ["backend:8080"]
         labels: { server: server2-service }
 
-  # 이후 추가 예정: Spark 지표, mysqld-exporter, redis-exporter, HDFS(JMX)
+  # --- 2026-09-08 추가: Spark(master·드라이버·executor), HDFS(json_exporter), Redis, MySQL. 남은 것: 알림 규칙 ---
+  # Spark 지표 경로는 infra/spark/conf/metrics.properties 의 PrometheusServlet sink 가 연다
+  - job_name: spark-master
+    metrics_path: /metrics/master/prometheus
+    static_configs:
+      - targets: ["172.26.15.35:8080"]
+        labels: { server: server1-data }
+
+  - job_name: spark-driver
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ["172.26.15.35:4040"]
+        labels: { server: server1-data, job_name: weather_latest }
+      - targets: ["172.26.15.35:4042"]
+        labels: { server: server1-data, job_name: realtime_latest }
+
+  - job_name: spark-executors
+    metrics_path: /metrics/executors/prometheus
+    static_configs:
+      - targets: ["172.26.15.35:4040", "172.26.15.35:4042"]
+        labels: { server: server1-data }
+
+  - job_name: hdfs
+    metrics_path: /probe
+    params: { module: [hdfs] }
+    static_configs:
+      - targets: ["http://hdfs-namenode:9870/jmx"]
+        labels: { server: server1-data }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 172.26.15.35:7979
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels: { server: server2-service }
+
+  - job_name: mysql
+    static_configs:
+      - targets: ["mysqld-exporter:9104"]
+        labels: { server: server2-service }

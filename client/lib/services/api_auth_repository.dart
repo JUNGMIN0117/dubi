@@ -141,6 +141,7 @@ class ApiAuthRepository implements AuthRepository {
     final session = _sessionStore.session;
     if (session == null) return;
     try {
+      await _deviceTokenService.unregisterBeforeLogout();
       await _api.logout(
         refreshToken: session.refreshToken,
         deviceId: session.deviceId,

@@ -60,6 +60,16 @@ class AuthSession {
       user: AuthUser.fromJson(json['user'] as Map<String, dynamic>),
     );
   }
+
+  AuthSession withRefreshedTokens(Map<String, dynamic> json) {
+    return AuthSession(
+      accessToken: json['accessToken'] as String,
+      refreshToken: json['refreshToken'] as String,
+      tokenType: json['tokenType'] as String? ?? tokenType,
+      deviceId: deviceId,
+      user: user,
+    );
+  }
 }
 
 class AuthSessionStore {

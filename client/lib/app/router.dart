@@ -23,9 +23,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final recommendationApi = ref.watch(recommendationApiProvider);
 
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/intro',
     routes: [
-      GoRoute(path: '/', redirect: (context, state) => '/login'),
+      GoRoute(path: '/', redirect: (context, state) => '/intro'),
+      GoRoute(path: '/intro', builder: (context, state) => const IntroScreen()),
       GoRoute(
         path: '/login',
         builder: (context, state) => LoginScreen(
@@ -103,6 +104,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/notifications',
             builder: (context, state) =>
                 NotificationsScreen(api: notificationApi),
+            routes: [
+              GoRoute(
+                path: ':id',
+                builder: (context, state) => NotificationDetailScreen(
+                  api: notificationApi,
+                  notificationId: state.pathParameters['id']!,
+                ),
+              ),
+            ],
           ),
           GoRoute(
             path: '/settings',

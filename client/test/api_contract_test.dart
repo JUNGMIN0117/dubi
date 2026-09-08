@@ -1,7 +1,10 @@
+import 'package:ddubi/core/constants/api_constants.dart';
 import 'package:ddubi/core/constants/api_paths.dart';
 import 'package:ddubi/core/network/api_error_response.dart';
+import 'package:ddubi/domain/auth.dart';
 import 'package:ddubi/domain/models.dart';
 import 'package:ddubi/services/device_token_service.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -54,6 +57,42 @@ void main() {
     expect(response.fieldErrors.single.field, 'email');
     expect(response.fieldErrors.single.reason, '올바른 이메일 형식이 아닙니다.');
     expect(response.requestId, 'request-1');
+  });
+
+  test('토큰 재발급 응답에 없는 기존 사용자와 디바이스 정보를 유지한다', () {
+    final session = AuthSession(
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      tokenType: 'Bearer',
+      deviceId: 'device-1',
+      user: AuthUser(
+        id: 7,
+        provider: 'LOCAL',
+        email: 'member@ddubi.app',
+        nickname: '뚜비',
+      ),
+    );
+
+    final refreshed = session.withRefreshedTokens({
+      'accessToken': 'new-access',
+      'refreshToken': 'new-refresh',
+      'tokenType': 'Bearer',
+    });
+
+    expect(refreshed.accessToken, 'new-access');
+    expect(refreshed.refreshToken, 'new-refresh');
+    expect(refreshed.deviceId, 'device-1');
+    expect(refreshed.user.id, 7);
+    expect(refreshed.user.nickname, '뚜비');
+  });
+
+  test('baseUrl의 API 버전 경로를 요청 URI에 유지한다', () {
+    final options = RequestOptions(
+      baseUrl: ApiConstants.baseUrl,
+      path: ApiPaths.refresh,
+    );
+
+    expect(options.uri.path, '/api/v1/auth/refresh');
   });
 
   test('FCM data를 알림 상세 또는 일정 경로로 변환한다', () {

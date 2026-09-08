@@ -20,7 +20,8 @@ $DC1 --profile batch --profile spark run --rm spark-batch sh submit.sh batch/wea
 - 28일 창의 아카이브를 읽어 격자·요일·시간대 기준선을 계산하고 `hdfs://.../ddubi/baseline/weather` 에 덮어쓴다. 1분 안에 끝난다 (2026-09-07 실측 55초, 2,142행).
 - 자원: executor 480m·코어 2 가 worker 에 남아 있어야 한다. `Initial job has not accepted any resources` 가 반복되면 [spark-streaming-crash.md](spark-streaming-crash.md) 의 자원 부족 항목.
 - 결과 확인: `docker exec hdfs-namenode hdfs dfs -ls /ddubi/baseline/weather` 에 새 시각의 parquet 와 `_SUCCESS`, 복제 계수 2 (`hdfs dfs -stat %r`).
-- backend 업로드(방법 2)가 연결되면 이 배치가 결과를 backend 내부 API 로 올린다. 그 전까지는 HDFS 까지만.
+- backend 업로드(방법 2)는 2026-09-08 실물 연결이 확인됐다(서버1 → 서버2 사설 IP /internal). weather 기준선은 아직 HDFS 까지만 쓰고, 구간(segment) 기준선 배치가 생기면 업로드·activate 까지 한다.
+- **급감 거절이 났을 때**(activate 409 `ROW_COUNT_DROPPED`): 배치가 중간에 끊긴 게 아닌지 먼저 본다(업로드 로그의 versionTotal 과 배치 행 수). 노선 폐지 같은 정상 축소가 확실하면 서버1 `.env` 에 `BASELINE_ALLOW_SHRINK=true` 와 `BASELINE_SHRINK_REASON=<이유>` 를 넣고 배치를 한 번 다시 돌린 뒤 **두 값을 반드시 비운다**. 이유는 backend 로그와 pipeline_config 에 남는다.
 
 ## B. 아카이브를 Kafka 로 재생 (replay)
 

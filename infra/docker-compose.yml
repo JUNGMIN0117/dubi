@@ -746,6 +746,9 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # 알림 수신처(Mattermost 수신 웹훅, Slack 호환). monitoring/grafana/alerting/contact-points.yaml 이 ${GF_ALERT_WEBHOOK_URL} 로 읽는다.
+      # 값은 서버 .env 에만. 비어 있으면(로컬) 무해한 자리표시 주소로 두어 Grafana 기동이 막히지 않게 한다
+      GF_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-https://example.invalid/hooks/unset}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning:ro
@@ -777,6 +780,43 @@ services:
       - /:/host:ro,rslave
     ports:
       - "9100:9100"
+
+  hdfs-exporter:
+    <<: *common
+    image: prometheuscommunity/json-exporter:${JSON_EXPORTER_VERSION:-v0.7.0}
+    container_name: hdfs-exporter
+    # 네임노드 /jmx(JSON) 를 Prometheus 형식으로 바꾼다. 서버1 exporters 프로필. 서버2 Prometheus 가 7979 원격 스크랩
+    profiles: ["exporters"]
+    mem_limit: 128m
+    command:
+      - --config.file=/config/hdfs.yml
+    volumes:
+      - ./monitoring/json-exporter:/config:ro
+    ports:
+      - "7979:7979"
+
+  redis-exporter:
+    <<: *common
+    image: oliver006/redis_exporter:${REDIS_EXPORTER_VERSION:-v1.66.0}
+    container_name: redis-exporter
+    profiles: ["monitoring"]
+    mem_limit: 128m
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # 포트 비공개: prometheus 와 같은 도커 네트워크에서 redis-exporter:9121 로 읽는다
+
+  mysqld-exporter:
+    <<: *common
+    image: prom/mysqld-exporter:${MYSQLD_EXPORTER_VERSION:-v0.16.0}
+    container_name: mysqld-exporter
+    profiles: ["monitoring"]
+    mem_limit: 128m
+    command:
+      - --mysqld.address=mysql:3306
+      - --mysqld.username=exporter
+    environment:
+      MYSQLD_EXPORTER_PASSWORD: ${MYSQL_EXPORTER_PASSWORD}
 
 networks:
   ddubi-network:

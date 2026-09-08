@@ -40,8 +40,8 @@
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
 | `batch` | spark-batch | 일회성 실행기. `run --rm`으로만 쓴다 |
 | `archive` | archiver | |
-| `monitoring` | prometheus, grafana, node-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
-| `exporters` | node-exporter, kafka-exporter | 서버1 몫 (kafka-exporter 는 Kafka 옆에 있어야 함) |
+| `monitoring` | prometheus, grafana, node-exporter, redis-exporter·mysqld-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
+| `exporters` | node-exporter, kafka-exporter, hdfs-exporter | 서버1 몫 (kafka-exporter 는 Kafka 옆에 있어야 함) |
 
 ## 새 PC에서 처음 시작하기 (로컬 개발)
 

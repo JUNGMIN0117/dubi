@@ -166,6 +166,8 @@ def test_missing_provider_identity_is_countable_but_not_served(spark):
          "city:latest:sdot-population:D1", 1800),
         ("subway.alert", {"providerAlertId": "A1", "raw": {}},
          "transit:latest:subway-alert:A1", 600),
+        ("topis.notice", {"providerNoticeId": "N1", "raw": {}},
+         "traffic:latest:topis-notice:N1", 1800),
     ],
 )
 def test_redis_key_and_ttl_match_contract(spark, event_type, payload, expected_key, expected_ttl):

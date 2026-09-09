@@ -109,6 +109,13 @@ keys:
       서울교통공사 이례상황 알림별 제목·내용·호선·종료시각 요약. 알림 자체는 지연 분의
       정답이 아니며, 구간 crosswalk와 실제 관측 악화가 결합될 때 위험 원인으로 사용한다.
 
+  topisNoticeLatest:
+    pattern: "traffic:latest:topis-notice:{providerNoticeId}"
+    ttlSeconds: 1800
+    owner: spark
+    description: >-
+      TOPIS 공지사항별 최신 제목·본문·분류. 공지 고유 ID를 키로 사용하고 원문은 HDFS에 보존한다.
+
   # --- 백엔드 소유 ----------------------------------------------------
   authRefresh:
     pattern: "auth:refresh:{userId}:{deviceId}"

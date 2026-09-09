@@ -709,6 +709,16 @@ services:
       - ./hdfs/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
       - ./hdfs/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
       - hdfs-namenode-data:/hadoop/dfs/name
+    healthcheck:
+      # 세이프 모드가 풀려 쓰기가 가능해야 healthy (재시작 직후 1~2분은 starting). JMX 를 HTTP 로 읽으므로 JVM 을 띄우지 않는다.
+      # 데이터노드에는 헬스체크를 두지 않는다 — 배포 때 네임노드와 함께 재생성되는 위험 범위를 키우지 않기 위해 (2026-09-09)
+      test:
+        - CMD-SHELL
+        - "curl -sf 'http://localhost:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo' | grep -q '\"Safemode\" *: *\"\"'"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
   hdfs-datanode1:
     <<: *hdfs

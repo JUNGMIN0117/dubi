@@ -321,6 +321,17 @@ services:
     container_name: backend
     profiles: ["serving"]
     mem_limit: 1g
+    # 메일·FCM 자격증명만 이 파일에서 온다. 배포 잡(.gitlab-ci.yml deploy-server2)이
+    # GitLab CI/CD 변수를 읽어 서버에 만들어 준다.
+    #
+    # 소셜 키와 나뉘어 있는 이유: 소셜 키는 서버 .env 에 이미 있고 PM 이 관리한다.
+    # 같은 이름을 environment: 에도 두면 안 된다 — environment 가 env_file 보다
+    # 우선이라, .env 에 값이 없을 때 빈 문자열이 이 파일 값을 덮어쓴다.
+    #
+    # required: false — 파일이 없어도 기동은 된다. 그때는 메일·푸시가 로그로만 남는다.
+    env_file:
+      - path: .env.backend
+        required: false
     environment:
       TZ: ${TZ:-Asia/Seoul}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
@@ -336,6 +347,18 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:-}
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      # 소셜 로그인 — 서버의 infra/.env 에서 온다 (PM 이 관리).
+      # 값이 없으면 해당 provider 로그인만 실패하고 기동은 된다.
+      KAKAO_APP_ID: ${KAKAO_APP_ID:-}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      # 서버1(Spark) 이 /internal/baselines 를 부를 때 쓰는 키.
+      # 서버1·서버2 .env 에 같은 값이 있어야 한다 (2026-09-07 인프라 확인).
+      # 비어 있으면 backend 가 /internal 을 503 으로 닫는다.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       DDUBI_TRANSIT_MASTER_IMPORT_ENABLED: ${DDUBI_TRANSIT_MASTER_IMPORT_ENABLED:-false}
       DDUBI_TRANSIT_MASTER_DATA_VERSION: ${DDUBI_TRANSIT_MASTER_DATA_VERSION:-}
       DDUBI_TRANSIT_MASTER_BUS_WORKBOOK: ${DDUBI_TRANSIT_MASTER_BUS_WORKBOOK:-}
@@ -630,6 +653,9 @@ services:
       # 기준선 업로드 API (비우면 업로드 생략 — 구간 기준선 배치에서 사용 예정)
       INTERNAL_API_BASE_URL: ${INTERNAL_API_BASE_URL:-}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
+      # 정상 축소(노선 폐지 등)를 운영자가 한 번만 허용할 때: 실행 직전 .env 에 넣고 끝나면 지운다 (docs/runbooks/reprocess-from-archive.md)
+      BASELINE_ALLOW_SHRINK: ${BASELINE_ALLOW_SHRINK:-}
+      BASELINE_SHRINK_REASON: ${BASELINE_SHRINK_REASON:-}
       # 스트리밍 실행기(1g x2)가 워커 메모리(1536m x2)를 먼저 쓰고 있어, 배치는 남는 몫(≈500m) 안에서 돈다.
       # 더 크게 잡으면 자원을 못 받아 무한 대기하고, Spark 최소값(450m) 보다 작으면 시작을 거부한다. 워커 메모리를 늘리면 함께 올린다.
       SPARK_EXECUTOR_MEMORY: ${BATCH_EXECUTOR_MEMORY:-480m}
@@ -723,6 +749,16 @@ services:
       - ./hdfs/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
       - ./hdfs/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
       - hdfs-namenode-data:/hadoop/dfs/name
+    healthcheck:
+      # 세이프 모드가 풀려 쓰기가 가능해야 healthy (재시작 직후 1~2분은 starting). JMX 를 HTTP 로 읽으므로 JVM 을 띄우지 않는다.
+      # 데이터노드에는 헬스체크를 두지 않는다 — 배포 때 네임노드와 함께 재생성되는 위험 범위를 키우지 않기 위해 (2026-09-09)
+      test:
+        - CMD-SHELL
+        - "curl -sf 'http://localhost:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo' | grep -q '\"Safemode\" *: *\"\"'"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
   hdfs-datanode1:
     <<: *hdfs
@@ -786,6 +822,9 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # 알림 수신처(Mattermost 수신 웹훅, Slack 호환). monitoring/grafana/alerting/contact-points.yaml 이 ${GF_ALERT_WEBHOOK_URL} 로 읽는다.
+      # 값은 서버 .env 에만. 비어 있으면(로컬) 무해한 자리표시 주소로 두어 Grafana 기동이 막히지 않게 한다
+      GF_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-https://example.invalid/hooks/unset}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning:ro
@@ -817,6 +856,43 @@ services:
       - /:/host:ro,rslave
     ports:
       - "9100:9100"
+
+  hdfs-exporter:
+    <<: *common
+    image: prometheuscommunity/json-exporter:${JSON_EXPORTER_VERSION:-v0.7.0}
+    container_name: hdfs-exporter
+    # 네임노드 /jmx(JSON) 를 Prometheus 형식으로 바꾼다. 서버1 exporters 프로필. 서버2 Prometheus 가 7979 원격 스크랩
+    profiles: ["exporters"]
+    mem_limit: 128m
+    command:
+      - --config.file=/config/hdfs.yml
+    volumes:
+      - ./monitoring/json-exporter:/config:ro
+    ports:
+      - "7979:7979"
+
+  redis-exporter:
+    <<: *common
+    image: oliver006/redis_exporter:${REDIS_EXPORTER_VERSION:-v1.66.0}
+    container_name: redis-exporter
+    profiles: ["monitoring"]
+    mem_limit: 128m
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # 포트 비공개: prometheus 와 같은 도커 네트워크에서 redis-exporter:9121 로 읽는다
+
+  mysqld-exporter:
+    <<: *common
+    image: prom/mysqld-exporter:${MYSQLD_EXPORTER_VERSION:-v0.16.0}
+    container_name: mysqld-exporter
+    profiles: ["monitoring"]
+    mem_limit: 128m
+    command:
+      - --mysqld.address=mysql:3306
+      - --mysqld.username=exporter
+    environment:
+      MYSQLD_EXPORTER_PASSWORD: ${MYSQL_EXPORTER_PASSWORD:-}   # 서버2 .env 에만 있음. 빈 기본값을 두어 서버1에서 compose 명령 시 경고가 나지 않게
 
 networks:
   ddubi-network:

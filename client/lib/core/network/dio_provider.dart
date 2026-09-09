@@ -61,7 +61,7 @@ final dioProvider = Provider<Dio>((ref) {
               data is! Map<String, dynamic>) {
             throw const FormatException('토큰 갱신 응답 형식이 올바르지 않습니다.');
           }
-          final refreshed = AuthSession.fromJson(data);
+          final refreshed = session.withRefreshedTokens(data);
           sessionStore.save(refreshed);
 
           final request = error.requestOptions;

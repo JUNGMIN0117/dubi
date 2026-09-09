@@ -65,6 +65,26 @@ class PlaceLocation {
   };
 }
 
+class SavedPlace extends PlaceLocation {
+  const SavedPlace({
+    required this.id,
+    required super.name,
+    required super.lat,
+    required super.lng,
+    super.address,
+  });
+
+  final String id;
+
+  factory SavedPlace.fromJson(Map<String, dynamic> json) => SavedPlace(
+    id: json['id'].toString(),
+    name: json['name'] as String? ?? '',
+    address: json['address'] as String?,
+    lat: (json['lat'] as num).toDouble(),
+    lng: (json['lng'] as num).toDouble(),
+  );
+}
+
 abstract interface class PlaceSearchService {
   Future<List<PlaceLocation>> search(
     String query, {
@@ -195,6 +215,7 @@ class RepeatScheduleRule {
     this.importance = ScheduleImportance.high,
     this.considerLastTrip = false,
     this.preferredTransport = TransportPreferenceChoice.balanced,
+    this.active = true,
   });
 
   final String id;
@@ -208,6 +229,7 @@ class RepeatScheduleRule {
   final ScheduleImportance importance;
   final bool considerLastTrip;
   final TransportPreferenceChoice preferredTransport;
+  final bool active;
 
   String get place => destination.name;
   String get departurePlace => origin.name;
@@ -229,10 +251,52 @@ class RepeatScheduleRule {
     };
   }
 
+  Map<String, dynamic> toUpdateRequestJson() => toCreateRequestJson();
+
+  factory RepeatScheduleRule.fromJson(Map<String, dynamic> json) {
+    final rrule = json['rrule'] as String? ?? '';
+    const apiDays = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+    final byDay = rrule
+        .split(';')
+        .where((part) => part.startsWith('BYDAY='))
+        .map((part) => part.substring(6))
+        .expand((part) => part.split(','))
+        .toSet();
+    return RepeatScheduleRule(
+      id: json['id'].toString(),
+      title: json['title'] as String? ?? '',
+      origin: PlaceLocation.fromJson(
+        (json['origin'] as Map).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      ),
+      destination: PlaceLocation.fromJson(
+        (json['destination'] as Map).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      ),
+      time: _hourMinute(json['localTime'] as String?),
+      startDate: DateTime.parse(json['startDate'] as String),
+      untilDate: DateTime.tryParse(json['endDate'] as String? ?? ''),
+      weekdays: {
+        for (var index = 0; index < apiDays.length; index++)
+          if (byDay.contains(apiDays[index])) index + 1,
+      },
+      importance: ScheduleImportance.fromApi(json['importance'] as String?),
+      considerLastTrip: json['considerLastTrip'] as bool? ?? false,
+      active: json['active'] as bool? ?? true,
+    );
+  }
+
   static String _dateOnly(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-'
       '${value.month.toString().padLeft(2, '0')}-'
       '${value.day.toString().padLeft(2, '0')}';
+
+  static String _hourMinute(String? value) {
+    if (value == null || value.length < 5) return '00:00';
+    return value.substring(0, 5);
+  }
 }
 
 class ScheduleConflict {
@@ -348,6 +412,114 @@ class UserProfile {
   );
 }
 
+class ArrivalRecord {
+  const ArrivalRecord({
+    required this.scheduleId,
+    required this.status,
+    required this.reportDetailId,
+    this.actualArrival,
+    this.result,
+  });
+
+  final String scheduleId;
+  final String status;
+  final String reportDetailId;
+  final DateTime? actualArrival;
+  final String? result;
+
+  factory ArrivalRecord.fromJson(Map<String, dynamic> json) => ArrivalRecord(
+    scheduleId: json['scheduleId'].toString(),
+    status: json['status'] as String? ?? 'DONE',
+    reportDetailId: json['reportDetailId'].toString(),
+    actualArrival: DateTime.tryParse(json['actualArrival'] as String? ?? ''),
+    result: json['result'] as String?,
+  );
+}
+
+class TravelHistorySummary {
+  const TravelHistorySummary({
+    required this.totalCount,
+    required this.onTimeCount,
+    required this.tightCount,
+    required this.lateCount,
+    required this.onTimeRate,
+    this.avgDurationMin,
+  });
+
+  final int totalCount, onTimeCount, tightCount, lateCount;
+  final double onTimeRate;
+  final double? avgDurationMin;
+
+  factory TravelHistorySummary.fromJson(Map<String, dynamic> json) =>
+      TravelHistorySummary(
+        totalCount: (json['totalCount'] as num?)?.toInt() ?? 0,
+        onTimeCount: (json['onTimeCount'] as num?)?.toInt() ?? 0,
+        tightCount: (json['tightCount'] as num?)?.toInt() ?? 0,
+        lateCount: (json['lateCount'] as num?)?.toInt() ?? 0,
+        onTimeRate: (json['onTimeRate'] as num?)?.toDouble() ?? 0,
+        avgDurationMin: (json['avgDurationMin'] as num?)?.toDouble(),
+      );
+}
+
+class TravelHistoryItem {
+  const TravelHistoryItem({
+    required this.reportDetailId,
+    required this.scheduleId,
+    required this.title,
+    required this.arriveBy,
+    this.actualArrival,
+    this.result,
+  });
+
+  final String reportDetailId, scheduleId, title;
+  final DateTime arriveBy;
+  final DateTime? actualArrival;
+  final String? result;
+
+  factory TravelHistoryItem.fromJson(Map<String, dynamic> json) =>
+      TravelHistoryItem(
+        reportDetailId: json['reportDetailId'].toString(),
+        scheduleId: json['scheduleId'].toString(),
+        title: json['title'] as String? ?? '',
+        arriveBy: DateTime.parse(json['arriveBy'] as String),
+        actualArrival: DateTime.tryParse(
+          json['actualArrival'] as String? ?? '',
+        ),
+        result: json['result'] as String?,
+      );
+}
+
+class TravelHistory {
+  const TravelHistory({required this.summary, required this.items});
+  final TravelHistorySummary summary;
+  final List<TravelHistoryItem> items;
+}
+
+class WeeklyReport {
+  const WeeklyReport({
+    required this.id,
+    required this.periodStart,
+    required this.periodEnd,
+    required this.totalSchedules,
+    required this.onTimeEstimated,
+    required this.delayedEstimated,
+  });
+
+  final String id;
+  final DateTime periodStart, periodEnd;
+  final int totalSchedules, onTimeEstimated, delayedEstimated;
+  int get tightEstimated => totalSchedules - onTimeEstimated - delayedEstimated;
+
+  factory WeeklyReport.fromJson(Map<String, dynamic> json) => WeeklyReport(
+    id: json['id'].toString(),
+    periodStart: DateTime.parse(json['periodStart'] as String),
+    periodEnd: DateTime.parse(json['periodEnd'] as String),
+    totalSchedules: (json['totalSchedules'] as num?)?.toInt() ?? 0,
+    onTimeEstimated: (json['onTimeEstimated'] as num?)?.toInt() ?? 0,
+    delayedEstimated: (json['delayedEstimated'] as num?)?.toInt() ?? 0,
+  );
+}
+
 class RouteOption {
   const RouteOption({
     required this.kind,
@@ -374,6 +546,10 @@ abstract interface class ScheduleRepository {
 
 abstract interface class RepeatScheduleRepository {
   Future<void> addRepeatSchedule(RepeatScheduleRule rule);
+  Future<List<RepeatScheduleRule>> repeatSchedules({bool activeOnly = false});
+  Future<RepeatScheduleRule> repeatScheduleById(String id);
+  Future<void> updateRepeatSchedule(RepeatScheduleRule rule);
+  Future<void> deactivateRepeatSchedule(String id);
 }
 
 abstract interface class DdubiRepository

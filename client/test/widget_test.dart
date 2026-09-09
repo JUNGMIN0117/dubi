@@ -68,11 +68,9 @@ void main() {
     expect(find.text('N'), findsOneWidget);
     expect(find.text('Apple'), findsNothing);
     expect(find.text('이메일을 입력해주세요'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '로그인'));
-    await tester.pumpAndSettle();
-    expect(find.text('이메일로 로그인'), findsOneWidget);
-    expect(find.text('이메일을 잊으셨나요?'), findsOneWidget);
-    expect(find.text('비밀번호를 잊으셨나요?'), findsOneWidget);
+    expect(find.byKey(const Key('loginEmailField')), findsOneWidget);
+    expect(find.byKey(const Key('loginPasswordField')), findsOneWidget);
+    expect(find.text('이메일로 로그인'), findsNothing);
     await tester.enterText(
       find.byType(TextFormField).at(0),
       'member@ddubi.app',
@@ -84,20 +82,24 @@ void main() {
     expect(find.text('추천 출발 시간'), findsOneWidget);
   });
 
-  testWidgets('첫 로그인 화면의 이메일 영역으로도 실제 입력 화면에 진입한다', (tester) async {
+  testWidgets('첫 로그인 화면에서 이메일과 비밀번호를 바로 입력한다', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
-    await tester.tap(find.text('이메일을 입력해주세요'));
-    await tester.pumpAndSettle();
-    expect(find.text('이메일로 로그인'), findsOneWidget);
     expect(find.byType(TextFormField), findsNWidgets(2));
+    await tester.enterText(
+      find.byKey(const Key('loginEmailField')),
+      'member@ddubi.app',
+    );
+    await tester.enterText(
+      find.byKey(const Key('loginPasswordField')),
+      'password123',
+    );
+    expect(find.text('이메일로 로그인'), findsNothing);
   });
 
   testWidgets('이메일 로그인은 잘못된 입력을 한국어로 안내한다', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
-    await tester.tap(find.widgetWithText(FilledButton, '로그인'));
-    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, 'abc@');
     await tester.tap(find.text('로그인'));
     await tester.pump();

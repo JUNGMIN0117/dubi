@@ -74,6 +74,8 @@ def main() -> int:
         return 2
 
     interval = settings.interval_seconds or spec.default_interval_seconds
+    if settings.source != "weather":
+        interval = max(interval, spec.default_interval_seconds)
     log.info(
         "start source=%s topic=%s interval=%ss kafka=%s run_once=%s",
         spec.name, spec.topic, interval, settings.kafka_bootstrap_servers, settings.run_once,
@@ -87,7 +89,7 @@ def main() -> int:
     # 재부팅 직후 Kafka 가 늦게 뜨는 경우를 위해 첫 사이클 전에 브로커를 기다린다 (최대 5분)
     publisher.wait_ready(timeout_seconds=300)
     exit_code = 0
-    with httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+    with httpx.Client(timeout=httpx.Timeout(10.0 if settings.source == "weather" else 60.0, connect=5.0)) as client:
         while not stop.is_set():
             try:
                 count = run_cycle(spec, settings, client, publisher)
@@ -110,7 +112,7 @@ def main() -> int:
                 break
             stop.wait(interval)
 
-    if publisher.flush() > 0:
+    if publisher.flush() > 0 or publisher.failed > 0:
         exit_code = exit_code or 1
     log.info("stop sent=%d failed=%d", publisher.sent, publisher.failed)
     return exit_code

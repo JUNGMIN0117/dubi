@@ -27,24 +27,42 @@ T = TypeVar("T")
 # 커밋 전이라 유실은 없지만 그때마다 버퍼를 다시 채우는 낭비가 생긴다. 2·4·8초 세 번이면 약 14초를 버틴다.
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 2.0
+RETRY_MAX_WAIT_SECONDS = 30.0
+# 기동 시(폴더 생성)는 네임노드 세이프 모드 1~2분을 통째로 기다려야 하므로 더 길게: 2+4+8+16+30+30+30 = 120초
+STARTUP_RETRY_ATTEMPTS = 8
 _RETRIABLE = (OSError, requests.exceptions.RequestException)
 _NO_RETRY_STATUS = {400, 401, 404}   # 요청 자체가 잘못된 것 — 다시 보내도 같다
+# fsspec webhdfs 는 서버가 준 RemoteException 중 IllegalArgument→ValueError, AccessControl→PermissionError,
+# FileNotFound→FileNotFoundError 로 바꾸고 "나머지"는 RuntimeError 로 던진다. 세이프 모드(SafeModeException)·
+# StandbyException·RetriableException 이 그 나머지에 들어간다 (2026-09-09 배포 때 세이프 모드 33초 동안 9번 재시작한 원인).
+# RuntimeError 전부를 재시도하면 진짜 버그도 삼키므로, 메시지에 아래 표식이 있을 때만 재시도한다.
+_RETRIABLE_RUNTIME_MARKERS = ("safe mode", "safemode", "retriable", "standby")
 _sleep = time.sleep                  # 테스트가 바꿔 끼운다
 
 
+def _is_retriable(exc: BaseException) -> bool:
+    if isinstance(exc, _RETRIABLE):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        return status not in _NO_RETRY_STATUS
+    if isinstance(exc, RuntimeError):
+        msg = str(exc).lower()
+        return any(m in msg for m in _RETRIABLE_RUNTIME_MARKERS)
+    return False
+
+
 def with_retry(fn: Callable[[], T], what: str, attempts: int = RETRY_ATTEMPTS,
-               backoff: float = RETRY_BACKOFF_SECONDS) -> T:
-    """fn 을 실행하고 연결 오류·HTTP 오류면 backoff 배수로 기다린 뒤 다시 시도한다."""
+               backoff: float = RETRY_BACKOFF_SECONDS, max_wait: float = RETRY_MAX_WAIT_SECONDS) -> T:
+    """fn 을 실행하고 짧은 장애(연결 오류·HTTP 5xx·세이프 모드)면 backoff 배수(상한 max_wait)로 기다린 뒤 다시 시도한다."""
     for attempt in range(1, attempts + 1):
         try:
             return fn()
-        except _RETRIABLE as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            if status in _NO_RETRY_STATUS or attempt == attempts:
+        except Exception as exc:  # noqa: BLE001 — 아래에서 재시도 대상만 골라내고 나머지는 그대로 올린다
+            if not _is_retriable(exc) or attempt == attempts:
                 raise
-            wait = backoff * (2 ** (attempt - 1))
-            log.warning("%s 실패 (%s%s), %.0f초 뒤 재시도 %d/%d", what, exc.__class__.__name__,
-                        f" {status}" if status else "", wait, attempt + 1, attempts)
+            wait = min(backoff * (2 ** (attempt - 1)), max_wait)
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            log.warning("%s 실패 (%s%s: %s), %.0f초 뒤 재시도 %d/%d", what, exc.__class__.__name__,
+                        f" {status}" if status else "", str(exc)[:80], wait, attempt + 1, attempts)
             _sleep(wait)
     raise RuntimeError("unreachable")
 
@@ -60,7 +78,8 @@ class Storage:
         if uri.startswith("webhdfs://") and hdfs_user:
             options["user"] = hdfs_user
         fs, root = fsspec.core.url_to_fs(uri, **options)
-        fs.makedirs(root, exist_ok=True)
+        # 기동 직후 네임노드가 세이프 모드면 MKDIRS 가 거절된다. 여기서 죽으면 컨테이너가 재시작을 반복하므로 길게 기다린다
+        with_retry(lambda: fs.makedirs(root, exist_ok=True), f"init {uri}", attempts=STARTUP_RETRY_ATTEMPTS)
         return cls(fs=fs, root=root.rstrip("/"))
 
     def write_parquet(self, relative_path: str, table: pa.Table) -> str:

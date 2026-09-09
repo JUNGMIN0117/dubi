@@ -730,6 +730,16 @@ class _PlaceSearchDialog extends StatefulWidget {
   State<_PlaceSearchDialog> createState() => _PlaceSearchDialogState();
 }
 
+Future<PlaceLocation?> showPlaceSearchDialog(
+  BuildContext context, {
+  required String title,
+  required PlaceSearchService searchService,
+}) => showDialog<PlaceLocation>(
+  context: context,
+  builder: (_) =>
+      _PlaceSearchDialog(title: title, searchService: searchService),
+);
+
 class _PlaceSearchDialogState extends State<_PlaceSearchDialog> {
   final _query = TextEditingController();
   List<PlaceLocation> _results = const [];

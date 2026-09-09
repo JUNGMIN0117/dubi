@@ -17,6 +17,8 @@ class ApiPaths {
   static const String home = '/home';
   static const String notifications = '/notifications';
   static const String me = '/users/me';
+  static const String history = '/history';
+  static const String reports = '/reports';
 
   static const String placeSearch = '$places/search';
 
@@ -26,6 +28,8 @@ class ApiPaths {
   static String notificationRead(String id) => '${notification(id)}/read';
   static const String notificationsReadAll = '$notifications/read-all';
   static String scheduleRepeat(String id) => '$scheduleRepeats/$id';
+  static String scheduleArrival(String id) => '${schedule(id)}/arrival';
+  static String report(String id) => '$reports/$id';
   static String scheduleRecommendations(String scheduleId) =>
       '${schedule(scheduleId)}/recommendations';
   static String latestRecommendation(String scheduleId) =>

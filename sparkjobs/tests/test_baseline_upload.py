@@ -123,6 +123,15 @@ def test_shrink_without_reason_is_refused_before_sending(server, client):
         client.activate("v-nr", total_rows=5, allow_shrink=True)
 
 
+def test_shrink_reason_over_100_chars_is_refused_before_sending(server, client):
+    client.upload_rows("v-long", make_rows(5, "z"))
+    with pytest.raises(ValueError):
+        client.activate("v-long", total_rows=5, allow_shrink=True, shrink_reason="사" * 101)
+    # 정확히 100자는 통과해야 한다 (서버 mock 도 같은 기준)
+    result = client.activate("v-long", total_rows=5, allow_shrink=True, shrink_reason="사" * 100)
+    assert result["activeVersion"] == "v-long"
+
+
 def test_shrink_options_from_env():
     from common.baseline_upload import shrink_options_from_env
     assert shrink_options_from_env({}) == {"allow_shrink": False, "shrink_reason": None}

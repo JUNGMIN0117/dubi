@@ -109,23 +109,25 @@ groups:
             model: { refId: C, type: math, expression: "$A < 1" }
 
       - uid: ddubi-archiver-lag-high
-        title: 아카이버 랙 상한 초과
+        title: 아카이버 저장 정지 (랙이 2시간 동안 내려오지 않음)
         condition: C
         for: 10m
         labels: { severity: warning, layer: data }
         annotations:
-          summary: 컨슈머 랙이 252(정상 최고점 84 의 3배) 를 10분 넘게 유지. 아카이버가 HDFS 에 못 쓰고 있을 가능성
+          summary: >-
+            아카이버는 한 시간마다 HDFS 에 저장하고 커밋해 랙이 0 근처로 떨어진다. 지난 2시간 랙 최솟값이 100 을 넘으면
+            저장이 한 번도 안 된 것 — HDFS 쓰기 실패 가능성. 랙 절대값은 유입량(실시간 수집기)에 따라 수만까지 정상이라 기준으로 쓰지 않는다 (2026-09-09)
           runbook: docs/runbooks/hdfs-datanode-down.md, reprocess-from-archive.md
         noDataState: OK
         execErrState: Error
         data:
           - refId: A
-            relativeTimeRange: { from: 300, to: 0 }
+            relativeTimeRange: { from: 7200, to: 0 }
             datasourceUid: prometheus
-            model: { refId: A, instant: true, expr: "sum(kafka_consumergroup_lag)" }
+            model: { refId: A, instant: true, expr: "min_over_time(sum(kafka_consumergroup_lag)[2h:1m])" }
           - refId: C
             datasourceUid: __expr__
-            model: { refId: C, type: math, expression: "$A > 252" }
+            model: { refId: C, type: math, expression: "$A > 100" }
 
       - uid: ddubi-spark-app-missing
         title: Spark 스트리밍 잡 부족

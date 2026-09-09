@@ -18,7 +18,10 @@ topics:
     partitions: 3
     replicationFactor: 1
     retentionHours: 504
-    retentionBytes: 1073741824
+    # 2026-09-09 1GiB → 4GiB/파티션. 실시간 수집 계획(지하철 도착 전체 역 6분 주기 등)으로 하루 약 200MB 가 들어오면
+    # 1GiB 는 약 15일 만에 21일보다 먼저 걸린다. 21일치(약 4.2GB/토픽)에 여유를 두어 4GiB×3 = 12GiB. 디스크 여유 293GB.
+    # 서버 반영: infra/scripts/create-topics.sh (기존 토픽은 보존 설정만 갱신). 근거: docs/data-retention.md 3절
+    retentionBytes: 4294967296
     schema: events/transport-event.schema.json
     key: provider ID (노선·역·링크 등 소스별 식별자)
     producer: collector

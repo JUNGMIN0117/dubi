@@ -343,7 +343,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     void allowShrinkBypassesDropCheck() {
         givenSharpDropSetup();
 
-        service.activate("2026-09-02", 1, true, "9월 개편으로 간선 노선 12개 폐지");
+        service.activate("2026-09-02", 1, true, "9월 개편으로 간선 노선 12개 폐지 S15P21E202-64");
 
         assertThat(activeVersion()).isEqualTo("2026-09-02");
     }
@@ -353,11 +353,11 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     void shrinkReasonIsRecorded() {
         givenSharpDropSetup();
 
-        service.activate("2026-09-02", 1, true, "9월 개편으로 간선 노선 12개 폐지");
+        service.activate("2026-09-02", 1, true, "9월 개편으로 간선 노선 12개 폐지 S15P21E202-64");
 
         assertThat(configRepository.findById(PipelineConfigKey.BASELINE_LAST_SHRINK_REASON))
                 .map(PipelineConfig::getConfigValue)
-                .hasValue("9월 개편으로 간선 노선 12개 폐지");
+                .hasValue("9월 개편으로 간선 노선 12개 폐지 S15P21E202-64");
     }
 
     @Test

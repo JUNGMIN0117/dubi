@@ -143,12 +143,13 @@ Content-Type: application/json
 
 ### ⑩ allowShrink=true + 사유 — 200, 급감 검사만 건너뛴다
 # 사유는 로그와 pipeline_config.baseline_last_shrink_reason 에 남는다.
+# 사유 형식은 "짧은 사유 + 이슈 번호"(분산팀 합의). 100자를 넘으면 400.
 # 확인: select * from pipeline_config where config_key = 'baseline_last_shrink_reason';
 POST {{host}}/internal/baselines/segment/versions/2026-09-02/activate
 X-Internal-Api-Key: {{apiKey}}
 Content-Type: application/json
 
-{ "totalRows": 1, "allowShrink": true, "shrinkReason": "9월 개편으로 간선 노선 12개 폐지" }
+{ "totalRows": 1, "allowShrink": true, "shrinkReason": "9월 개편으로 간선 노선 12개 폐지 S15P21E202-64" }
 
 ### ⑪ allowShrink 여도 행 수 대조는 그대로 — 409
 # 급감 검사를 끄는 것이지 체크섬을 끄는 것이 아니다.

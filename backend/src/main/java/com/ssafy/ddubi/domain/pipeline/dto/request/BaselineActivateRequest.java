@@ -19,7 +19,8 @@ import org.springframework.util.StringUtils;
  * @param allowShrink 선택, 기본 false. true 면 <b>급감 검사만</b> 건너뛴다.
  *                    노선 폐지처럼 구간이 실제로 줄어드는 정상 축소를 운영자가 미리 알고
  *                    한 번만 허용하는 용도다. {@code totalRows} 대조는 그대로 한다
- * @param shrinkReason {@code allowShrink=true} 면 필수. 로그와
+ * @param shrinkReason {@code allowShrink=true} 면 필수. <b>"짧은 사유 + 이슈 번호"</b> 한 줄(분산팀 합의).
+ *                     로그와
  *                     {@code pipeline_config.baseline_last_shrink_reason} 에 남는다
  */
 public record BaselineActivateRequest(
@@ -36,7 +37,8 @@ public record BaselineActivateRequest(
          */
         @Size(max = MAX_REASON_LENGTH,
                 message = "shrinkReason 은 " + MAX_REASON_LENGTH + "자를 넘을 수 없습니다. "
-                        + "자세한 경위는 이슈에 남기고 여기에는 한 줄로 적어 주세요.")
+                        + "\"짧은 사유 + 이슈 번호\" 형식으로 한 줄만 적어 주세요. "
+                        + "자세한 경위는 이슈에 남깁니다.")
         String shrinkReason
 ) {
 

@@ -40,9 +40,18 @@ _RETRIABLE_RUNTIME_MARKERS = ("safe mode", "safemode", "retriable", "standby")
 _sleep = time.sleep                  # 테스트가 바꿔 끼운다
 
 
+def _response_status(exc: BaseException) -> int | None:
+    """예외나 response 구현이 비표준이어도 재시도 판단 중 새 오류를 만들지 않는다."""
+    try:
+        response = getattr(exc, "response", None)
+        return getattr(response, "status_code", None)
+    except Exception:  # 커스텀 property getter 자체가 실패하는 경우까지 방어한다.
+        return None
+
+
 def _is_retriable(exc: BaseException) -> bool:
     if isinstance(exc, _RETRIABLE):
-        status = getattr(getattr(exc, "response", None), "status_code", None)
+        status = _response_status(exc)
         return status not in _NO_RETRY_STATUS
     if isinstance(exc, RuntimeError):
         msg = str(exc).lower()
@@ -60,7 +69,7 @@ def with_retry(fn: Callable[[], T], what: str, attempts: int = RETRY_ATTEMPTS,
             if not _is_retriable(exc) or attempt == attempts:
                 raise
             wait = min(backoff * (2 ** (attempt - 1)), max_wait)
-            status = getattr(getattr(exc, "response", None), "status_code", None)
+            status = _response_status(exc)
             log.warning("%s 실패 (%s%s: %s), %.0f초 뒤 재시도 %d/%d", what, exc.__class__.__name__,
                         f" {status}" if status else "", str(exc)[:80], wait, attempt + 1, attempts)
             _sleep(wait)

@@ -35,6 +35,54 @@ def test_retries_connection_error_then_succeeds(no_sleep):
     assert no_sleep == [2.0, 4.0]          # 2초, 4초 뒤 재시도 (지수 백오프)
 
 
+def test_retries_timeout_without_response_then_succeeds(no_sleep):
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.exceptions.Timeout("namenode timeout")
+        return "ok"
+
+    assert with_retry(flaky, "test") == "ok"
+    assert calls["n"] == 2
+    assert no_sleep == [2.0]
+
+
+def test_plain_custom_exception_without_response_is_not_retried(no_sleep):
+    class CustomError(Exception):
+        pass
+
+    with pytest.raises(CustomError):
+        with_retry(lambda: (_ for _ in ()).throw(CustomError("custom failure")), "test")
+    assert no_sleep == []
+
+
+def test_request_exception_response_without_status_code_is_retried(no_sleep):
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.exceptions.RequestException(response=object())
+        return "ok"
+
+    assert with_retry(flaky, "test") == "ok"
+    assert calls["n"] == 2
+    assert no_sleep == [2.0]
+
+
+def test_broken_custom_response_property_does_not_mask_original_error(no_sleep):
+    class BrokenResponseError(OSError):
+        @property
+        def response(self):
+            raise RuntimeError("broken response property")
+
+    with pytest.raises(BrokenResponseError):
+        with_retry(lambda: (_ for _ in ()).throw(BrokenResponseError("original error")), "test")
+    assert no_sleep == [2.0, 4.0]
+
+
 def test_gives_up_after_attempts(no_sleep):
     def always_fail():
         raise _http_error(403)               # 세이프 모드: 재시도 대상이지만 끝까지 안 풀리면 예외

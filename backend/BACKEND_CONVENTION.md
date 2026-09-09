@@ -41,7 +41,7 @@ Flutter(Android·Web) → Nginx(443) → Spring Boot API ─┬→ MySQL 8 (진�
 | 인증 | Spring Security + JWT (Access 60분 / Refresh 14일, Redis 회전) |
 | 문서화 | springdoc-openapi(Swagger UI). API 변경 시 반드시 갱신 |
 | 테스트 | JUnit 5 + Testcontainers(MySQL·Redis), 도메인 규칙(4장)은 필수 테스트 대상 |
-| 마이그레이션 | Flyway. `V1__init.sql`은 `docs/ddubi_erd_v2.sql` 기반. **스키마 변경은 ERD 문서와 마이그레이션에 동시 반영 + 팀 합의 필요**. 운영 방식은 3.2장 |
+| 마이그레이션 | Flyway. 스키마 변경은 **새 `V2__`,`V3__` 파일로 쌓는다**(V1 은 고치지 않음). **ERD 문서에도 동시 반영 + 팀 합의 필요**. 운영 방식은 3.2장 |
 | 환경변수 | 실제 값은 `.env`(git 제외), `.env.example`에 변수명만 |
 | 레포 구조 | 모노레포: `client/ backend/ collector/ sparkjobs/ notification/ infra/ docs/` — 백엔드 작업은 `backend/`에서만 |
 | 브랜치 | `feature/backend/{작업명}` → MR → **`be/dev`** (백엔드 트랙). PM이 확인 후 `develop`(서버가 바라보는 테스트 브랜치)로 반영하고 최종적으로 `master`. **`develop`·`master`를 직접 건드리지 않는다.** 다른 트랙은 `fe/dev`·`fe/main`·`infra` |
@@ -86,19 +86,40 @@ com.ssafy.ddubi
 
 ## 3.2 마이그레이션 운영 방식 (팀 합의)
 
-스키마 파일은 **두 개가 항상 동일**해야 한다.
-
+스키마는 **원천(ERD) 하나와 그것을 만들어 가는 마이그레이션들**로 관리한다.
 | 파일 | 역할 |
 | --- | --- |
-| `docs/ddubi_erd_v2.sql` | 원천(source of truth). 팀·분산 담당과 공유하는 ERD_master의 코드판 |
-| `backend/src/main/resources/db/migration/V1__init.sql` | Flyway 적용본. 위 파일의 복사본 |
+| `docs/ddubi_erd_v2.sql` | 원천(source of truth). 팀·분산 담당과 공유하는 ERD_master의 코드판. **최종 목표 스키마**를 담는다 |
+| `backend/src/main/resources/db/migration/V1__init.sql` | 최초 스키마. **더 이상 고치지 않는다** |
+| `V2__`, `V3__`, ... | 이후 변경은 전부 여기에 쌓는다 |
 
-### Phase 3까지 — V1 하나로 버틴다
+### 스키마를 바꿀 때 — 새 마이그레이션을 쌓는다 (2026-09-08 변경)
 
-개발 초기엔 스키마가 자주 바뀐다. `V2__`, `V3__`를 쌓지 말고 **`V1__init.sql`을 직접 고치고 DB를 날린다.**
+**`V1__init.sql` 을 직접 고치지 않는다.** 새 파일을 만든다.
+
+```
+V4__add_something.sql
+ALTER TABLE ... ADD ...;
+```
+
+그리고 **`docs/ddubi_erd_v2.sql` 도 함께 고친다** — 최종 목표 스키마를 담는 문서이므로,
+새 인덱스·제약이 거기에도 반영돼야 한다. 두 파일이 **글자 단위로 같지는 않지만**
+(V1 은 초기 상태, ERD 는 최종 상태), **ERD 에 있는 것은 마이그레이션 어딘가에 반드시 있어야 한다.**
+
+> **왜 바뀌었나**: 예전에는 "V1 을 직접 고치고 DB 를 날린다" 였다. 그러면 스키마를 고칠
+> 때마다 **팀 전원이 로컬 DB 를 날려야** 하고(2026-09-08 하루에만 두 번 발생), 서버에
+> 데이터가 쌓이기 시작하면 아예 쓸 수 없다.
+>
+> 실제로 이 규약을 그대로 따라 V1 을 고쳤다가, PM 이 V2·V3 로 옮겨 놓은 것을 모르고
+> 되돌리려다 `Duplicate key name` 으로 마이그레이션을 깨뜨릴 뻔했다. 규약이 현실보다
+> 뒤처지면 그걸 믿은 사람이 사고를 낸다.
+
+`FlywayValidateException`(checksum mismatch)이 나면 **이미 적용된 마이그레이션 파일을
+고친 것**이다. 그 파일을 되돌리고 새 버전으로 만든다.
+
+로컬 DB 를 새로 만들어야 할 때:
 
 ```bash
-# 1) 두 파일을 함께 수정  2) DB 폐기 후 재생성
 docker compose -f backend/docker-compose.dev.yml down -v
 docker compose -f backend/docker-compose.dev.yml up -d
 ```

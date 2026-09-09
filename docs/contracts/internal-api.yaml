@@ -81,11 +81,21 @@ endpoints:
       POST /internal/baselines/segment/versions/2026-09-01/activate
       X-DDUBI-API-KEY: ***
       Content-Type: application/json
-      {"totalRows": 252000}
+      {"totalRows": 252000, "allowShrink": false}
+    requestFields:
+      totalRows: "배치가 보낸 총 행 수. 서버에 저장된 행 수와 다르면 409 (배치가 중간에 끊긴 채 activate 된 것)"
+      allowShrink: >-
+        선택, 기본 false. true 면 "직전 활성 버전 대비 절반 미만 급감" 검사만 건너뛴다.
+        노선 폐지처럼 구간이 실제로 줄어드는 정상 축소를 운영자가 미리 알고 한 번만 허용하는 용도.
+        totalRows 대조는 그대로 한다. (2026-09-08 추가 — backend 질문 "정상적인 급감은 어떻게 하나"의 답)
+      shrinkReason: >-
+        allowShrink=true 면 필수(비어 있으면 400). 서버는 로그와 pipeline_config(baseline_last_shrink_reason)에 남긴다.
+        Spark 쪽은 환경변수 BASELINE_ALLOW_SHRINK=true / BASELINE_SHRINK_REASON 이 있을 때만 이 필드를 보내고, 실행 뒤 변수를 지운다.
     responses:
       "200": '{"activeVersion": "2026-09-01", "previousVersion": "2026-08-31", "rowCount": 252000, "activatedAt": "2026-09-01T03:12:44.123456", "purgedVersions": ["2026-08-30"]}'
          # 2026-09-08 정정: 계약 초안의 activated/previous/deletedVersions 를 구현 필드명으로 맞춤
-      "409": "행 수 불일치 또는 급감 감지. 활성 버전은 바뀌지 않음"
+      "400": "allowShrink=true 인데 shrinkReason 이 비어 있음"
+      "409": "행 수 불일치 또는 급감 감지(allowShrink 없을 때). 활성 버전은 바뀌지 않음"
       "401": "API 키 없음/불일치"
 
 # ---------------------------------------------------------------------

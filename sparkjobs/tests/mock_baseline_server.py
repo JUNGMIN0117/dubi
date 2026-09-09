@@ -148,6 +148,8 @@ class MockBaselineHandler(BaseHTTPRequestHandler):
         shrink_reason = (payload.get("shrinkReason") or "").strip()
         if allow_shrink and not shrink_reason:
             return self._send(400, False, code="INVALID_REQUEST", message="allowShrink=true 이면 shrinkReason 이 필요함")
+        if allow_shrink and len(shrink_reason) > 100:   # 계약 maxLength 100 (VARCHAR(100))
+            return self._send(400, False, code="INVALID_REQUEST", message="shrinkReason 은 100자 이내")
         with state.lock:
             stored = len(state.versions.get(version, {}))
             if stored == 0:

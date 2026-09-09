@@ -56,6 +56,7 @@ EVENT_POLICY = {
     "city.realtime": ("city:latest:area", 900),
     "sdot.population": ("city:latest:sdot-population", 1800),
     "subway.alert": ("transit:latest:subway-alert", 600),
+    "topis.notice": ("traffic:latest:topis-notice", 1800),
 }
 
 log = logging.getLogger(JOB_NAME)
@@ -96,7 +97,8 @@ def _usable_id(value: Column) -> Column:
 
 def _provider_key(event_type: Column, route_id: Column, vehicle_id: Column, stop_id: Column,
                   line_id: Column, station_id: Column, train_id: Column, link_id: Column,
-                  incident_id: Column, area_id: Column, sensor_id: Column, alert_id: Column) -> Column:
+                  incident_id: Column, area_id: Column, sensor_id: Column, alert_id: Column,
+                  notice_id: Column) -> Column:
     """이벤트별 provider ID 조합으로 충돌 없는 최신값 키의 뒷부분을 만든다.
 
     이 값은 Redis 조회용 provider key일 뿐 canonical ``segment_id``가 아니다. 예를 들어 차량
@@ -118,6 +120,7 @@ def _provider_key(event_type: Column, route_id: Column, vehicle_id: Column, stop
         .when((event_type == "city.realtime") & _usable_id(area_id), area_id)
         .when((event_type == "sdot.population") & _usable_id(sensor_id), sensor_id)
         .when((event_type == "subway.alert") & _usable_id(alert_id), alert_id)
+        .when((event_type == "topis.notice") & _usable_id(notice_id), notice_id)
     )
 
 
@@ -145,6 +148,7 @@ def transform(events: DataFrame) -> DataFrame:
     area_id = _json("$.providerAreaId")
     sensor_id = _json("$.providerSensorId")
     alert_id = _json("$.providerAlertId")
+    notice_id = _json("$.providerNoticeId")
 
     # 2. API별 raw 명칭 차이를 흡수해 계산에서 바로 단위 확인 가능한 대표 관측값으로 만든다.
     #    필드가 없는 소스는 null이며 Spark JSON 직렬화 시 생략된다.
@@ -182,10 +186,10 @@ def transform(events: DataFrame) -> DataFrame:
         _for("traffic.flow", _first("$.raw.TRV_TIME", "$.raw.travelTime").cast("int")).alias("travelTimeSeconds"),
         _for("traffic.flow", _first("$.raw.IDX", "$.raw.trafficStatus")).alias("trafficStatusCode"),
 
-        _for("traffic.incident", _first("$.raw.ACC_TYPE", "$.raw.INCIDENT_TYPE", "$.raw.CODE")).alias("incidentType"),
-        _for("traffic.incident", _first("$.raw.ACC_INFO", "$.raw.INCIDENT_MSG", "$.raw.MESSAGE")).alias("incidentMessage"),
+        _for("traffic.incident", _first("$.raw.ACC_TYPE", "$.raw.incidentTypeCode", "$.raw.INCIDENT_TYPE", "$.raw.CODE")).alias("incidentType"),
+        _for("traffic.incident", _first("$.raw.ACC_INFO", "$.raw.description", "$.raw.INCIDENT_MSG", "$.raw.MESSAGE")).alias("incidentMessage"),
         _for("traffic.incident", _first("$.raw.ROAD_NM", "$.raw.ROAD_NAME")).alias("roadName"),
-        _for("traffic.incident", _first("$.raw.EXP_CLR_DATE", "$.raw.END_DATE")).alias("expectedClearAt"),
+        _for("traffic.incident", _first("$.raw.EXP_CLR_DATE", "$.raw.expectedClearDate", "$.raw.END_DATE")).alias("expectedClearAt"),
 
         # CITYDATA는 제공 시점에 따라 객체 또는 1건 배열이다. 두 구조와 하위 단건/배열을 모두
         # 허용하되, 값의 의미와 단위가 같은 공식 필드만 하나의 출력으로 합친다.
@@ -225,17 +229,21 @@ def transform(events: DataFrame) -> DataFrame:
         _for("sdot.population", _first("$.raw.VISITOR_COUNT", "$.raw.VISITOR_CNT", "$.raw.PEOPLE").cast("long")).alias("visitorCount"),
         _for("sdot.population", _first("$.raw.ADMINISTRATIVE_DISTRICT", "$.raw.GU_NM", "$.raw.GU_NAME")).alias("sensorDistrict"),
 
-        _for("subway.alert", _first("$.raw.title", "$.raw.ntcTtl", "$.raw.TITLE")).alias("alertTitle"),
-        _for("subway.alert", _first("$.raw.content", "$.raw.ntcCn", "$.raw.MESSAGE")).alias("alertContent"),
-        _for("subway.alert", _first("$.raw.lineNm", "$.raw.subwayNm", "$.raw.LINE_NM")).alias("alertLineName"),
+        _for("subway.alert", _first("$.raw.title", "$.raw.noftTtl", "$.raw.ntcTtl", "$.raw.TITLE")).alias("alertTitle"),
+        _for("subway.alert", _first("$.raw.content", "$.raw.noftCn", "$.raw.ntcCn", "$.raw.MESSAGE")).alias("alertContent"),
+        _for("subway.alert", _first("$.raw.lineNm", "$.raw.lineNmLst", "$.raw.subwayNm", "$.raw.LINE_NM")).alias("alertLineName"),
         _for("subway.alert", _json("$.activeUntil")).alias("activeUntil"),
+
+        _for("topis.notice", _json("$.raw.title")).alias("noticeTitle"),
+        _for("topis.notice", _json("$.raw.contentText")).alias("noticeContent"),
+        _for("topis.notice", _json("$.raw.categoryName")).alias("noticeCategory"),
     )
 
     # 3. Redis의 provider key와 값에 사용할 공통 메타데이터를 결합한다. segmentIds는 upstream
     #    Resolver가 실제로 검증해 넣은 경우에만 전달하고, 비어 있으면 매핑 완료로 표현하지 않는다.
     provider_key = _provider_key(
         F.col("eventType"), route_id, vehicle_id, stop_id, line_id, station_id, train_id,
-        link_id, incident_id, area_id, sensor_id, alert_id,
+        link_id, incident_id, area_id, sensor_id, alert_id, notice_id,
     )
     return supported.select(
         "eventId", "eventType", "source", "occurredAt", "collectedAt", "latitude", "longitude",
@@ -245,7 +253,7 @@ def transform(events: DataFrame) -> DataFrame:
             route_id.alias("routeId"), vehicle_id.alias("vehicleId"), stop_id.alias("stopId"),
             line_id.alias("lineId"), station_id.alias("stationId"), train_id.alias("trainId"),
             link_id.alias("linkId"), incident_id.alias("incidentId"), area_id.alias("areaId"),
-            sensor_id.alias("sensorId"), alert_id.alias("alertId"),
+            sensor_id.alias("sensorId"), alert_id.alias("alertId"), notice_id.alias("noticeId"),
         ).alias("providerIds"),
         observation.alias("observation"),
     )

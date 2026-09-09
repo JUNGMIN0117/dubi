@@ -19,7 +19,7 @@ x-common: &common
   networks:
     - ddubi-network
 
-# 수집기 5개가 공유하는 정의. 소스별로 COLLECTOR_SOURCE 만 다르다.
+# 모든 수집기가 공유하는 정의. 소스별로 COLLECTOR_SOURCE 만 다르다.
 x-collector: &collector
   <<: *common
   build:
@@ -28,6 +28,8 @@ x-collector: &collector
   image: ddubi/collector:${APP_VERSION:-0.1.0}
   profiles: ["collect"]
   mem_limit: 256m
+  volumes:
+    - collector-budget:/app/data
   depends_on:
     kafka:
       condition: service_healthy
@@ -43,7 +45,17 @@ x-collector-env: &collector-env
   SEOUL_API_KEY: ${SEOUL_API_KEY:-}
   DATA_GO_KR_API_KEY: ${DATA_GO_KR_API_KEY:-}
   KMA_API_KEY: ${KMA_API_KEY:-}
+  BUS_ARRIVAL: ${BUS_ARRIVAL:-}
+  BUS_LOCATION: ${BUS_LOCATION:-}
+  SUBWAY_API_KEY: ${SUBWAY_API_KEY:-}
+  SUBWAY_ALERT_API_KEY: ${SUBWAY_ALERT_API_KEY:-}
+  CITY_API_KEY: ${CITY_API_KEY:-}
+  TOPIS_NOTICE_API_KEY: ${TOPIS_NOTICE_API_KEY:-}
+  SEOUL_EMERGENCY_API_KEY: ${SEOUL_EMERGENCY_API_KEY:-}
+  API_DAILY_LIMIT: ${API_DAILY_LIMIT:-900}
+  API_BUDGET_PATH: /app/data/request_budget.sqlite3
   BUS_ROUTE_IDS: ${BUS_ROUTE_IDS:-}
+  BUS_ROUTE_LIMIT: ${BUS_ROUTE_LIMIT:-100}
   SUBWAY_LINES: ${SUBWAY_LINES:-}
   SUBWAY_STATIONS: ${SUBWAY_STATIONS:-}
   TRAFFIC_LINK_IDS: ${TRAFFIC_LINK_IDS:-}
@@ -152,7 +164,7 @@ services:
         condition: service_healthy
 
   # =========================================================================
-  # collect : Python 수집기 x5 (Kafka 발행만 담당)                [서버1]
+  # collect : Python 수집기 (Kafka 발행만 담당)                   [서버1]
   #  - collect           : 항상 배포하는 weather
   #  - collect-realtime  : 구현 완료된 비기상 수집기. API 키와 명시적 수집 범위를
   #                        준비한 뒤 운영자가 별도로 활성화한다.
@@ -163,7 +175,14 @@ services:
     profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
-      COLLECTOR_SOURCE: bus
+      COLLECTOR_SOURCE: bus_arrival
+
+  collector-bus-location:
+    <<: *collector
+    profiles: ["collect-realtime"]
+    environment:
+      <<: *collector-env
+      COLLECTOR_SOURCE: bus_location
 
   collector-subway:
     <<: *collector
@@ -171,7 +190,28 @@ services:
     profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
-      COLLECTOR_SOURCE: subway
+      COLLECTOR_SOURCE: subway_arrival
+
+  collector-subway-location:
+    <<: *collector
+    profiles: ["collect-realtime"]
+    environment:
+      <<: *collector-env
+      COLLECTOR_SOURCE: subway_location
+
+  collector-subway-alert:
+    <<: *collector
+    profiles: ["collect-realtime"]
+    environment:
+      <<: *collector-env
+      COLLECTOR_SOURCE: subway_alert
+
+  collector-city:
+    <<: *collector
+    profiles: ["collect-realtime"]
+    environment:
+      <<: *collector-env
+      COLLECTOR_SOURCE: city_realtime
 
   collector-traffic:
     <<: *collector
@@ -179,7 +219,7 @@ services:
     profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
-      COLLECTOR_SOURCE: traffic
+      COLLECTOR_SOURCE: traffic_incident
 
   collector-weather:
     <<: *collector
@@ -194,7 +234,7 @@ services:
     profiles: ["collect-realtime"]
     environment:
       <<: *collector-env
-      COLLECTOR_SOURCE: event
+      COLLECTOR_SOURCE: topis_notice
 
   # =========================================================================
   # data : MySQL, Redis                                             [서버2]
@@ -709,6 +749,16 @@ services:
       - ./hdfs/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
       - ./hdfs/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
       - hdfs-namenode-data:/hadoop/dfs/name
+    healthcheck:
+      # 세이프 모드가 풀려 쓰기가 가능해야 healthy (재시작 직후 1~2분은 starting). JMX 를 HTTP 로 읽으므로 JVM 을 띄우지 않는다.
+      # 데이터노드에는 헬스체크를 두지 않는다 — 배포 때 네임노드와 함께 재생성되는 위험 범위를 키우지 않기 위해 (2026-09-09)
+      test:
+        - CMD-SHELL
+        - "curl -sf 'http://localhost:9870/jmx?qry=Hadoop:service=NameNode,name=NameNodeInfo' | grep -q '\"Safemode\" *: *\"\"'"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
   hdfs-datanode1:
     <<: *hdfs
@@ -849,6 +899,7 @@ networks:
     name: ddubi-network
 
 volumes:
+  collector-budget:
   certbot-certs:
   certbot-webroot:
   mysql-data:

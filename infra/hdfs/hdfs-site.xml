@@ -39,6 +39,20 @@
     <name>dfs.client.use.datanode.hostname</name>
     <value>true</value>
   </property>
+  <!-- 데이터노드 사망 판정 단축 (2026-09-09, 9/7 장애 연습의 약점 보완).
+       판정 시간 = recheck-interval x 2 + heartbeat(3s) x 10. 기본 5분이면 10분 30초, 30초로 두면 1분 30초.
+       그동안 네임노드는 죽은 노드를 Live 로 알고 WebHDFS 읽기를 그 노드로 보내 실패시킨다 -->
+  <property>
+    <name>dfs.namenode.heartbeat.recheck-interval</name>
+    <value>30000</value>
+  </property>
+  <!-- 심장박동이 30초(dfs.namenode.stale.datanode.interval 기본값) 끊긴 노드는 "stale" 로 표시된다.
+       기본은 stale 노드도 읽기 대상에 넣지만, 켜 두면 읽기(WebHDFS 리다이렉트 포함)에서 뒤로 미룬다.
+       쓰기 회피는 켜지 않는다: 데이터노드가 2대라 한 대를 피하면 복제 대상이 하나뿐이다 -->
+  <property>
+    <name>dfs.namenode.avoid.read.stale.datanode</name>
+    <value>true</value>
+  </property>
   <!-- archiver 가 쓰는 WebHDFS (NameNode 9870 → DataNode 9864 리다이렉트) -->
   <property>
     <name>dfs.webhdfs.enabled</name>

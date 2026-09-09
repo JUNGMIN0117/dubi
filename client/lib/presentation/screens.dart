@@ -169,9 +169,9 @@ class LoginScreen extends StatelessWidget {
         Positioned(bottom:24,left:0,right:0,child:Image.asset('assets/images/ttubee/empty-schedule.png',height:205)),
       ])),
       Positioned.fill(top: box.maxHeight * .50, child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(28, 12, 28, 24), child: Column(children:[
-        _field('이메일을 입력해주세요', Icons.mail_outline), const SizedBox(height:9), _field('비밀번호를 입력해주세요', Icons.lock_outline),
+        _field('이메일을 입력해주세요', Icons.mail_outline, ()=>_openEmailLogin(c)), const SizedBox(height:9), _field('비밀번호를 입력해주세요', Icons.lock_outline, ()=>_openEmailLogin(c)),
         const SizedBox(height:8), const Align(alignment:Alignment.centerLeft,child:Row(children:[Icon(Icons.check_box,color:Color(0xFF08A79D),size:20),SizedBox(width:7),Text('로그인 상태 유지',style:TextStyle(fontSize:13,color:DdubiColors.navy))])),
-        const SizedBox(height:12), SizedBox(width:double.infinity,height:48,child:FilledButton(onPressed:()=>_open(c,EmailLoginScreen(repository:authRepository,onAuthenticated:()=>_completeLogin(c))),child:const Text('로그인',style:TextStyle(fontSize:16,fontWeight:FontWeight.w700)))),
+        const SizedBox(height:12), SizedBox(width:double.infinity,height:48,child:FilledButton(onPressed:()=>_openEmailLogin(c),child:const Text('로그인',style:TextStyle(fontSize:16,fontWeight:FontWeight.w700)))),
         Row(mainAxisAlignment:MainAxisAlignment.center,children:[TextButton(onPressed:()=>_comingSoon(c,'아이디 찾기'),child:const Text('아이디 찾기',style:TextStyle(fontSize:12,color:Color(0xFF607080)))),Container(width:1,height:12,color:const Color(0xFFD7DDE0)),TextButton(onPressed:()=>_comingSoon(c,'비밀번호 찾기'),child:const Text('비밀번호 찾기',style:TextStyle(fontSize:12,color:Color(0xFF607080))))]),
         const SizedBox(height:14),const Row(children:[Expanded(child:Divider()),Padding(padding:EdgeInsets.symmetric(horizontal:12),child:Text('또는',style:TextStyle(color:Color(0xFF77818B))),),Expanded(child:Divider())]),const SizedBox(height:12),
         Row(mainAxisAlignment:MainAxisAlignment.center,children:[_socialIcon('K',const Color(0xFFFFD600),Colors.black,()=>_social(c,'카카오')),_socialIcon('G',Colors.white,DdubiColors.navy,()=>_social(c,'Google')),_socialIcon('N',const Color(0xFF03C75A),Colors.white,()=>_social(c,'네이버'))]),
@@ -181,8 +181,9 @@ class LoginScreen extends StatelessWidget {
     ]))),
   );
   void _completeLogin(BuildContext c) => c.go('/home');
+  void _openEmailLogin(BuildContext c) => _open(c,EmailLoginScreen(repository:authRepository,onAuthenticated:()=>_completeLogin(c)));
   void _comingSoon(BuildContext c, String label) => ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text('$label 기능은 준비 중입니다.')));
-  Widget _field(String hint, IconData icon) => Container(height: 47, decoration: BoxDecoration(color: Colors.white.withValues(alpha: .88), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFDCE1E4))), child: Row(children:[const SizedBox(width:13),Icon(icon,size:20,color:const Color(0xFF687786)),const SizedBox(width:10),Text(hint,style:const TextStyle(fontSize:13,color:Color(0xFF8A959E)))]));
+  Widget _field(String hint, IconData icon, VoidCallback onTap) => Semantics(button:true,label:hint,child:InkWell(onTap:onTap,borderRadius:BorderRadius.circular(12),child:Container(height: 47, decoration: BoxDecoration(color: Colors.white.withValues(alpha: .88), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFDCE1E4))), child: Row(children:[const SizedBox(width:13),Icon(icon,size:20,color:const Color(0xFF687786)),const SizedBox(width:10),Text(hint,style:const TextStyle(fontSize:13,color:Color(0xFF8A959E)))]))));
   Widget _socialIcon(String label, Color color, Color text, VoidCallback onTap) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: InkWell(onTap:onTap,borderRadius:BorderRadius.circular(28),child:Container(width:48,height:48,alignment:Alignment.center,decoration:BoxDecoration(color:color,shape:BoxShape.circle,border:Border.all(color:const Color(0xFFE0E3E5))),child:Text(label,style:TextStyle(fontSize:18,fontWeight:FontWeight.w900,color:text)) )));
   void _social(BuildContext c, String provider) => _open(
     c,

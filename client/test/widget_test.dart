@@ -84,6 +84,15 @@ void main() {
     expect(find.text('추천 출발 시간'), findsOneWidget);
   });
 
+  testWidgets('첫 로그인 화면의 이메일 영역으로도 실제 입력 화면에 진입한다', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await _skipIntro(tester);
+    await tester.tap(find.text('이메일을 입력해주세요'));
+    await tester.pumpAndSettle();
+    expect(find.text('이메일로 로그인'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNWidgets(2));
+  });
+
   testWidgets('이메일 로그인은 잘못된 입력을 한국어로 안내한다', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);

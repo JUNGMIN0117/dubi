@@ -8,13 +8,45 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
+from typing import Callable, Iterable, Optional, TypeVar
 
 import fsspec
 import pyarrow as pa
 import pyarrow.parquet as pq
+import requests
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+# 짧은 HDFS 장애를 넘기기 위한 재시도 (2026-09-09).
+# 네임노드 재시작 직후 세이프 모드(1~2분, 쓰기 거부 403)나 데이터노드 재시작(리다이렉트 연결 거부)은
+# 수십 초~2분 안에 풀린다. 재시도 없이 예외가 나면 아카이버 프로세스가 죽고 컨테이너가 재시작하는데,
+# 커밋 전이라 유실은 없지만 그때마다 버퍼를 다시 채우는 낭비가 생긴다. 2·4·8초 세 번이면 약 14초를 버틴다.
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
+_RETRIABLE = (OSError, requests.exceptions.RequestException)
+_NO_RETRY_STATUS = {400, 401, 404}   # 요청 자체가 잘못된 것 — 다시 보내도 같다
+_sleep = time.sleep                  # 테스트가 바꿔 끼운다
+
+
+def with_retry(fn: Callable[[], T], what: str, attempts: int = RETRY_ATTEMPTS,
+               backoff: float = RETRY_BACKOFF_SECONDS) -> T:
+    """fn 을 실행하고 연결 오류·HTTP 오류면 backoff 배수로 기다린 뒤 다시 시도한다."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except _RETRIABLE as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in _NO_RETRY_STATUS or attempt == attempts:
+                raise
+            wait = backoff * (2 ** (attempt - 1))
+            log.warning("%s 실패 (%s%s), %.0f초 뒤 재시도 %d/%d", what, exc.__class__.__name__,
+                        f" {status}" if status else "", wait, attempt + 1, attempts)
+            _sleep(wait)
+    raise RuntimeError("unreachable")
 
 
 @dataclass
@@ -32,15 +64,31 @@ class Storage:
         return cls(fs=fs, root=root.rstrip("/"))
 
     def write_parquet(self, relative_path: str, table: pa.Table) -> str:
-        """table 을 root/relative_path 에 원자적으로 쓴다. 최종 경로를 돌려준다."""
+        """table 을 root/relative_path 에 원자적으로 쓴다. 최종 경로를 돌려준다. 짧은 HDFS 장애는 재시도로 넘긴다."""
         final = f"{self.root}/{relative_path}"
         tmp = f"{final}.tmp"
         parent = final.rsplit("/", 1)[0]
-        self.fs.makedirs(parent, exist_ok=True)
-        with self.fs.open(tmp, "wb") as f:
-            pq.write_table(table, f, compression="snappy")
-        self.fs.mv(tmp, final)
-        return final
+
+        def _write_once() -> str:
+            if self.fs.exists(final):          # 앞 시도가 mv 까지 끝난 뒤 응답만 못 받은 경우
+                return final
+            self.fs.makedirs(parent, exist_ok=True)
+            with self.fs.open(tmp, "wb") as f:  # 재시도면 .tmp 를 덮어쓴다
+                pq.write_table(table, f, compression="snappy")
+            self.fs.mv(tmp, final)
+            return final
+
+        return with_retry(_write_once, f"write {relative_path}")
+
+    def read_parquet(self, path: str, columns: Optional[Iterable[str]] = None) -> pa.Table:
+        """Parquet 파일을 읽는다 (replay 용). 데이터노드 재시작 중 리다이렉트 실패를 재시도로 넘긴다."""
+        cols = list(columns) if columns is not None else None
+
+        def _read_once() -> pa.Table:
+            with self.fs.open(path, "rb") as f:
+                return pq.read_table(f, columns=cols)
+
+        return with_retry(_read_once, f"read {path}")
 
     def size(self, path: str) -> int:
         return int(self.fs.size(path))

@@ -1,5 +1,6 @@
 package com.ssafy.ddubi.domain.pipeline.service;
 
+import com.ssafy.ddubi.domain.pipeline.dto.request.BaselineActivateRequest;
 import com.ssafy.ddubi.domain.pipeline.dto.request.BaselineRowsRequest;
 import com.ssafy.ddubi.domain.pipeline.dto.response.BaselineActivateResponse;
 import com.ssafy.ddubi.domain.pipeline.dto.response.BaselineUploadResponse;
@@ -94,7 +95,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     @DisplayName("서빙 중인 버전에는 덮어쓸 수 없다 — 추천이 요청마다 다른 값을 보게 된다")
     void cannotOverwriteActiveVersion() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
 
         assertThatThrownBy(() -> service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 999))))
                 .isInstanceOf(BusinessException.class)
@@ -131,10 +132,10 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     @DisplayName("활성화하면 서빙 버전이 바뀌고 직전 버전이 기록된다")
     void activateSwitchesVersion() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
 
         service.upload("2026-09-02", rows(row(SEGMENT_A, 8, 1300)));
-        BaselineActivateResponse response = service.activate("2026-09-02", 1);
+        BaselineActivateResponse response = service.activate("2026-09-02", 1, false, null);
 
         assertThat(response.activeVersion()).isEqualTo("2026-09-02");
         assertThat(response.previousVersion()).isEqualTo("2026-09-01");
@@ -145,7 +146,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     @Test
     @DisplayName("행이 0건인 버전은 활성화할 수 없다 — 추천이 기준선을 통째로 잃는다")
     void cannotActivateEmptyVersion() {
-        assertThatThrownBy(() -> service.activate("2026-09-09", 0))
+        assertThatThrownBy(() -> service.activate("2026-09-09", 0, false, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).errorCode())
                 .isEqualTo(ErrorCode.INVALID_STATE);
@@ -155,9 +156,9 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     @DisplayName("같은 버전 재활성화는 멱등 — 배치 재시도가 여기서 실패하면 안 된다")
     void reactivateIsIdempotent() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
 
-        BaselineActivateResponse again = service.activate("2026-09-01", 1);
+        BaselineActivateResponse again = service.activate("2026-09-01", 1, false, null);
 
         assertThat(again.activeVersion()).isEqualTo("2026-09-01");
         assertThat(again.purgedVersions()).isEmpty();
@@ -168,9 +169,9 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     @DisplayName("활성·직전 버전은 정리에서 보호된다 — 롤백할 곳이 남아야 한다")
     void activeAndPreviousSurvivePurge() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
         service.upload("2026-09-02", rows(row(SEGMENT_A, 8, 1300)));
-        service.activate("2026-09-02", 1);
+        service.activate("2026-09-02", 1, false, null);
 
         assertThat(baselineRepository.countByDataVersion("2026-09-01")).isEqualTo(1);
         assertThat(baselineRepository.countByDataVersion("2026-09-02")).isEqualTo(1);
@@ -181,7 +182,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     void freshOrphanIsKept() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
         service.upload("2026-08-31", rows(row(SEGMENT_B, 8, 700)));   // 방금 올린 고아
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
 
         assertThat(baselineRepository.countByDataVersion("2026-08-31")).isEqualTo(1);
     }
@@ -196,7 +197,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
                 "2026-08-01");
 
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
-        BaselineActivateResponse response = service.activate("2026-09-01", 1);
+        BaselineActivateResponse response = service.activate("2026-09-01", 1, false, null);
 
         assertThat(response.purgedVersions()).containsExactly("2026-08-01");
         assertThat(baselineRepository.countByDataVersion("2026-08-01")).isZero();
@@ -206,7 +207,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     @DisplayName("활성화 시각이 기록된다 — 기준선이 낡았는지 판단하는 기준이다")
     void activationTimeIsRecorded() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
 
         assertThat(configRepository.findById(PipelineConfigKey.BASELINE_ACTIVATED_AT))
                 .isPresent();
@@ -261,7 +262,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200), row(SEGMENT_B, 8, 600)));
 
         // 배치는 3행을 보냈다고 믿지만 실제로 저장된 것은 2행
-        assertThatThrownBy(() -> service.activate("2026-09-01", 3))
+        assertThatThrownBy(() -> service.activate("2026-09-01", 3, false, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).errorCode())
                 .isEqualTo(ErrorCode.INVALID_STATE);
@@ -274,7 +275,7 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     void acceptsMatchingRowCount() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200), row(SEGMENT_B, 8, 600)));
 
-        service.activate("2026-09-01", 2);
+        service.activate("2026-09-01", 2, false, null);
 
         assertThat(activeVersion()).isEqualTo("2026-09-01");
     }
@@ -286,12 +287,12 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
         service.upload("2026-09-01", rows(
                 row(SEGMENT_A, 8, 1200), row(SEGMENT_A, 9, 1300),
                 row(SEGMENT_B, 8, 600), row(SEGMENT_B, 9, 650)));
-        service.activate("2026-09-01", 4);
+        service.activate("2026-09-01", 4, false, null);
 
         // 새 버전 1행 — 절반(2) 미만
         service.upload("2026-09-02", rows(row(SEGMENT_A, 8, 1250)));
 
-        assertThatThrownBy(() -> service.activate("2026-09-02", 1))
+        assertThatThrownBy(() -> service.activate("2026-09-02", 1, false, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).errorCode())
                 .isEqualTo(ErrorCode.INVALID_STATE);
@@ -305,11 +306,11 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
         service.upload("2026-09-01", rows(
                 row(SEGMENT_A, 8, 1200), row(SEGMENT_A, 9, 1300),
                 row(SEGMENT_B, 8, 600), row(SEGMENT_B, 9, 650)));
-        service.activate("2026-09-01", 4);
+        service.activate("2026-09-01", 4, false, null);
 
         // 4행 → 2행. 절반이므로 "절반 미만"이 아니다
         service.upload("2026-09-02", rows(row(SEGMENT_A, 8, 1250), row(SEGMENT_B, 8, 620)));
-        service.activate("2026-09-02", 2);
+        service.activate("2026-09-02", 2, false, null);
 
         assertThat(activeVersion()).isEqualTo("2026-09-02");
     }
@@ -319,8 +320,90 @@ class BaselineIngestIntegrationTest extends IntegrationTestSupport {
     void firstActivationSkipsDropCheck() {
         service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200)));
 
-        service.activate("2026-09-01", 1);
+        service.activate("2026-09-01", 1, false, null);
 
         assertThat(activeVersion()).isEqualTo("2026-09-01");
+    }
+
+    // ------------------------------------------------------------------
+    // allowShrink — 사람이 책임지고 넘기는 문 (2026-09-08 계약)
+    // ------------------------------------------------------------------
+
+    /** 활성 4행 → 새 버전 1행. 절반 미만이라 기본값이면 막힌다. */
+    private void givenSharpDropSetup() {
+        service.upload("2026-09-01", rows(
+                row(SEGMENT_A, 8, 1200), row(SEGMENT_A, 9, 1300),
+                row(SEGMENT_B, 8, 600), row(SEGMENT_B, 9, 650)));
+        service.activate("2026-09-01", 4, false, null);
+        service.upload("2026-09-02", rows(row(SEGMENT_A, 8, 1250)));
+    }
+
+    @Test
+    @DisplayName("allowShrink=true 면 급감이어도 활성화된다 — 노선 폐지 같은 정상 축소")
+    void allowShrinkBypassesDropCheck() {
+        givenSharpDropSetup();
+
+        service.activate("2026-09-02", 1, true, "9월 개편으로 간선 노선 12개 폐지");
+
+        assertThat(activeVersion()).isEqualTo("2026-09-02");
+    }
+
+    @Test
+    @DisplayName("건너뛴 사유가 pipeline_config 에 남는다 — 나중에 왜 넘겼는지 알아야 한다")
+    void shrinkReasonIsRecorded() {
+        givenSharpDropSetup();
+
+        service.activate("2026-09-02", 1, true, "9월 개편으로 간선 노선 12개 폐지");
+
+        assertThat(configRepository.findById(PipelineConfigKey.BASELINE_LAST_SHRINK_REASON))
+                .map(PipelineConfig::getConfigValue)
+                .hasValue("9월 개편으로 간선 노선 12개 폐지");
+    }
+
+    @Test
+    @DisplayName("allowShrink 여도 totalRows 대조는 그대로 — 청크 유실은 여전히 잡는다")
+    void allowShrinkDoesNotSkipRowCountCheck() {
+        givenSharpDropSetup();
+
+        assertThatThrownBy(() -> service.activate("2026-09-02", 99, true, "정상 축소"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.INVALID_STATE);
+
+        assertThat(activeVersion()).isEqualTo("2026-09-01");
+    }
+
+    @Test
+    @DisplayName("급감이 없었으면 사유를 기록하지 않는다 — 매일 덮어쓰면 정작 필요할 때 못 찾는다")
+    void reasonNotRecordedWhenNoDrop() {
+        service.upload("2026-09-01", rows(row(SEGMENT_A, 8, 1200), row(SEGMENT_B, 8, 600)));
+        service.activate("2026-09-01", 2, false, null);
+        service.upload("2026-09-02", rows(row(SEGMENT_A, 8, 1250), row(SEGMENT_B, 8, 620)));
+
+        // 플래그는 켜져 있지만 줄지 않았다
+        service.activate("2026-09-02", 2, true, "켜두기만 한 사유");
+
+        assertThat(configRepository.findById(PipelineConfigKey.BASELINE_LAST_SHRINK_REASON))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("allowShrink=true 인데 사유가 없으면 400 — DTO 단계에서 걸린다")
+    void reasonIsRequiredWhenAllowShrink() {
+        assertThat(new BaselineActivateRequest(1L, true, null).isReasonMissing()).isTrue();
+        assertThat(new BaselineActivateRequest(1L, true, "  ").isReasonMissing()).isTrue();
+        assertThat(new BaselineActivateRequest(1L, true, "사유").isReasonMissing()).isFalse();
+        assertThat(new BaselineActivateRequest(1L, false, null).isReasonMissing()).isFalse();
+    }
+
+    @Test
+    @DisplayName("shrinkReason 이 100자를 넘으면 걸러진다 — config_value 가 VARCHAR(100)")
+    void reasonLengthIsLimited() {
+        String tooLong = "가".repeat(BaselineActivateRequest.MAX_REASON_LENGTH + 1);
+
+        var violations = validator.validate(new BaselineActivateRequest(1L, true, tooLong));
+
+        assertThat(violations).hasSize(1);
+        assertThat(violations.iterator().next().getMessage()).contains("100자");
     }
 }

@@ -134,7 +134,8 @@ public class BaselineIngestService {
      * 조회와 전환이 겹치는 찰나를 견디고, 문제가 생기면 직전 버전으로 되돌릴 수 있어야 한다.
      */
     @Transactional
-    public BaselineActivateResponse activate(String dataVersion, long claimedRows) {
+    public BaselineActivateResponse activate(String dataVersion, long claimedRows,
+                                             boolean allowShrink, String shrinkReason) {
         validateVersion(dataVersion);
 
         long rowCount = baselineRepository.countByDataVersion(dataVersion);
@@ -146,7 +147,7 @@ public class BaselineIngestService {
 
         String currentActive = readConfig(PipelineConfigKey.BASELINE_ACTIVE_VERSION).orElse(null);
         verifyRowCount(dataVersion, rowCount, claimedRows);
-        verifyNoSharpDrop(dataVersion, rowCount, currentActive);
+        checkSharpDrop(dataVersion, rowCount, currentActive, allowShrink, shrinkReason);
         LocalDateTime activatedAt = BusinessTime.nowMicros();
 
         if (dataVersion.equals(currentActive)) {
@@ -194,20 +195,40 @@ public class BaselineIngestService {
      * 기준선이 없는 구간이 대량으로 생기고, 추천은 그걸 "폴백" 으로 조용히 넘긴다.
      * 사고가 눈에 안 띄는 형태라 여기서 막는다.
      *
-     * <p>구간 마스터가 실제로 줄어드는 정상적인 경우도 있을 수 있다. 그때는 계약을 고쳐
-     * 예외 수단을 두기로 하고, 지금은 합의대로 무조건 거절한다.
+     * <h3>allowShrink — 사람이 책임지고 넘기는 문 (2026-09-08 계약 추가)</h3>
+     * 노선 폐지처럼 구간이 <b>실제로</b> 줄어드는 경우가 있다. 그때만 운영자가 한 번 열어 준다.
+     * 자동으로 판단하지 않는 이유: "정상 축소" 와 "배치 고장" 은 행 수만 봐서는 구분되지 않는다.
+     * 아는 사람이 명시적으로 말해야 한다.
+     *
+     * <p>사유는 <b>검사가 실제로 걸렸을 때만</b> 기록한다. 배치가 플래그를 켜둔 채 매일 돌면
+     * 급감이 없는 날에도 사유가 덮어써져, 정작 필요할 때 "언제 왜 넘겼나" 를 알 수 없게 된다.
      */
-    private void verifyNoSharpDrop(String dataVersion, long rowCount, String currentActive) {
+    private void checkSharpDrop(String dataVersion, long rowCount, String currentActive,
+                                boolean allowShrink, String shrinkReason) {
         if (currentActive == null || currentActive.equals(dataVersion)) {
             return;   // 첫 활성화이거나 같은 버전 재활성화면 비교 대상이 없다
         }
         long activeRows = baselineRepository.countByDataVersion(currentActive);
-        if (activeRows > 0 && rowCount * 2 < activeRows) {
+        boolean sharpDrop = activeRows > 0 && rowCount * 2 < activeRows;
+
+        if (!sharpDrop) {
+            if (allowShrink) {
+                // 열어 뒀지만 쓸 일이 없었다. 기록은 남기지 않는다.
+                log.info("allowShrink 가 켜져 있었지만 급감이 없어 그대로 진행 version={}", dataVersion);
+            }
+            return;
+        }
+
+        if (!allowShrink) {
             throw new BusinessException(ErrorCode.INVALID_STATE, String.format(
                     "행 수가 직전 활성 버전의 절반 미만입니다. 새 버전=%d행(%s), 활성 버전=%d행(%s). "
-                            + "배치 입력을 확인해 주세요.",
+                            + "배치 입력을 확인해 주세요. 정상적인 축소라면 allowShrink 와 사유를 함께 보내 주세요.",
                     rowCount, dataVersion, activeRows, currentActive));
         }
+
+        log.warn("급감 검사 건너뜀 version={} rows={} previousRows={} reason={}",
+                dataVersion, rowCount, activeRows, shrinkReason);
+        writeConfig(PipelineConfigKey.BASELINE_LAST_SHRINK_REASON, shrinkReason);
     }
 
     /**

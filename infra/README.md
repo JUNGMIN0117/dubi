@@ -5,7 +5,7 @@
 ### 서버 1 — 데이터 처리
 
 - Kafka (KRaft) + Kafka UI
-- Collector ×5 (bus, subway, traffic, weather, event)
+- Collector: 버스 도착·위치, 지하철 도착·위치·알림, 도시데이터, 교통 돌발, TOPIS 공지, 날씨
 - Spark Master / Worker ×2 / 스트리밍 드라이버 / 배치 실행기
 - Archiver (Kafka → Parquet → HDFS)
 - HDFS NameNode / DataNode1
@@ -34,7 +34,7 @@
 | `core` | kafka, kafka-ui | 가장 먼저 띄운다 |
 | `data` | mysql, redis | |
 | `collect` | collector-weather | 배포 잡이 항상 켜는 기상 수집기 |
-| `collect-realtime` | collector-bus/subway/traffic/event | 구현 완료. API 키와 명시적 수집 범위를 준비한 뒤 별도 활성화 |
+| `collect-realtime` | 비기상 실시간 수집기 8개 | API 키와 호출 한도를 준비한 뒤 별도 활성화. 상세는 [수집 가이드](../docs/data-collection-guide.md) |
 | `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
 | `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |

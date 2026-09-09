@@ -30,6 +30,7 @@ _ROUTE_ID = re.compile(r"^\d{9}$")
 
 # 활용가이드의 최대 30 TPS보다 여유를 두어 호출한다.
 MAX_REQUESTS_PER_SECOND = 25
+DEFAULT_ROUTE_LIMIT = 100
 
 
 class BusLocationError(RuntimeError):
@@ -218,6 +219,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_ROUTE_IDS_PATH,
         help="전체 조회에 사용할 노선 ID JSON 파일",
     )
+    parser.add_argument(
+        "--route-limit",
+        type=int,
+        default=DEFAULT_ROUTE_LIMIT,
+        help=f"전체 조회 시 앞에서부터 조회할 노선 수 (1~{DEFAULT_ROUTE_LIMIT})",
+    )
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_PATH, help="API 키 환경 파일")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH, help="JSON 출력 경로")
     parser.add_argument(
@@ -244,10 +251,12 @@ def main(argv: list[str] | None = None) -> int:
             "routeResults": {route_id: response},
         }
     else:
+        if not 1 <= args.route_limit <= DEFAULT_ROUTE_LIMIT:
+            raise BusLocationError(f"노선 수는 1 이상 {DEFAULT_ROUTE_LIMIT} 이하여야 합니다")
         route_ids = load_bus_route_ids(args.route_ids_file)
         data = fetch_all_bus_locations(
             api_key,
-            route_ids,
+            route_ids[:args.route_limit],
             requests_per_second=args.requests_per_second,
         )
     save_json(data, args.output)
@@ -256,6 +265,12 @@ def main(argv: list[str] | None = None) -> int:
         f"(노선 {data['routeCount']}개, 차량 {data['vehicleCount']}대)"
     )
     return 0
+
+
+# 서버 main.py가 읽는 Kafka 수집 계약. 직접 실행 JSON 기능도 유지한다.
+if __package__:
+    from sources.kafka_adapter import make_source
+    SOURCE = make_source("bus_location")
 
 
 if __name__ == "__main__":

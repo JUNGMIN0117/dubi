@@ -339,5 +339,11 @@ def main() -> int:
     return 0
 
 
+# 서버 main.py가 읽는 Kafka 수집 계약. 직접 실행 JSON 기능도 유지한다.
+if __package__:
+    from sources.kafka_adapter import make_source
+    SOURCE = make_source("topis_notice")
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

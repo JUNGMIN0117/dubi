@@ -26,6 +26,7 @@ DEFAULT_ROUTE_IDS_PATH = COLLECTOR_DIR / "config" / "bus_route_ids.json"
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ROUTE_ID = re.compile(r"^\d{9}$")
 MAX_REQUESTS_PER_SECOND = 25
+DEFAULT_ROUTE_LIMIT = 100
 
 
 class BusArrivalError(RuntimeError):
@@ -94,6 +95,9 @@ def fetch_bus_arrival(
             raise BusArrivalError("서울 버스도착 API 응답이 올바른 JSON이 아닙니다") from exc
         if not isinstance(data, dict):
             raise BusArrivalError("서울 버스도착 API JSON 응답의 최상위 값이 객체가 아닙니다")
+        header = data.get("msgHeader", {})
+        if str(header.get("headerCd", "")) != "0":
+            raise BusArrivalError("서울 버스도착 API 업무 오류: " + str(header.get("headerCd", "UNKNOWN")))
         return data
     except httpx.HTTPError as exc:
         raise BusArrivalError(f"서울 버스도착 API 연결에 실패했습니다: {type(exc).__name__}") from exc
@@ -182,6 +186,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_ROUTE_IDS_PATH,
         help="전체 조회에 사용할 노선 ID JSON 파일",
     )
+    parser.add_argument(
+        "--route-limit",
+        type=int,
+        default=DEFAULT_ROUTE_LIMIT,
+        help=f"전체 조회 시 앞에서부터 조회할 노선 수 (1~{DEFAULT_ROUTE_LIMIT})",
+    )
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_PATH, help="API 키 환경 파일")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH, help="JSON 출력 경로")
     return parser.parse_args(argv)
@@ -196,11 +206,19 @@ def main(argv: list[str] | None = None) -> int:
     if bus_route_id:
         data = fetch_bus_arrival(api_key, bus_route_id)
     else:
+        if not 1 <= args.route_limit <= DEFAULT_ROUTE_LIMIT:
+            raise BusArrivalError(f"노선 수는 1 이상 {DEFAULT_ROUTE_LIMIT} 이하여야 합니다")
         route_ids = load_bus_route_ids(args.route_ids_file)
-        data = fetch_all_bus_arrivals(api_key, route_ids)
+        data = fetch_all_bus_arrivals(api_key, route_ids[:args.route_limit])
     save_json(data, args.output)
     print(f"버스 도착정보 JSON 저장 완료: {args.output.resolve()}")
     return 0
+
+
+# 서버 main.py가 읽는 Kafka 수집 계약. 직접 실행 JSON 기능도 유지한다.
+if __package__:
+    from sources.kafka_adapter import make_source
+    SOURCE = make_source("bus_arrival")
 
 
 if __name__ == "__main__":

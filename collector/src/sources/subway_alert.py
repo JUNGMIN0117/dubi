@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import httpx
 
 
 API_HOST = "http://openapi.seoul.go.kr:8088"
@@ -71,7 +72,7 @@ def _validate_range(start_index: int, end_index: int) -> None:
 
 
 def _request_json(
-    api_key: str, start_index: int, end_index: int
+    api_key: str, start_index: int, end_index: int, *, client: httpx.Client | None = None
 ) -> dict[str, Any]:
     _validate_range(start_index, end_index)
     url = (
@@ -79,6 +80,15 @@ def _request_json(
         f"{start_index}/{end_index}/"
     )
     request = Request(url, headers={"User-Agent": "seoul-data-collector/1.0"})
+
+    if client is not None:
+        response = client.get(url, headers={"Accept": "application/json"}, follow_redirects=True)
+        if response.status_code != 200:
+            raise SubwayAlertError(f"API HTTP 오류: {response.status_code}")
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise SubwayAlertError("API 최상위 응답이 JSON 객체가 아닙니다.")
+        return payload
 
     try:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
@@ -155,6 +165,7 @@ def fetch_alerts(
     start_index: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
     fetch_all: bool = False,
+    client: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """알림을 조회한다. fetch_all=False이면 지정 범위 한 페이지만 요청한다."""
     if page_size < 1 or page_size > MAX_PAGE_SIZE:
@@ -169,7 +180,8 @@ def fetch_alerts(
 
     while True:
         current_end = current_start + page_size - 1
-        payload = _request_json(api_key, current_start, current_end)
+        payload = (_request_json(api_key, current_start, current_end, client=client)
+                   if client is not None else _request_json(api_key, current_start, current_end))
         total_count, page_items = _parse_response(payload)
         collected_items.extend(page_items)
         request_count += 1
@@ -246,6 +258,12 @@ def main() -> int:
         f"(전체 {data['totalCount']}건, API {data['requestCount']}회): {args.output}"
     )
     return 0
+
+
+# 서버 main.py가 읽는 Kafka 수집 계약. 직접 실행 JSON 기능도 유지한다.
+if __package__:
+    from sources.kafka_adapter import make_source
+    SOURCE = make_source("subway_alert")
 
 
 if __name__ == "__main__":

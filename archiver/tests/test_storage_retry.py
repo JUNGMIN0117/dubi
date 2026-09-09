@@ -44,6 +44,60 @@ def test_gives_up_after_attempts(no_sleep):
     assert no_sleep == [2.0, 4.0]          # 3회 시도, 대기 2회
 
 
+def test_safe_mode_runtime_error_is_retried(no_sleep):
+    calls = {"n": 0}
+
+    def nn_in_safe_mode():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("Cannot create directory /ddubi/archive. Name node is in safe mode.")
+        return "ok"
+
+    assert with_retry(nn_in_safe_mode, "test") == "ok"
+    assert no_sleep == [2.0]
+
+
+def test_other_runtime_error_is_not_retried(no_sleep):
+    def bug():
+        raise RuntimeError("unrelated programming error")
+
+    with pytest.raises(RuntimeError):
+        with_retry(bug, "test")
+    assert no_sleep == []
+
+
+def test_backoff_is_capped(no_sleep):
+    def always():
+        raise requests.exceptions.ConnectionError("down")
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        with_retry(always, "test", attempts=8)
+    assert no_sleep == [2.0, 4.0, 8.0, 16.0, 30.0, 30.0, 30.0]   # 상한 30초, 합계 120초
+
+
+def test_from_uri_waits_for_namenode(monkeypatch, tmp_path, no_sleep):
+    real = storage_mod.fsspec.core.url_to_fs
+    state = {"n": 0}
+
+    def flaky_url_to_fs(uri, **kw):
+        fs, root = real(uri, **kw)
+        real_makedirs = fs.makedirs
+
+        def makedirs(path, exist_ok=False):
+            state["n"] += 1
+            if state["n"] <= 2:
+                raise RuntimeError("Name node is in safe mode.")
+            return real_makedirs(path, exist_ok=exist_ok)
+
+        fs.makedirs = makedirs
+        return fs, root
+
+    monkeypatch.setattr(storage_mod.fsspec.core, "url_to_fs", flaky_url_to_fs)
+    st = Storage.from_uri(f"file://{tmp_path}/archive")
+    assert st.root.endswith("archive") and state["n"] == 3
+    assert no_sleep == [2.0, 4.0]
+
+
 def test_404_is_not_retried(no_sleep):
     calls = {"n": 0}
 

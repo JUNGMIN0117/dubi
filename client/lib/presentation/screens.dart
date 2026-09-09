@@ -14,6 +14,7 @@ import '../services/kakao_login_service.dart';
 import '../services/google_login_service.dart';
 import '../services/naver_login_service.dart';
 import '../services/app_api.dart';
+import '../services/place_api.dart';
 import '../services/recommendation_api.dart';
 import 'auth_screens.dart';
 import 'micro_animations.dart';
@@ -36,60 +37,246 @@ class IntroScreen extends StatefulWidget {
 
 class _IntroScreenState extends State<IntroScreen> {
   final _pages = const [
-    {'bg': 'intro-bg-1.png', 'title': '뚜비', 'body': '변하는 길 위에서,\n가장 좋은 출발의 순간을 알려드려요.', 'character': 'welcome.png'},
-    {'bg': 'intro-bg-2.png', 'title': '중요한 일정,\n놓치지 않게 도와드려요', 'body': '일정과 실시간 이동 변수를 바탕으로\n추천 출발 시간을 안내해요.', 'character': 'intro-calendar-clock.png'},
-    {'bg': 'intro-bg-3.png', 'title': '실시간 이동 변수를\n한눈에 확인해요', 'body': '날씨, 혼잡도, 지하철 지연,\n도로 통제까지 함께 반영해요.', 'character': 'empty-schedule.png'},
-    {'bg': 'intro-bg-4.png', 'title': '여러 변수를 반영해\n출발 시간을 추천해요', 'body': '일정 중요도와 예상 지연을 반영해\n가장 알맞은 출발 시간을 알려드려요.', 'character': 'celebrate.png'},
+    {
+      'bg': 'intro-bg-1.png',
+      'title': '뚜비',
+      'body': '변하는 길 위에서,\n가장 좋은 출발의 순간을 알려드려요.',
+      'character': 'welcome.png',
+    },
+    {
+      'bg': 'intro-bg-2.png',
+      'title': '중요한 일정,\n놓치지 않게 도와드려요',
+      'body': '일정과 실시간 이동 변수를 바탕으로\n추천 출발 시간을 안내해요.',
+      'character': 'intro-calendar-clock.png',
+    },
+    {
+      'bg': 'intro-bg-3.png',
+      'title': '실시간 이동 변수를\n한눈에 확인해요',
+      'body': '날씨, 혼잡도, 지하철 지연,\n도로 통제까지 함께 반영해요.',
+      'character': 'empty-schedule.png',
+    },
+    {
+      'bg': 'intro-bg-4.png',
+      'title': '여러 변수를 반영해\n출발 시간을 추천해요',
+      'body': '일정 중요도와 예상 지연을 반영해\n가장 알맞은 출발 시간을 알려드려요.',
+      'character': 'celebrate.png',
+    },
   ];
   final _controller = PageController();
   var _page = 0;
 
   @override
-  void dispose() { _controller.dispose(); super.dispose(); }
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final last = _page == _pages.length - 1;
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SafeArea(child: Stack(children: [
-        Positioned.fill(child: Image.asset('assets/images/ttubee/${_page == 1 ? 'intro-bg-bus-stop.png' : _page == 2 ? 'intro-bg-2.png' : _page == 3 ? 'intro-bg-skyline.png' : 'intro-bg-4.png'}', fit: BoxFit.cover)),
-        const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: Color(0x66FFFDF7)))),
-        Column(children: [
-        Align(alignment: Alignment.centerRight, child: TextButton(
-          onPressed: () => context.go('/login'),
-          child: const Text('건너뛰기', style: TextStyle(color: Color(0xFF078C83), fontWeight: FontWeight.w800)),
-        )),
-        Expanded(child: PageView.builder(
-          controller: _controller,
-          itemCount: _pages.length,
-          onPageChanged: (value) => setState(() => _page = value),
-          itemBuilder: (context, index) {
-            final page = _pages[index];
-            if (index == 0) return const _IntroStartPage();
-            return Padding(padding: const EdgeInsets.fromLTRB(16, 22, 16, 8), child: Column(children: [
-              Container(width: 70, height: 30, decoration: BoxDecoration(color: const Color(0xFFDDF2EA), borderRadius: BorderRadius.circular(18)), child: Center(child: Text('$index / 4', style: const TextStyle(color: Color(0xFF078C83), fontWeight: FontWeight.w800)))),
-              const SizedBox(height: 12),
-              Text(page['title']!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 30, height: 1.2, fontWeight: FontWeight.w900, color: Color(0xFF101A32))),
-              const SizedBox(height: 10),
-              Text(page['body']!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, height: 1.5, color: Color(0xFF52647A))),
-              const SizedBox(height: 12),
-              Expanded(child: Stack(fit: StackFit.expand, children: [
-                Align(alignment: Alignment.bottomCenter, child: Padding(padding: EdgeInsets.only(bottom: index == 2 ? 148 : index == 3 ? 128 : 18), child: Image.asset('assets/images/ttubee/${page['character']}', height: index == 1 ? 355 : 305, fit: BoxFit.contain))),
-                if (index == 1) const Positioned(right: 12, top: 30, child: _SpeechBubble('제시간에\n도착해요!')),
-                if (index == 2) const Positioned(top: 18, left: 0, right: 0, child: _MobilityCards()),
-                if (index == 3) const Positioned(bottom: 22, left: 0, right: 0, child: _DepartureCards()),
-              ])),
-            ]));
-          },
-        )),
-        if (_page != 0) Padding(padding: const EdgeInsets.fromLTRB(24, 4, 24, 18), child: SizedBox(height:48,child:Stack(children: [
-          Align(alignment:Alignment.center,child:Row(mainAxisSize:MainAxisSize.min,children: List.generate(4, (i) => AnimatedContainer(duration: const Duration(milliseconds: 200), margin: const EdgeInsets.symmetric(horizontal: 3), width: i == _page - 1 ? 10 : 8, height: 8, decoration: BoxDecoration(color: i == _page - 1 ? const Color(0xFF08A79D) : const Color(0xFFD4DAD8), borderRadius: BorderRadius.circular(8)))))),
-          if (_page > 1) Align(alignment:Alignment.centerLeft,child:_roundNav(Icons.arrow_back, () => _controller.previousPage(duration: const Duration(milliseconds: 260), curve: Curves.easeOut))),
-          Align(alignment:Alignment.centerRight,child:_roundNav(Icons.arrow_forward, () { if (last) { context.go('/login'); } else { _controller.nextPage(duration: const Duration(milliseconds: 260), curve: Curves.easeOut); } })),
-        ]))) else const SizedBox(height: 34),
-        ]),
-      ])),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/ttubee/${_page == 1
+                    ? 'intro-bg-bus-stop.png'
+                    : _page == 2
+                    ? 'intro-bg-2.png'
+                    : _page == 3
+                    ? 'intro-bg-skyline.png'
+                    : 'intro-bg-4.png'}',
+                fit: BoxFit.cover,
+              ),
+            ),
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: Color(0x66FFFDF7)),
+              ),
+            ),
+            Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.go('/login'),
+                    child: const Text(
+                      '건너뛰기',
+                      style: TextStyle(
+                        color: Color(0xFF078C83),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _controller,
+                    itemCount: _pages.length,
+                    onPageChanged: (value) => setState(() => _page = value),
+                    itemBuilder: (context, index) {
+                      final page = _pages[index];
+                      if (index == 0) return const _IntroStartPage();
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 22, 16, 8),
+                        child: Column(
+                          children: [
+                            Container(
+                              width: 70,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDDF2EA),
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$index / 4',
+                                  style: const TextStyle(
+                                    color: Color(0xFF078C83),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              page['title']!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 30,
+                                height: 1.2,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF101A32),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              page['body']!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                height: 1.5,
+                                color: Color(0xFF52647A),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Padding(
+                                      padding: EdgeInsets.only(
+                                        bottom: index == 2
+                                            ? 148
+                                            : index == 3
+                                            ? 128
+                                            : 18,
+                                      ),
+                                      child: Image.asset(
+                                        'assets/images/ttubee/${page['character']}',
+                                        height: index == 1 ? 355 : 305,
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
+                                  if (index == 1)
+                                    const Positioned(
+                                      right: 12,
+                                      top: 30,
+                                      child: _SpeechBubble('제시간에\n도착해요!'),
+                                    ),
+                                  if (index == 2)
+                                    const Positioned(
+                                      top: 18,
+                                      left: 0,
+                                      right: 0,
+                                      child: _MobilityCards(),
+                                    ),
+                                  if (index == 3)
+                                    const Positioned(
+                                      bottom: 22,
+                                      left: 0,
+                                      right: 0,
+                                      child: _DepartureCards(),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                if (_page != 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 4, 24, 18),
+                    child: SizedBox(
+                      height: 48,
+                      child: Stack(
+                        children: [
+                          Align(
+                            alignment: Alignment.center,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: List.generate(
+                                4,
+                                (i) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 3,
+                                  ),
+                                  width: i == _page - 1 ? 10 : 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: i == _page - 1
+                                        ? const Color(0xFF08A79D)
+                                        : const Color(0xFFD4DAD8),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_page > 1)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: _roundNav(
+                                Icons.arrow_back,
+                                () => _controller.previousPage(
+                                  duration: const Duration(milliseconds: 260),
+                                  curve: Curves.easeOut,
+                                ),
+                              ),
+                            ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: _roundNav(Icons.arrow_forward, () {
+                              if (last) {
+                                context.go('/login');
+                              } else {
+                                _controller.nextPage(
+                                  duration: const Duration(milliseconds: 260),
+                                  curve: Curves.easeOut,
+                                );
+                              }
+                            }),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(height: 34),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -111,88 +298,691 @@ class _IntroStartPage extends StatelessWidget {
   const _IntroStartPage();
 
   @override
-  Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
-    const Positioned(top: 78, left: 0, right: 0, child: Column(children: [
-      Text('뚜비', style: TextStyle(fontSize: 50, height: .9, fontWeight: FontWeight.w900, color: Color(0xFF087A76), letterSpacing: 2)),
-      SizedBox(height: 7), Text('뚜벅이의 비서', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF08A79D))),
-      SizedBox(height: 24), Text('변하는 길 위에서,\n가장 좋은 출발의 순간을 알려주는 비서', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, height: 1.35, fontWeight: FontWeight.w800, color: Color(0xFF181818))),
-    ])),
-    Positioned(bottom: 92, left: 18, right: 18, child: Image.asset('assets/images/ttubee/welcome.png', height: 315, fit: BoxFit.contain)),
-    const Positioned(bottom: 42, left: 0, right: 0, child: Text('좋은 출발이 좋은 하루를 만들어요.', textAlign: TextAlign.center, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF078C83)))),
-  ]);
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const Positioned(
+        top: 78,
+        left: 0,
+        right: 0,
+        child: Column(
+          children: [
+            Text(
+              '뚜비',
+              style: TextStyle(
+                fontSize: 50,
+                height: .9,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF087A76),
+                letterSpacing: 2,
+              ),
+            ),
+            SizedBox(height: 7),
+            Text(
+              '뚜벅이의 비서',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF08A79D),
+              ),
+            ),
+            SizedBox(height: 24),
+            Text(
+              '변하는 길 위에서,\n가장 좋은 출발의 순간을 알려주는 비서',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 18,
+                height: 1.35,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF181818),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Positioned(
+        bottom: 92,
+        left: 18,
+        right: 18,
+        child: Image.asset(
+          'assets/images/ttubee/welcome.png',
+          height: 315,
+          fit: BoxFit.contain,
+        ),
+      ),
+      const Positioned(
+        bottom: 42,
+        left: 0,
+        right: 0,
+        child: Text(
+          '좋은 출발이 좋은 하루를 만들어요.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w900,
+            color: Color(0xFF078C83),
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 class _SpeechBubble extends StatelessWidget {
-  const _SpeechBubble(this.text); final String text;
-  @override Widget build(BuildContext context) => Stack(clipBehavior: Clip.none, children:[
-    Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: const Color(0xFFD0D7D7)), borderRadius: BorderRadius.circular(30)), child: Text(text, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, height: 1.2, fontWeight: FontWeight.w900, color: DdubiColors.navy))),
-    Positioned(bottom:-9,left:22,child:Transform.rotate(angle:.65,child:Container(width:18,height:18,decoration:BoxDecoration(color:Colors.white,border:Border(right:BorderSide(color:Color(0xFFD0D7D7)),bottom:BorderSide(color:Color(0xFFD0D7D7)))))))
-  ]);
+  const _SpeechBubble(this.text);
+  final String text;
+  @override
+  Widget build(BuildContext context) => Stack(
+    clipBehavior: Clip.none,
+    children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFD0D7D7)),
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 16,
+            height: 1.2,
+            fontWeight: FontWeight.w900,
+            color: DdubiColors.navy,
+          ),
+        ),
+      ),
+      Positioned(
+        bottom: -9,
+        left: 22,
+        child: Transform.rotate(
+          angle: .65,
+          child: Container(
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(
+                right: BorderSide(color: Color(0xFFD0D7D7)),
+                bottom: BorderSide(color: Color(0xFFD0D7D7)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 class _MobilityCards extends StatelessWidget {
   const _MobilityCards();
-  @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(horizontal: 18), child: LayoutBuilder(builder:(context,box) {
-    final width=(box.maxWidth-8)/2;
-    return Wrap(spacing: 8, runSpacing: 8, children: [
-      _MiniStatus(Icons.wb_sunny_rounded, '날씨', '맑음', Color(0xFF1976E9),width), _MiniStatus(Icons.groups_rounded, '혼잡도', '보통', Color(0xFF078C83),width),
-      _MiniStatus(Icons.train_rounded, '지하철', '일부 지연', Color(0xFFEF3D3D),width), _MiniStatus(Icons.add_road_rounded, '도로', '통제 없음', Color(0xFF078C83),width),
-    ]);
-  }));
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 18),
+    child: LayoutBuilder(
+      builder: (context, box) {
+        final width = (box.maxWidth - 8) / 2;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _MiniStatus(
+              Icons.wb_sunny_rounded,
+              '날씨',
+              '맑음',
+              Color(0xFF1976E9),
+              width,
+            ),
+            _MiniStatus(
+              Icons.groups_rounded,
+              '혼잡도',
+              '보통',
+              Color(0xFF078C83),
+              width,
+            ),
+            _MiniStatus(
+              Icons.train_rounded,
+              '지하철',
+              '일부 지연',
+              Color(0xFFEF3D3D),
+              width,
+            ),
+            _MiniStatus(
+              Icons.add_road_rounded,
+              '도로',
+              '통제 없음',
+              Color(0xFF078C83),
+              width,
+            ),
+          ],
+        );
+      },
+    ),
+  );
 }
-class _MiniStatus extends StatelessWidget { const _MiniStatus(this.icon,this.title,this.value,this.color,this.width); final IconData icon; final String title,value; final Color color; final double width;
-  @override Widget build(BuildContext context) => Container(width: width, height: 64, padding: const EdgeInsets.symmetric(horizontal:11), decoration: BoxDecoration(color: Colors.white.withValues(alpha:.96), borderRadius: BorderRadius.circular(12), boxShadow: const [BoxShadow(color: Color(0x12003F3B), blurRadius: 8, offset: Offset(0,3))]), child: Row(children:[Icon(icon,size:29,color:color),const SizedBox(width:9),Column(crossAxisAlignment: CrossAxisAlignment.start,mainAxisAlignment: MainAxisAlignment.center,children:[Text(title,style:const TextStyle(fontSize:13,fontWeight:FontWeight.w800,color:DdubiColors.navy)),const SizedBox(height:1),Text(value,style:TextStyle(fontSize:13,fontWeight:FontWeight.w900,color:color))]) ])); }
-class _DepartureCards extends StatelessWidget { const _DepartureCards(); @override Widget build(BuildContext context) => Row(mainAxisAlignment: MainAxisAlignment.center,children: const [_DepartureCard(Icons.schedule_rounded,'추천 출발','17:35',Color(0xFF08A79D)),SizedBox(width:8),_DepartureCard(Icons.eco_rounded,'여유 출발','17:25',Color(0xFF3C657E)),SizedBox(width:8),_DepartureCard(Icons.flag_rounded,'도착 예상','18:20',Color(0xFF9B53A4))]); }
-class _DepartureCard extends StatelessWidget { const _DepartureCard(this.icon,this.label,this.time,this.color); final IconData icon; final String label,time; final Color color; @override Widget build(BuildContext context)=>Container(width:104,height:102,decoration:BoxDecoration(color:Colors.white.withValues(alpha:.96),borderRadius:BorderRadius.circular(15),border:Border.all(color:color.withValues(alpha:.55)),boxShadow:const [BoxShadow(color:Color(0x17003F3B),blurRadius:10,offset:Offset(0,4))]),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon(icon,size:20,color:color),const SizedBox(height:3),Text(label,style:TextStyle(fontSize:14,fontWeight:FontWeight.w800,color:color)),const SizedBox(height:4),Text(time,style:TextStyle(fontSize:24,fontWeight:FontWeight.w900,color:color))])); }
 
-class LoginScreen extends StatelessWidget {
+class _MiniStatus extends StatelessWidget {
+  const _MiniStatus(this.icon, this.title, this.value, this.color, this.width);
+  final IconData icon;
+  final String title, value;
+  final Color color;
+  final double width;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: 64,
+    padding: const EdgeInsets.symmetric(horizontal: 11),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: .96),
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x12003F3B),
+          blurRadius: 8,
+          offset: Offset(0, 3),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        Icon(icon, size: 29, color: color),
+        const SizedBox(width: 9),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: DdubiColors.navy,
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+class _DepartureCards extends StatelessWidget {
+  const _DepartureCards();
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: const [
+      _DepartureCard(
+        Icons.schedule_rounded,
+        '추천 출발',
+        '17:35',
+        Color(0xFF08A79D),
+      ),
+      SizedBox(width: 8),
+      _DepartureCard(Icons.eco_rounded, '여유 출발', '17:25', Color(0xFF3C657E)),
+      SizedBox(width: 8),
+      _DepartureCard(Icons.flag_rounded, '도착 예상', '18:20', Color(0xFF9B53A4)),
+    ],
+  );
+}
+
+class _DepartureCard extends StatelessWidget {
+  const _DepartureCard(this.icon, this.label, this.time, this.color);
+  final IconData icon;
+  final String label, time;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 104,
+    height: 102,
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: .96),
+      borderRadius: BorderRadius.circular(15),
+      border: Border.all(color: color.withValues(alpha: .55)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x17003F3B),
+          blurRadius: 10,
+          offset: Offset(0, 4),
+        ),
+      ],
+    ),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 20, color: color),
+        const SizedBox(height: 3),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          time,
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
+            color: color,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
     required this.authRepository,
     required this.kakaoLoginService,
     required this.googleLoginService,
     required this.naverLoginService,
+    this.onAuthenticated,
   });
   final AuthRepository authRepository;
   final KakaoLoginService kakaoLoginService;
   final GoogleLoginService googleLoginService;
   final NaverLoginService naverLoginService;
+  final VoidCallback? onAuthenticated;
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final email = TextEditingController();
+  final password = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  bool obscure = true;
+  bool loading = false;
+  bool keepSignedIn = true;
+  String? serverError;
+
+  @override
+  void dispose() {
+    email.dispose();
+    password.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext c) => Scaffold(
     backgroundColor: Colors.white,
     floatingActionButton: null,
-    body: SafeArea(child: LayoutBuilder(builder: (context, box) => Stack(children: [
-      Positioned(top: 0, left: 0, right: 0, height: box.maxHeight * .50, child: Stack(fit: StackFit.expand, children: [
-        Image.asset('assets/images/ttubee/intro-bg-2.png', fit: BoxFit.cover),
-        const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0xBFFFFFFF),Color(0x00FFFFFF)]))),
-        const Positioned(top: 22,left:0,right:0,child:Column(children:[Text('뚜비',style:TextStyle(fontSize:38,fontWeight:FontWeight.w900,color:Color(0xFF087A76))),Text('뚜벅이의 비서',style:TextStyle(fontWeight:FontWeight.w900,color:Color(0xFF08A79D))),SizedBox(height:10),Text('오늘도, 더 안전한 출발.',style:TextStyle(fontSize:15,fontWeight:FontWeight.w800,color:Color(0xFF222222)))])),
-        Positioned(bottom:24,left:0,right:0,child:Image.asset('assets/images/ttubee/empty-schedule.png',height:205)),
-      ])),
-      Positioned.fill(top: box.maxHeight * .50, child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(28, 12, 28, 24), child: Column(children:[
-        _field('이메일을 입력해주세요', Icons.mail_outline, ()=>_openEmailLogin(c)), const SizedBox(height:9), _field('비밀번호를 입력해주세요', Icons.lock_outline, ()=>_openEmailLogin(c)),
-        const SizedBox(height:8), const Align(alignment:Alignment.centerLeft,child:Row(children:[Icon(Icons.check_box,color:Color(0xFF08A79D),size:20),SizedBox(width:7),Text('로그인 상태 유지',style:TextStyle(fontSize:13,color:DdubiColors.navy))])),
-        const SizedBox(height:12), SizedBox(width:double.infinity,height:48,child:FilledButton(onPressed:()=>_openEmailLogin(c),child:const Text('로그인',style:TextStyle(fontSize:16,fontWeight:FontWeight.w700)))),
-        Row(mainAxisAlignment:MainAxisAlignment.center,children:[TextButton(onPressed:()=>_comingSoon(c,'아이디 찾기'),child:const Text('아이디 찾기',style:TextStyle(fontSize:12,color:Color(0xFF607080)))),Container(width:1,height:12,color:const Color(0xFFD7DDE0)),TextButton(onPressed:()=>_comingSoon(c,'비밀번호 찾기'),child:const Text('비밀번호 찾기',style:TextStyle(fontSize:12,color:Color(0xFF607080))))]),
-        const SizedBox(height:14),const Row(children:[Expanded(child:Divider()),Padding(padding:EdgeInsets.symmetric(horizontal:12),child:Text('또는',style:TextStyle(color:Color(0xFF77818B))),),Expanded(child:Divider())]),const SizedBox(height:12),
-        Row(mainAxisAlignment:MainAxisAlignment.center,children:[_socialIcon('K',const Color(0xFFFFD600),Colors.black,()=>_social(c,'카카오')),_socialIcon('G',Colors.white,DdubiColors.navy,()=>_social(c,'Google')),_socialIcon('N',const Color(0xFF03C75A),Colors.white,()=>_social(c,'네이버'))]),
-        TextButton(onPressed:()=>_open(c,SignUpScreen(repository:authRepository)),child:const Text('계정이 없으신가요?  회원가입',style:TextStyle(color:Color(0xFF078C83)))),
-        const SizedBox(height:16),const Row(mainAxisAlignment:MainAxisAlignment.center,children:[Icon(Icons.lock_outline,size:14,color:Color(0xFF84909A)),SizedBox(width:6),Text('안전한 서비스 이용을 위해 최소한의 권한만 사용합니다.',style:TextStyle(fontSize:10,color:Color(0xFF84909A)))])
-      ])))
-    ]))),
+    body: SafeArea(
+      child: LayoutBuilder(
+        builder: (context, box) => Stack(
+          children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: box.maxHeight * .50,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.asset(
+                    'assets/images/ttubee/intro-bg-2.png',
+                    fit: BoxFit.cover,
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xBFFFFFFF), Color(0x00FFFFFF)],
+                      ),
+                    ),
+                  ),
+                  const Positioned(
+                    top: 22,
+                    left: 0,
+                    right: 0,
+                    child: Column(
+                      children: [
+                        Text(
+                          '뚜비',
+                          style: TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF087A76),
+                          ),
+                        ),
+                        Text(
+                          '뚜벅이의 비서',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF08A79D),
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          '오늘도, 더 안전한 출발.',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF222222),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 24,
+                    left: 0,
+                    right: 0,
+                    child: Image.asset(
+                      'assets/images/ttubee/empty-schedule.png',
+                      height: 205,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Positioned.fill(
+              top: box.maxHeight * .50,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        key: const Key('loginEmailField'),
+                        controller: email,
+                        validator: validateEmail,
+                        keyboardType: TextInputType.emailAddress,
+                        autofillHints: const [AutofillHints.email],
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          hintText: '이메일을 입력해주세요',
+                          prefixIcon: Icon(Icons.mail_outline),
+                        ),
+                      ),
+                      const SizedBox(height: 9),
+                      TextFormField(
+                        key: const Key('loginPasswordField'),
+                        controller: password,
+                        validator: validatePassword,
+                        obscureText: obscure,
+                        autofillHints: const [AutofillHints.password],
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => loading ? null : _submit(c),
+                        decoration: InputDecoration(
+                          hintText: '비밀번호를 입력해주세요',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            onPressed: () => setState(() => obscure = !obscure),
+                            icon: Icon(
+                              obscure
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: keepSignedIn,
+                          onChanged: (value) =>
+                              setState(() => keepSignedIn = value ?? true),
+                          title: const Text(
+                            '로그인 상태 유지',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: DdubiColors.navy,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (serverError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              serverError!,
+                              style: const TextStyle(color: DdubiColors.red),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: FilledButton(
+                          onPressed: loading ? null : () => _submit(c),
+                          child: loading
+                              ? const SizedBox.square(
+                                  dimension: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text(
+                                  '로그인',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TextButton(
+                            onPressed: () => _open(
+                              c,
+                              const AccountRecoveryScreen(initialIndex: 0),
+                            ),
+                            child: const Text(
+                              '아이디 찾기',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF607080),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 12,
+                            color: const Color(0xFFD7DDE0),
+                          ),
+                          TextButton(
+                            onPressed: () => _open(
+                              c,
+                              const AccountRecoveryScreen(initialIndex: 1),
+                            ),
+                            child: const Text(
+                              '비밀번호 찾기',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF607080),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      const Row(
+                        children: [
+                          Expanded(child: Divider()),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              '또는',
+                              style: TextStyle(color: Color(0xFF77818B)),
+                            ),
+                          ),
+                          Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _socialIcon(
+                            'K',
+                            const Color(0xFFFFD600),
+                            Colors.black,
+                            () => _social(c, '카카오'),
+                          ),
+                          _socialIcon(
+                            'G',
+                            Colors.white,
+                            DdubiColors.navy,
+                            () => _social(c, 'Google'),
+                          ),
+                          _socialIcon(
+                            'N',
+                            const Color(0xFF03C75A),
+                            Colors.white,
+                            () => _social(c, '네이버'),
+                          ),
+                        ],
+                      ),
+                      TextButton(
+                        onPressed: () => _openSignUp(c),
+                        child: const Text(
+                          '계정이 없으신가요?  회원가입',
+                          style: TextStyle(color: Color(0xFF078C83)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.lock_outline,
+                            size: 14,
+                            color: Color(0xFF84909A),
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            '안전한 서비스 이용을 위해 최소한의 권한만 사용합니다.',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF84909A),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
-  void _completeLogin(BuildContext c) => c.go('/home');
-  void _openEmailLogin(BuildContext c) => _open(c,EmailLoginScreen(repository:authRepository,onAuthenticated:()=>_completeLogin(c)));
-  void _comingSoon(BuildContext c, String label) => ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text('$label 기능은 준비 중입니다.')));
-  Widget _field(String hint, IconData icon, VoidCallback onTap) => Semantics(button:true,label:hint,child:InkWell(onTap:onTap,borderRadius:BorderRadius.circular(12),child:Container(height: 47, decoration: BoxDecoration(color: Colors.white.withValues(alpha: .88), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFDCE1E4))), child: Row(children:[const SizedBox(width:13),Icon(icon,size:20,color:const Color(0xFF687786)),const SizedBox(width:10),Text(hint,style:const TextStyle(fontSize:13,color:Color(0xFF8A959E)))]))));
-  Widget _socialIcon(String label, Color color, Color text, VoidCallback onTap) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: InkWell(onTap:onTap,borderRadius:BorderRadius.circular(28),child:Container(width:48,height:48,alignment:Alignment.center,decoration:BoxDecoration(color:color,shape:BoxShape.circle,border:Border.all(color:const Color(0xFFE0E3E5))),child:Text(label,style:TextStyle(fontSize:18,fontWeight:FontWeight.w900,color:text)) )));
+  void _completeLogin(BuildContext c) {
+    final callback = widget.onAuthenticated;
+    if (callback != null) {
+      callback();
+      return;
+    }
+    c.go('/home');
+  }
+
+  Future<void> _submit(BuildContext context) async {
+    setState(() => serverError = null);
+    if (kDebugMode &&
+        email.text == 'localadmin' &&
+        password.text == 'local1234') {
+      _completeLogin(context);
+      return;
+    }
+    if (!(formKey.currentState?.validate() ?? false)) return;
+    setState(() => loading = true);
+    try {
+      await widget.authRepository.login(
+        email: email.text.trim(),
+        password: password.text,
+      );
+      if (context.mounted) _completeLogin(context);
+    } on AuthException catch (error) {
+      if (mounted) {
+        setState(() => serverError = error.message ?? '이메일 또는 비밀번호를 확인해주세요.');
+      }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _openSignUp(BuildContext context) async {
+    final registeredEmail = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SignUpScreen(repository: widget.authRepository),
+      ),
+    );
+    if (registeredEmail != null && context.mounted) {
+      email.text = registeredEmail;
+    }
+  }
+
+  Widget _socialIcon(
+    String label,
+    Color color,
+    Color text,
+    VoidCallback onTap,
+  ) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(28),
+      child: Container(
+        width: 48,
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: const Color(0xFFE0E3E5)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: text,
+          ),
+        ),
+      ),
+    ),
+  );
   void _social(BuildContext c, String provider) => _open(
     c,
     SocialAuthScreen(
       provider: provider,
-      repository: authRepository,
-      kakaoLoginService: provider == '카카오' ? kakaoLoginService : null,
-      googleLoginService: provider == 'Google' ? googleLoginService : null,
-      naverLoginService: provider == '네이버' ? naverLoginService : null,
+      repository: widget.authRepository,
+      kakaoLoginService: provider == '카카오' ? widget.kakaoLoginService : null,
+      googleLoginService: provider == 'Google'
+          ? widget.googleLoginService
+          : null,
+      naverLoginService: provider == '네이버' ? widget.naverLoginService : null,
       onAuthenticated: () => _completeLogin(c),
     ),
   );
@@ -216,6 +1006,12 @@ class HomeScreen extends StatelessWidget {
     index: go == null ? null : 2,
     onNav: go,
     actions: [
+      IconButton(
+        key: const Key('manageRepeatSchedulesButton'),
+        tooltip: '반복 일정 관리',
+        onPressed: () => c.push('/schedules/repeats'),
+        icon: const Icon(Icons.event_repeat_outlined),
+      ),
       IconButton(
         tooltip: '알림 보기',
         onPressed: () => c.go('/notifications'),
@@ -1260,11 +2056,13 @@ class RepeatScheduleFormScreen extends StatefulWidget {
     required this.repository,
     required this.placeSearchService,
     this.initialDate,
+    this.rule,
   });
 
   final RepeatScheduleRepository repository;
   final PlaceSearchService placeSearchService;
   final DateTime? initialDate;
+  final RepeatScheduleRule? rule;
 
   @override
   State<RepeatScheduleFormScreen> createState() =>
@@ -1289,8 +2087,20 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
   @override
   void initState() {
     super.initState();
-    startDate = widget.initialDate ?? DateTime.now();
-    endDate = startDate.add(const Duration(days: 84));
+    final rule = widget.rule;
+    title.text = rule?.title ?? '';
+    time.text = rule?.time ?? '09:00';
+    origin = rule?.origin;
+    destination = rule?.destination;
+    weekdays
+      ..clear()
+      ..addAll(rule?.weekdays ?? const {1, 2, 3, 4, 5});
+    startDate = rule?.startDate ?? widget.initialDate ?? DateTime.now();
+    endDate = rule?.untilDate ?? startDate.add(const Duration(days: 84));
+    hasEndDate = rule?.untilDate != null;
+    considerLastTrip = rule?.considerLastTrip ?? false;
+    importance = rule?.importance ?? ScheduleImportance.high;
+    transport = rule?.preferredTransport ?? TransportPreferenceChoice.balanced;
   }
 
   @override
@@ -1302,7 +2112,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
 
   @override
   Widget build(BuildContext context) => AppPage(
-    title: '반복 일정 등록',
+    title: widget.rule == null ? '반복 일정 등록' : '반복 일정 수정',
     child: Form(
       key: formKey,
       child: LayoutBuilder(
@@ -1344,7 +2154,10 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
                 preference,
               ],
               const SizedBox(height: 16),
-              PrimaryButton('반복 일정 저장하기', onPressed: _save),
+              PrimaryButton(
+                widget.rule == null ? '반복 일정 저장하기' : '반복 일정 수정하기',
+                onPressed: _save,
+              ),
               const SizedBox(height: 24),
             ],
           );
@@ -1578,21 +2391,26 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
       return;
     }
     try {
-      await widget.repository.addRepeatSchedule(
-        RepeatScheduleRule(
-          id: 'repeat-${DateTime.now().microsecondsSinceEpoch}',
-          title: title.text.trim(),
-          origin: origin!,
-          destination: destination!,
-          time: time.text.trim(),
-          startDate: startDate,
-          weekdays: {...weekdays},
-          untilDate: hasEndDate ? endDate : null,
-          importance: importance,
-          considerLastTrip: considerLastTrip,
-          preferredTransport: transport,
-        ),
+      final rule = RepeatScheduleRule(
+        id:
+            widget.rule?.id ??
+            'repeat-${DateTime.now().microsecondsSinceEpoch}',
+        title: title.text.trim(),
+        origin: origin!,
+        destination: destination!,
+        time: time.text.trim(),
+        startDate: startDate,
+        weekdays: {...weekdays},
+        untilDate: hasEndDate ? endDate : null,
+        importance: importance,
+        considerLastTrip: considerLastTrip,
+        preferredTransport: transport,
       );
+      if (widget.rule == null) {
+        await widget.repository.addRepeatSchedule(rule);
+      } else {
+        await widget.repository.updateRepeatSchedule(rule);
+      }
       if (mounted) context.pop(true);
     } on Object {
       if (!mounted) return;
@@ -1820,9 +2638,11 @@ class ScheduleDetailScreen extends StatelessWidget {
     super.key,
     required this.repository,
     required this.scheduleId,
+    required this.arrivalApi,
   });
   final ScheduleRepository repository;
   final String scheduleId;
+  final ArrivalApi arrivalApi;
 
   @override
   Widget build(BuildContext c) => FutureBuilder<Schedule?>(
@@ -1977,6 +2797,13 @@ class ScheduleDetailScreen extends StatelessWidget {
           label: const Text('일정 수정'),
         ),
         const SizedBox(height: 8),
+        FilledButton.icon(
+          key: const Key('completeScheduleButton'),
+          onPressed: () => _recordArrival(c, schedule),
+          icon: const Icon(Icons.check_circle_outline),
+          label: const Text('도착 완료'),
+        ),
+        const SizedBox(height: 8),
         TextButton.icon(
           key: const Key('cancelScheduleButton'),
           onPressed: () => _confirmCancel(c, schedule),
@@ -2056,6 +2883,38 @@ class ScheduleDetailScreen extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('일정을 취소하지 못했어요. 잠시 후 다시 시도해주세요.')),
       );
+    }
+  }
+
+  Future<void> _recordArrival(BuildContext context, Schedule schedule) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('도착을 완료할까요?'),
+        content: const Text('위치 정보 없이 일정만 완료하고 이동 기록을 남깁니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('완료'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await arrivalApi.record(schedule.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('도착 기록을 저장했어요.')));
+      context.go('/schedules');
+    } on Object {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('도착 기록을 저장하지 못했어요.')));
     }
   }
 }
@@ -3371,6 +4230,480 @@ class ArrivalScreen extends StatelessWidget {
   );
 }
 
+class RepeatSchedulesScreen extends StatefulWidget {
+  const RepeatSchedulesScreen({
+    super.key,
+    required this.repository,
+    required this.placeSearchService,
+  });
+
+  final RepeatScheduleRepository repository;
+  final PlaceSearchService placeSearchService;
+
+  @override
+  State<RepeatSchedulesScreen> createState() => _RepeatSchedulesScreenState();
+}
+
+class _RepeatSchedulesScreenState extends State<RepeatSchedulesScreen> {
+  late Future<List<RepeatScheduleRule>> _rules;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() => _rules = widget.repository.repeatSchedules();
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '반복 일정 관리',
+    actions: [
+      IconButton(
+        tooltip: '반복 일정 추가',
+        onPressed: () async {
+          final saved = await context.push<bool>('/schedules/repeat/new');
+          if (saved == true && mounted) setState(_reload);
+        },
+        icon: const Icon(Icons.add),
+      ),
+    ],
+    child: FutureBuilder<List<RepeatScheduleRule>>(
+      future: _rules,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const DataLoadError(message: '반복 일정을 불러오지 못했어요.');
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final rules = snapshot.data!;
+        if (rules.isEmpty) {
+          return const Center(child: Text('등록된 반복 일정이 없어요.'));
+        }
+        return ListView.separated(
+          padding: _pad,
+          itemCount: rules.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final rule = rules[index];
+            final days = rule.weekdays.toList()..sort();
+            return InfoCard(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  Icons.event_repeat,
+                  color: rule.active ? DdubiColors.blue : Colors.grey,
+                ),
+                title: Text(rule.title),
+                subtitle: Text(
+                  '${days.map((day) => _weekdays[day - 1]).join('·')} ${rule.time}\n'
+                  '${rule.departurePlace} → ${rule.place}',
+                ),
+                isThreeLine: true,
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) =>
+                      value == 'edit' ? _edit(rule) : _deactivate(rule),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'edit', child: Text('수정')),
+                    if (rule.active)
+                      const PopupMenuItem(value: 'stop', child: Text('반복 중지')),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ),
+  );
+
+  Future<void> _edit(RepeatScheduleRule rule) async {
+    final changed = await context.push<bool>(
+      '/schedules/repeats/${rule.id}/edit',
+    );
+    if (changed == true && mounted) setState(_reload);
+  }
+
+  Future<void> _deactivate(RepeatScheduleRule rule) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('반복을 중지할까요?'),
+        content: Text('${rule.title}의 새 일정 생성을 중지합니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('중지'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.repository.deactivateRepeatSchedule(rule.id);
+      if (mounted) setState(_reload);
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('반복 일정을 중지하지 못했어요.')));
+    }
+  }
+}
+
+class RepeatScheduleEditScreen extends StatelessWidget {
+  const RepeatScheduleEditScreen({
+    super.key,
+    required this.repository,
+    required this.placeSearchService,
+    required this.repeatId,
+  });
+
+  final RepeatScheduleRepository repository;
+  final PlaceSearchService placeSearchService;
+  final String repeatId;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<RepeatScheduleRule>(
+    future: repository.repeatScheduleById(repeatId),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return const AppPage(
+          title: '반복 일정 수정',
+          child: DataLoadError(message: '반복 일정을 불러오지 못했어요.'),
+        );
+      }
+      if (!snapshot.hasData) {
+        return const AppPage(
+          title: '반복 일정 수정',
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+      return RepeatScheduleFormScreen(
+        repository: repository,
+        placeSearchService: placeSearchService,
+        rule: snapshot.data,
+      );
+    },
+  );
+}
+
+class SavedPlacesScreen extends StatefulWidget {
+  const SavedPlacesScreen({
+    super.key,
+    required this.api,
+    required this.searchService,
+  });
+
+  final PlaceApi api;
+  final PlaceSearchService searchService;
+
+  @override
+  State<SavedPlacesScreen> createState() => _SavedPlacesScreenState();
+}
+
+class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
+  late Future<List<SavedPlace>> _places;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() => _places = widget.api.list();
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '저장 장소',
+    actions: [
+      IconButton(
+        key: const Key('addSavedPlaceButton'),
+        tooltip: '장소 추가',
+        onPressed: _add,
+        icon: const Icon(Icons.add_location_alt_outlined),
+      ),
+    ],
+    child: FutureBuilder<List<SavedPlace>>(
+      future: _places,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const DataLoadError(message: '저장 장소를 불러오지 못했어요.');
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final places = snapshot.data!;
+        if (places.isEmpty) {
+          return const Center(child: Text('저장한 장소가 없어요.'));
+        }
+        return ListView.separated(
+          padding: _pad,
+          itemCount: places.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final place = places[index];
+            return ListTile(
+              leading: const Icon(Icons.bookmark_outline),
+              title: Text(place.name),
+              subtitle: Text(place.address ?? '주소 정보 없음'),
+              onTap: () => _showDetail(place),
+              trailing: PopupMenuButton<String>(
+                onSelected: (value) =>
+                    value == 'rename' ? _rename(place) : _delete(place),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'rename', child: Text('이름 수정')),
+                  PopupMenuItem(value: 'delete', child: Text('삭제')),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ),
+  );
+
+  Future<void> _add() async {
+    final selected = await showPlaceSearchDialog(
+      context,
+      title: '저장할 장소 검색',
+      searchService: widget.searchService,
+    );
+    if (selected == null) return;
+    try {
+      await widget.api.create(selected);
+      if (mounted) setState(_reload);
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('장소를 저장하지 못했어요.')));
+    }
+  }
+
+  Future<void> _showDetail(SavedPlace place) async {
+    try {
+      final detail = await widget.api.get(place.id);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(detail.name),
+          content: Text(
+            '${detail.address ?? '주소 정보 없음'}\n'
+            '${detail.lat}, ${detail.lng}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('확인'),
+            ),
+          ],
+        ),
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('장소 상세를 불러오지 못했어요.')));
+    }
+  }
+
+  Future<void> _rename(SavedPlace place) async {
+    final controller = TextEditingController(text: place.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('장소 이름 수정'),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty || name == place.name) return;
+    try {
+      await widget.api.update(place.id, name: name);
+      if (mounted) setState(_reload);
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('장소 이름을 수정하지 못했어요.')));
+    }
+  }
+
+  Future<void> _delete(SavedPlace place) async {
+    try {
+      await widget.api.delete(place.id);
+      if (mounted) setState(_reload);
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('장소를 삭제하지 못했어요.')));
+    }
+  }
+}
+
+class TravelRecordsScreen extends StatefulWidget {
+  const TravelRecordsScreen({super.key, required this.api});
+  final ReportApi api;
+
+  @override
+  State<TravelRecordsScreen> createState() => _TravelRecordsScreenState();
+}
+
+class _TravelRecordsData {
+  const _TravelRecordsData(this.history, this.reports);
+  final TravelHistory history;
+  final List<WeeklyReport> reports;
+}
+
+class _TravelRecordsScreenState extends State<TravelRecordsScreen> {
+  late Future<_TravelRecordsData> _data;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    final from = DateTime(now.year, now.month - 2, 1);
+    final to = DateTime(now.year, now.month + 1, 0);
+    _data =
+        Future.wait([
+          widget.api.history(from: from, to: to),
+          widget.api.reports(),
+        ]).then(
+          (values) => _TravelRecordsData(
+            values[0] as TravelHistory,
+            values[1] as List<WeeklyReport>,
+          ),
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '이동 기록 · 리포트',
+    child: FutureBuilder<_TravelRecordsData>(
+      future: _data,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const DataLoadError(message: '이동 기록을 불러오지 못했어요.');
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final history = snapshot.data!.history;
+        final reports = snapshot.data!.reports;
+        return ListView(
+          padding: _pad,
+          children: [
+            InfoCard(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _recordMetric('전체', '${history.summary.totalCount}건'),
+                  _recordMetric(
+                    '정시율',
+                    '${(history.summary.onTimeRate * 100).round()}%',
+                  ),
+                  _recordMetric('지연', '${history.summary.lateCount}건'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            const SectionHeader('주간 리포트'),
+            if (reports.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('아직 생성된 리포트가 없어요.'),
+              )
+            else
+              ...reports.map(
+                (report) => ListTile(
+                  leading: const Icon(Icons.insights_outlined),
+                  title: Text(
+                    '${report.periodStart.month}.${report.periodStart.day} '
+                    '~ ${report.periodEnd.month}.${report.periodEnd.day}',
+                  ),
+                  subtitle: Text(
+                    '전체 ${report.totalSchedules} · 정시 ${report.onTimeEstimated} · '
+                    '빠듯 ${report.tightEstimated} · 지연 ${report.delayedEstimated}',
+                  ),
+                  onTap: () => _showReport(report),
+                ),
+              ),
+            const SizedBox(height: 18),
+            const SectionHeader('최근 이동 기록'),
+            if (history.items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('최근 이동 기록이 없어요.'),
+              )
+            else
+              ...history.items.map(_historyTile),
+          ],
+        );
+      },
+    ),
+  );
+
+  Widget _recordMetric(String label, String value) => Column(
+    children: [
+      Text(label),
+      const SizedBox(height: 4),
+      Text(value, style: const TextStyle(fontWeight: FontWeight.w800)),
+    ],
+  );
+
+  Widget _historyTile(TravelHistoryItem item) => ListTile(
+    leading: const Icon(Icons.directions_transit_outlined),
+    title: Text(item.title),
+    subtitle: Text(_fullDate(item.arriveBy)),
+    trailing: Text(_arrivalResultLabel(item.result)),
+  );
+
+  Future<void> _showReport(WeeklyReport report) async {
+    try {
+      final details = await widget.api.reportDetails(report.id);
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) => ListView(
+          padding: _pad,
+          children: [
+            Text('주간 리포트 상세', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            if (details.isEmpty) const Text('이 주의 이동 기록이 없어요.'),
+            ...details.map(_historyTile),
+          ],
+        ),
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('리포트 상세를 불러오지 못했어요.')));
+    }
+  }
+
+  String _arrivalResultLabel(String? result) => switch (result) {
+    'ON_TIME' => '정시',
+    'TIGHT' => '빠듯',
+    'LATE_RISK' => '지연',
+    _ => '판정 없음',
+  };
+}
+
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key, required this.api, this.go});
 
@@ -3686,6 +5019,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 14),
             _mobileServiceStatus(context),
             const SizedBox(height: 14),
+            _accountActionsCard(context),
+            const SizedBox(height: 14),
             _logoutCard(context),
           ],
         ),
@@ -3819,6 +5154,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _permissionCard(),
                 const SizedBox(height: 16),
                 _serviceStatus(context),
+                const SizedBox(height: 16),
+                _accountActionsCard(context),
               ],
             ),
           ),
@@ -4040,22 +5377,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return await image.readAsBytes();
     } on Object {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('갤러리 접근 권한을 확인해주세요.')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('갤러리 접근 권한을 확인해주세요.')));
       }
       return null;
     }
   }
 
-  Widget _mobileTransportSelector() =>
-      RadioGroup<TransportPreferenceChoice>(
-        groupValue: selectedTransport,
-        onChanged: (choice) {
-          if (choice != null) _updateTransportPreference(choice);
-        },
-        child: Column(
-          children: TransportPreferenceChoice.values.map((choice) {
+  Widget _mobileTransportSelector() => RadioGroup<TransportPreferenceChoice>(
+    groupValue: selectedTransport,
+    onChanged: (choice) {
+      if (choice != null) _updateTransportPreference(choice);
+    },
+    child: Column(
+      children: TransportPreferenceChoice.values
+          .map((choice) {
             final selected = choice == selectedTransport;
             final icon = choice == TransportPreferenceChoice.subwayFirst
                 ? Icons.subway_rounded
@@ -4063,8 +5399,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? Icons.directions_bus_rounded
                 : Icons.commute_rounded;
             final description = switch (choice) {
-              TransportPreferenceChoice.subwayFirst =>
-                '지하철을 우선으로 경로를 안내해요.',
+              TransportPreferenceChoice.subwayFirst => '지하철을 우선으로 경로를 안내해요.',
               TransportPreferenceChoice.balanced =>
                 '버스와 지하철을 모두 고려해 최적의 경로를 안내해요.',
               TransportPreferenceChoice.busFirst => '버스를 우선으로 경로를 안내해요.',
@@ -4146,9 +5481,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             );
-          }).toList(growable: false),
-        ),
-      );
+          })
+          .toList(growable: false),
+    ),
+  );
 
   Widget _mobilePermissionCard() => _settingsCard(
     child: const Column(
@@ -4333,6 +5669,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
+  Widget _accountActionsCard(BuildContext context) => InfoCard(
+    child: Column(
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.bookmarks_outlined),
+          title: const Text('저장 장소 관리'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/settings/places'),
+        ),
+        const Divider(),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.insights_outlined),
+          title: const Text('이동 기록 · 주간 리포트'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/settings/records'),
+        ),
+        const Divider(),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(
+            Icons.person_remove_outlined,
+            color: DdubiColors.red,
+          ),
+          title: const Text('회원 탈퇴', style: TextStyle(color: DdubiColors.red)),
+          onTap: () => _showWithdrawDialog(context),
+        ),
+      ],
+    ),
+  );
+
   Widget _transportSelector() => TransportPreferenceSelector(
     value: selectedTransport,
     onChanged: (value) async {
@@ -4365,9 +5733,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } on Object {
       if (!mounted) return;
       setState(() => selectedTransport = previous);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('교통수단 설정을 저장하지 못했어요.')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('교통수단 설정을 저장하지 못했어요.')));
     }
   }
 
@@ -4447,6 +5814,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     ),
   );
+
+  Future<void> _showWithdrawDialog(BuildContext context) async {
+    final password = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('회원 탈퇴'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('모든 일정과 기록이 삭제되며 되돌릴 수 없어요.'),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('withdrawPasswordField'),
+              controller: password,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: '비밀번호 (소셜 계정은 비워두세요)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: DdubiColors.red),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('탈퇴'),
+          ),
+        ],
+      ),
+    );
+    final value = password.text.trim();
+    password.dispose();
+    if (confirmed != true) return;
+    try {
+      await widget.userApi.withdraw(password: value.isEmpty ? null : value);
+      if (context.mounted) context.go('/login');
+    } on Object {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('회원 탈퇴에 실패했어요. 비밀번호를 확인해주세요.')),
+      );
+    }
+  }
 }
 
 class _ProfileCharacterImage extends StatelessWidget {

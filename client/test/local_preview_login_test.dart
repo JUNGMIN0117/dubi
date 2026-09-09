@@ -1,7 +1,10 @@
 import 'package:ddubi/app.dart';
 import 'package:ddubi/core/network/dio_provider.dart';
 import 'package:ddubi/domain/auth.dart';
-import 'package:ddubi/presentation/auth_screens.dart';
+import 'package:ddubi/presentation/screens.dart';
+import 'package:ddubi/services/google_login_service.dart';
+import 'package:ddubi/services/kakao_login_service.dart';
+import 'package:ddubi/services/naver_login_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,8 +62,6 @@ void main() {
       );
       await tester.tap(find.text('건너뛰기'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, '로그인'));
-      await tester.pumpAndSettle();
       await _enterCredentials(tester, 'localadmin', 'local1234');
       expect(find.text('다음 중요 일정'), findsOneWidget);
       expect(container.read(authSessionStoreProvider).session, isNull);
@@ -76,8 +77,11 @@ void main() {
     var authenticated = false;
     await tester.pumpWidget(
       MaterialApp(
-        home: EmailLoginScreen(
-          repository: repository,
+        home: LoginScreen(
+          authRepository: repository,
+          kakaoLoginService: const KakaoSdkLoginService(),
+          googleLoginService: const GoogleSdkLoginService(),
+          naverLoginService: const NaverSdkLoginService(),
           onAuthenticated: () => authenticated = true,
         ),
       ),
@@ -100,8 +104,11 @@ void main() {
       var authenticated = false;
       await tester.pumpWidget(
         MaterialApp(
-          home: EmailLoginScreen(
-            repository: repository,
+          home: LoginScreen(
+            authRepository: repository,
+            kakaoLoginService: const KakaoSdkLoginService(),
+            googleLoginService: const GoogleSdkLoginService(),
+            naverLoginService: const NaverSdkLoginService(),
             onAuthenticated: () => authenticated = true,
           ),
         ),

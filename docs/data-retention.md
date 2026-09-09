@@ -6,7 +6,7 @@
 
 | 데이터 | 어디에 | 얼마나 두나 | 누가 지우나 | 설정 위치 |
 |---|---|---|---|---|
-| 수집 원본(raw 이벤트) | **Kafka** 토픽 `city.raw`, `transport.raw` | **21일** 또는 파티션당 1GiB 중 먼저 오는 것 | Kafka 가 자동 | `docs/contracts/topics.yaml` → `infra/scripts/create-topics.sh` |
+| 수집 원본(raw 이벤트) | **Kafka** 토픽 `city.raw`, `transport.raw` | **21일** 또는 파티션당 용량 상한(city.raw 1GiB, transport.raw **4GiB**, 2026-09-09 상향) 중 먼저 오는 것 | Kafka 가 자동 | `docs/contracts/topics.yaml` → `infra/scripts/create-topics.sh` |
 | 수집 원본 아카이브 | **HDFS** `/ddubi/archive/<토픽>/date=/hour=/*.parquet` | **영구** (지우지 않음) | 없음 | `ARCHIVE_URI`, `ARCHIVE_TOPICS`, `ARCHIVE_FLUSH_MINUTES=60`, `ARCHIVE_MAX_BYTES=128MB` |
 | 구간 판정 이력 | Kafka `segment.status` | 24시간 (계약 현재값) | Kafka 자동 | topics.yaml — **아카이브 여부는 5절 참고** |
 | Spark 체크포인트 | HDFS `/ddubi/checkpoints/<잡>` | 잡이 사는 동안. 잡을 새로 시작하려면 폴더를 지운다 | 인프라 | `SPARK_CHECKPOINT_DIR` |
@@ -44,7 +44,19 @@ docker exec kafka du -sh /var/lib/kafka/data/transport.raw-*
 docker exec hdfs-namenode hdfs dfs -du -s -h /ddubi/archive/transport.raw/date=$(date +%F)
 ```
 
-**Kafka 의 두 상한 중 어느 것이 먼저 걸리나.** 토픽은 파티션 3개이고 파티션당 1GiB 라 토픽당 최대 약 3GiB 입니다. 하루 350MB 가 들어오면 약 9일 만에 1GiB 상한이 먼저 걸려, 21일이 아니라 9일치만 Kafka 에 남습니다. 아카이버가 정상이면 문제가 없지만(HDFS 에 있음), 재처리로 Kafka 에서 다시 읽고 싶은 기간이 줄어듭니다. 실측 뒤 `retentionBytes` 를 올리는지 결정합니다.
+**dt 팀 수집 계획(2026-09-09) 기준 추정.** 호출당 레코드 수는 API 응답 형태로 어림한 값이며, 켜진 뒤 실측으로 갱신합니다.
+
+| 수집기 | 하루 호출 | 하루 레코드(추정) | Kafka 용량(추정) |
+|---|---|---|---|
+| 지하철 도착(전체 역, 6분) | 480 | 약 30만 | 약 150MB |
+| 실시간 도시데이터(121장소, 6시간) | 484 | 484 (건당 수십 KB) | 30~50MB |
+| 버스 도착·위치(노선 100개, 8시간) | 600 | 약 2만 | 10MB 미만 |
+| 지하철 위치(16호선, 1시간) | 384 | 약 2만 | 10MB 미만 |
+| 지하철 알림·교통 돌발·TOPIS 공지(15분) | 288 | 수천 | 소량 |
+| 날씨(14격자, 10분) | 2,016 | 2,016 | 1MB 미만 |
+| **합계** | 약 4,250 | **약 35만** | **약 200MB/일** |
+
+**Kafka 의 두 상한 중 어느 것이 먼저 걸리나.** 토픽은 파티션 3개입니다. `transport.raw` 에 하루 200MB 가 들어오면 21일치가 약 4.2GB 인데 파티션당 1GiB(토픽 3GiB)로는 약 15일 만에 용량 상한이 먼저 걸립니다. 그래서 2026-09-09 에 transport.raw 를 **파티션당 4GiB(토픽 12GiB)** 로 올렸습니다. `city.raw` 는 날씨·도시데이터·예보를 합쳐도 21일치 약 1GB 라 1GiB 를 유지합니다. 아카이버가 정상이면 원본은 HDFS 에 있어 상한이 걸려도 유실은 없지만, 재처리로 Kafka 에서 다시 읽을 수 있는 기간이 줄어드는 것을 막기 위한 조치입니다.
 
 **디스크 수명(대략)**: 하루 100MB 가 HDFS 에 쌓여도(복제 2 → 두 서버에 각 100MB) 서버 디스크 293GB 여유는 8년치입니다. 프로젝트 기간 안에는 용량보다 **Kafka 1GiB 상한**과 **Redis 384MB** 가 먼저 문제가 됩니다.
 
@@ -57,6 +69,7 @@ Grafana `DDUBI 파이프라인` 대시보드와 알림(Mattermost)으로 봅니�
 | 서버 디스크 사용률 | 서버 자원 행 "디스크 사용률" / 알림 "디스크 80% 초과" | 10% 미만 | 70% 에서 5절 순서로 정리 |
 | HDFS 용량 사용률 | 데이터 행 "HDFS 용량 사용률" | 1% 미만 | 70% |
 | 토픽별 누적 메시지 | 데이터 행 "토픽별 누적 메시지" | 계단형 우상향 | 평평해지면 수집 중단(용량 문제 아님) |
+| 아카이버 랙 | 데이터 행 "아카이버 컨슈머 랙" / 알림 "아카이버 저장 정지" | 정시마다 0 근처로 떨어지는 톱니(높이 = 시간당 유입량) | 2시간 최솟값이 100 을 넘으면 저장 실패 → HDFS 절차서 |
 | Redis 메모리 사용률 | 서비스 행 stat / 알림 "Redis 메모리 90%" | 수 % | 70% 에서 TTL 없는 키 점검(redis-keys.yaml) |
 | Redis 퇴출 키 | 서비스 행 "퇴출·만료" | 퇴출 0 | 0 이 아니면 즉시 원인 키 확인 |
 

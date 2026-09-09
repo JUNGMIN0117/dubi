@@ -89,17 +89,22 @@ class KafkaSourceTest(unittest.TestCase):
     def test_budget_shared_key_concurrent_atomic_limit_and_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = str(Path(directory)/"budget.db")
-            budgets = [RequestBudget(path, "secret", limit=10) for _ in range(4)]
             def reserve(i):
                 try:
-                    budgets[i % 4].before_request(None)
+                    # 각 작업이 별도 컨테이너처럼 독립 연결·초기화를 수행한다.
+                    RequestBudget(path, "secret", limit=90).before_request(None)
                     return 1
                 except BudgetExceeded:
                     return 0
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                self.assertEqual(sum(pool.map(reserve, range(30))), 10)
+            with ThreadPoolExecutor(max_workers=9) as pool:
+                self.assertEqual(sum(pool.map(reserve, range(180))), 90)
             with self.assertRaises(BudgetExceeded):
-                RequestBudget(path, "secret", limit=10).before_request(None)
+                RequestBudget(path, "secret", limit=90).before_request(None)
+            db = sqlite3.connect(path)
+            try:
+                self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
+            finally:
+                db.close()
             self.assertNotIn(b"secret", Path(path).read_bytes())
 
     def test_rolling_window_does_not_reset_at_midnight(self):

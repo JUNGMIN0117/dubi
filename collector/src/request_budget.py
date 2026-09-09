@@ -14,6 +14,11 @@ class BudgetExceeded(RuntimeError):
 
 
 class RequestBudget:
+    # 여러 Collector 컨테이너가 같은 Docker volume의 DB를 공유한다. WAL은 읽기와
+    # 쓰기의 충돌을 줄이고 busy_timeout은 다른 프로세스의 짧은 쓰기가 끝날 때까지
+    # 즉시 실패하지 않고 기다리게 한다.
+    BUSY_TIMEOUT_MS = 30_000
+
     def __init__(self, path: str, key: str, limit: int = 900, clock=time.time):
         if not 1 <= limit <= 1000:
             raise ValueError("API_DAILY_LIMIT must be between 1 and 1000")
@@ -28,13 +33,25 @@ class RequestBudget:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.path, timeout=30)
+        db = sqlite3.connect(
+            self.path,
+            timeout=self.BUSY_TIMEOUT_MS / 1000,
+            isolation_level=None,
+        )
         try:
+            db.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
+            # journal_mode는 DB 파일에 유지된다. 모든 프로세스가 같은 값을 다시
+            # 요청해도 안전하며, 최초 실행 시에만 실제 모드 전환이 일어난다.
+            journal_mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if str(journal_mode).lower() != "wal":
+                raise RuntimeError("request budget SQLite WAL mode is unavailable")
+            db.execute("PRAGMA synchronous=NORMAL")
             db.execute("BEGIN IMMEDIATE")
             yield db
-            db.commit()
+            db.execute("COMMIT")
         except BaseException:
-            db.rollback()
+            if db.in_transaction:
+                db.execute("ROLLBACK")
             raise
         finally:
             db.close()

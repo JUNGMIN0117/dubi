@@ -106,7 +106,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
         const SizedBox(height: 8), Text(label),
         if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         if (result.isNotEmpty) ...[
-          if (isPreview) const Text('검증용 최소시간 후보 · 구간별 ML 적용 여부는 아래 표시'),
+          if (isPreview) const Text('검증용 최소시간 후보 · 구간별 계산 방식은 아래 표시'),
           if (isPreview && selected.isEmpty) const Text('계산 가능하고 통제되지 않은 후보가 없습니다.'),
           Text('입력 출발: ${_time(result['plannedDepartAt'])}'),
           Text('예상 도착: ${_time(selected['estimatedArrivalAt'])}'),
@@ -115,7 +115,12 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
           if (selected['tentative'] == true) const Text('잠정 예측입니다. 배차와 모델 정확도 검증이 필요합니다.'),
           if (isPreview) ...[
             for (final candidate in (preview['candidates'] as List? ?? const []))
-              Text('${_map(_map(candidate)['result'])['journeyKey']}: ML 적용 ${_map(candidate)['mlSteps']}개, API 사용 ${_map(candidate)['apiSteps']}개'),
+              Text('${_map(_map(candidate)['result'])['journeyKey']}: 버스 ML ${_map(candidate)['mlSteps']}개, 지하철 시간표·실시간 ${_map(candidate)['subwaySteps'] ?? 0}개, API ${_map(candidate)['apiSteps']}개'),
+            // 지하철 별도 계산이 있어도 전체 시간에 미반영된 상태를 적용 성공으로 표시하지 않는다.
+            for (final value in (preview['subwayPredictions'] as List? ?? const []))
+              Text(_subwayLabel(_map(value))),
+            for (final value in (preview['waitPredictions'] as List? ?? const []))
+              Text(_waitLabel(_map(value))),
           ],
           if (hasChange || isPreview && proposed.isNotEmpty) ...[
             const Divider(),
@@ -136,5 +141,27 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
         ]),
       ],
     )));
+  }
+
+  String _subwayLabel(Map value) {
+    final estimate = _map(value['estimate']);
+    final prefix = '${value['candidateKey']} 지하철';
+    if (estimate['arrivalAt'] == null) return '$prefix: 시간표·도착 정보 부족으로 API 시간 사용';
+    if (value['applied'] != true) return '$prefix: 대기·환승 시간 확인이 필요해 API 시간 유지';
+    final source = estimate['source'] == 'SUBWAY_REALTIME_ARRIVAL_AND_TIMETABLE'
+        ? '실시간 도착 + 시간표' : '시간표';
+    return '$prefix: $source · 탑승 예상 ${_time(estimate['boardingAt'])} · 하차 예상 ${_time(estimate['arrivalAt'])}';
+  }
+
+  /// 결측은 0분으로 표시하지 않는다. 계산했지만 시간 중복 방지로 미반영된 대기도 구별한다.
+  String _waitLabel(Map value) {
+    final mode = value['mode'] == 'BUS' ? '버스' : '지하철';
+    final prefix = '${value['candidateKey']} ${value['stepKey']} $mode 대기';
+    final seconds = value['seconds'];
+    if (seconds is! num) return '$prefix: 다음 차량 정보 부족';
+    final duration = '${seconds ~/ 60}분 ${seconds.toInt() % 60}초';
+    final source = value['source'] == 'SUBWAY_TIMETABLE' ? '시간표 기준' : '실시간 도착예측 기준';
+    final applied = value['applied'] == true ? '전체 시간에 반영' : '전체 시간에는 미반영';
+    return '$prefix: $duration · $source · $applied';
   }
 }

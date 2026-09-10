@@ -83,8 +83,27 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         assertThat(result.preview().fastest().departureAt()).isEqualTo(now.plusSeconds(600));
         var stored = (ScheduleEvaluationWorkflow.Outcome) store.latest(scheduleId,owner).get("result");
         assertThat(stored.preview().predictions()).hasSize(2);
+        assertThat(stored.preview().waitPredictions()).hasSize(2);
+        assertThat(stored.preview().waitPredictions()).allMatch(w -> w.seconds() == null && !w.applied());
         assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("ML_PREVIEW");
         assertThat(stored.recommendationId()).isNull();
+    }
+
+    @Test void subwayMissingTimetableReasonSurvivesStoredPreviewRoundTrip() {
+        // 새 JSON 필드가 MySQL 저장/역직렬화에서 사라지거나 시간표 미설정을 ML 성공으로 표시하지 않는다.
+        var segment = SubwayTimingServiceTest.segment(1,"A","B");
+        var route = new com.ssafy.ddubi.domain.route.model.RouteCandidate(0,
+                com.ssafy.ddubi.domain.route.model.RouteType.SUBWAY,100,999,0,
+                new com.ssafy.ddubi.domain.route.model.FareRange(0,0),0,0,List.of(segment));
+        when(routeClient.search(any())).thenReturn(new RouteSearchResult("KAKAO",now,null,List.of(route)));
+        workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        var stored = (ScheduleEvaluationWorkflow.Outcome)store.latest(scheduleId,owner).get("result");
+        assertThat(stored.preview().subwayPredictions()).hasSize(1);
+        assertThat(stored.preview().waitPredictions()).hasSize(1);
+        assertThat(stored.preview().waitPredictions().get(0).seconds()).isNull();
+        assertThat(stored.preview().subwayPredictions().get(0).estimate().reasons()).contains("SUBWAY_TIMETABLE_NOT_CONFIGURED");
+        assertThat(stored.preview().subwayPredictions().get(0).applied()).isFalse();
+        assertThat(stored.preview().candidates().get(0).subwaySteps()).isZero();
     }
 
     @Test void canceledOrEditedScheduleCannotBeOverwrittenByInFlightEvaluation() {

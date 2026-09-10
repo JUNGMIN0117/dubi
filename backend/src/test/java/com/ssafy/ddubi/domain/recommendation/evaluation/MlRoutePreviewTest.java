@@ -15,7 +15,8 @@ class MlRoutePreviewTest {
     final Instant now = Instant.parse("2026-09-10T14:59:30Z");
     final BusPreviewClient client = mock(BusPreviewClient.class);
     final RouteEvidenceAssembler evidence = new RouteEvidenceAssembler(mock(StringRedisTemplate.class), new ObjectMapper());
-    final MlRoutePreview service = new MlRoutePreview(client, evidence, new RouteTimelineEvaluator());
+    final MlRoutePreview service = new MlRoutePreview(client, evidence, new RouteTimelineEvaluator(), mock(SubwayTimingService.class),
+            new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false));
     final RouteEvidenceAssembler.Snapshot empty = new RouteEvidenceAssembler.Snapshot(Map.of(), List.of());
 
     static RouteCandidate route(int index, String routeId, long apiSeconds, long residual, int edgeCount) {

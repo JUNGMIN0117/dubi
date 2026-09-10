@@ -75,7 +75,7 @@ def test_transform_extracts_typed_metrics_without_copying_raw(spark):
             {
                 "providerRouteId": "R1",
                 "providerStopId": "S1",
-                "raw": {"traTime1": "120", "traTime2": "360", "arrmsg1": "2분 후"},
+                "raw": {"exps1": "120", "exps2": "360", "traTime1": "2", "arrmsg1": "2분 후"},
             },
         ),
         _event(
@@ -104,11 +104,54 @@ def test_transform_extracts_typed_metrics_without_copying_raw(spark):
     rows = {row.eventId: row for row in transform(_kafka_df(spark, events)).collect()}
     assert rows["bus"].providerKey == "R1:S1"
     assert rows["bus"].observation.firstArrivalSeconds == 120
+    assert rows["bus"].observation.firstTravelTimeMinutes == 2
+    assert rows["bus"].observation.arrivalTimeBasis == "SEOUL_EXPS_SECONDS_V1"
     assert rows["road"].observation.speedKph == 22.5
     assert rows["road"].observation.travelTimeSeconds == 91
     assert rows["city"].observation.areaCongestionLevel == "붐빔"
     assert rows["city"].observation.areaPopulationMax == 12000
     assert "raw" not in rows["city"].observation.asDict()
+
+
+def test_subway_timing_preserves_source_time_and_train_type_without_filling_missing(spark):
+    """생성시각 없는 수집을 fresh 도착예측으로 오인하거나 급행을 일반 열차와 섞는 회귀를 막는다."""
+    events = [
+        _event("arrival", "subway.arrival", "2026-09-04T12:00:00+09:00", {
+            "providerLineId": "1002", "providerStationId": "PA", "providerTrainId": "T1",
+            "raw": {"barvlDt": "80", "recptnDt": "2026-09-04 12:00:00", "btrainStt": "급행"},
+        }),
+        _event("position", "subway.position", "2026-09-04T12:00:00+09:00", {
+            "providerLineId": "1002", "providerTrainId": "T1", "raw": {},
+        }),
+    ]
+    payloads = [json.loads(row[VALUE_COL]) for row in to_redis_rows(transform(_kafka_df(spark, events))).collect()]
+    rows = {payload["eventId"]: payload for payload in payloads}
+    assert rows["arrival"]["observation"]["arrivalTrainType"] == "급행"
+    assert rows["arrival"]["observation"]["sourceGeneratedAt"] == "2026-09-04 12:00:00"
+    assert rows["arrival"]["observation"]["arrivalSeconds"] == 80
+    assert rows["position"]["observation"].get("sourceGeneratedAt") is None
+
+
+def test_bus_waiting_preserves_units_identity_status_and_missing_prediction(spark):
+    """분 단위 traTime을 도착예측 초로 재사용하지 않고 운행·순번·제공시각을 함께 전달한다."""
+    raw = {"exps1": "90", "exps2": "110", "traTime1": "7", "staOrd": "3", "mkTm": "2026-09-04 12:00:00.0",
+           "deTourAt": "00", "isArrive1": "0", "isArrive2": "1", "full1": "0", "full2": "1",
+           "vehId1": "101", "vehId2": "102"}
+    events = [
+        _event("current", "bus.arrival", "2026-09-04T12:00:00+09:00", {"providerRouteId": "1", "providerStopId": "2", "raw": raw}),
+        _event("missing", "bus.arrival", "2026-09-04T12:00:00+09:00", {"providerRouteId": "1", "providerStopId": "3", "raw": {"traTime1": "7"}}),
+    ]
+    payloads = [json.loads(row[VALUE_COL]) for row in to_redis_rows(transform(_kafka_df(spark, events))).collect()]
+    by_id = {p["eventId"]: p["observation"] for p in payloads}
+    assert by_id["current"]["firstArrivalSeconds"] == 90
+    assert by_id["current"]["firstTravelTimeMinutes"] == 7
+    assert by_id["current"]["stopOrder"] == 3
+    assert by_id["current"]["sourceGeneratedAt"] == raw["mkTm"]
+    assert by_id["current"]["arrivalTimeBasis"] == "SEOUL_EXPS_SECONDS_V1"
+    assert by_id["current"]["secondTerminalArrivalCode"] == "1"
+    assert by_id["current"]["secondFullCode"] == "1"
+    assert by_id["missing"].get("firstArrivalSeconds") is None
+    assert by_id["missing"].get("sourceGeneratedAt") is None
 
 
 def test_latest_per_provider_uses_event_time_before_collection_order(spark):

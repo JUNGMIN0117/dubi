@@ -29,12 +29,13 @@ def test_actual_collector_envelope_matches_spark_and_preserves_arrival_semantics
     from events import build_event
     from sources.base import now_kst
     path,sha=fixture(tmp_path);cw=BusCrosswalk(path,sha)
-    event=build_event(make_source('bus_arrival'),to_record('bus_arrival',{'busRouteId':'1','stId':'11','traTime1':'120'},crosswalk=cw),now_kst())
+    event=build_event(make_source('bus_arrival'),to_record('bus_arrival',{'busRouteId':'1','stId':'11','exps1':'120','traTime1':'2'},crosswalk=cw),now_kst())
     rows=to_redis_rows(latest_per_provider(transform(_kafka_df(spark,[event]),load_crosswalk(spark,path,sha)))).collect()
     assert len(rows)==1
     value=json.loads(rows[0][VALUE_COL]);assert value['segmentIds']==event['segmentIds']==['BUS:1:10:11']
     assert value['canonicalMapping']['scope']=='ARRIVAL_TARGET_INCOMING_EDGE'
     assert value['observation']['firstArrivalSeconds']==120
+    assert value['observation']['firstTravelTimeMinutes']==2
     assert rows[0][KEY_COL]=='transit:latest:bus-arrival:1:11'
 
 

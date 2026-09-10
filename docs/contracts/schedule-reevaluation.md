@@ -1,11 +1,14 @@
-# 일정 경로 ML 검증 — ml-prev-v1
+# 일정 경로 검증 — transit-prev-v3
 
 ## 현재 동작
 
 사용자 일정 등록 → 카카오 후보 경로 조회/매핑 → 버스 인접 구간 ML 호출 → 후보별 총 소요시간 계산 → 최소시간 후보 하나 반환.
 현재는 **검증용 PREVIEW**다. 실제 모델은 버스 인접 구간의 시간대별 평균 초만 예측한다.
-버스 대기·지하철·환승·일반 도보는 카카오 시간이다. Redis 관측 소요시간으로 이동시간을 교체하지 않는다.
-Redis는 통제/위험 근거로만 읽으며 모델 HTTP 입력에는 포함되지 않는다.
+지하철은 시간표·실시간 도착·위치로 별도 계산하고 시간 분해가 검증된 후보에 적용한다.
+버스 대기는 실제 도착정보로 별도 계산하여 검증된 시간 분해 조건에서 ML 이동 앞에 적용한다.
+조건 미충족 대기·환승·일반 도보는 카카오 시간을 보존한다. Redis 관측 소요시간으로 버스 이동시간을 교체하지 않는다.
+공통 waitPredictions와 결측 대기로 인한 정보 부족 판정은 [대기시간 계약](transit-waiting.md)을 따른다.
+Redis 구간 상태는 통제/위험 근거이며 버스 모델 HTTP 입력에는 포함되지 않는다.
 
 ## 계산 규칙
 
@@ -18,7 +21,8 @@ Redis는 통제/위험 근거로만 읽으며 모델 HTTP 입력에는 포함되
   일부 실패는 해당 BUS step 전체를 카카오 시간으로 되돌리고 부분 예측은 applied=false로 보존한다.
 - 카카오 총시간에서 step 합을 뺀 미배치 대기·환승 시간은 한 번만 보존한다.
   이 잔여시간 때문에 진입 가능한 시간대가 둘 이상이면 ENTRY_HOUR_UNCERTAIN으로 API fallback한다.
-- 나머지 구간은 API 시간을 사용한다. 총시간이 step 합보다 작으면 분해를 믿지 않고 API 총시간을 사용한다.
+- 지하철은 [지하철 계산 계약](subway-timing.md)의 시간 분해 검증 조건을 충족하면 대기+이동으로 교체한다.
+  나머지 구간은 API 시간을 사용한다. 총시간이 step 합보다 작으면 분해를 믿지 않고 API 총시간을 사용한다.
 - 계산 가능한 후보 중 통제로 제외되지 않은 최소 도착시각 한 건을 preview.fastest에 반환한다.
   출발시각이 같으므로 최소 소요시간과 동일하다. 동률은 candidate key 순이다.
   목표 도착에 모두 늦어도 최소시간 후보를 LATE_ESTIMATE로 반환한다. 모두 차단/계산 불가이면 null이다.
@@ -52,8 +56,10 @@ Redis는 통제/위험 근거로만 읽으며 모델 HTTP 입력에는 포함되
 }
 ```
 
-위는 핵심 필드만 보인 축약 예시다. 실제 candidates에는 각 Result, quality, mlSteps, apiSteps가 있다.
-quality는 ML_PREVIEW(전 요소 ML), MIXED_PREVIEW(ML+API), API_ONLY(ML 적용 없음)다.
+위는 핵심 필드만 보인 축약 예시다. 실제 candidates에는 각 Result, quality, mlSteps, apiSteps, subwaySteps가 있다.
+quality는 ML_PREVIEW(전 요소 ML), SUBWAY_PREVIEW(전 요소 지하철 시간표/실시간), MIXED_PREVIEW(여러 출처), API_ONLY다.
+지하철의 별도 계산·적용 여부는 subwayPredictions에 보존한다. 지하철 ML은 호출하지 않는다.
+입력 시간표·실시간 유효성·대기 중복 방지 조건은 [지하철 계산 계약](subway-timing.md)을 따른다.
 predictions에는 provider 입력, 실제 진입 예상시각, 모델 버전/계산시각/결측 수/표본 수,
 초 단위 결과, 실패 이유, applied가 저장된다. 모델 실패를 0초 또는 ML 성공으로 표시하지 않는다.
 ML_NOT_CONFIGURED, ML_TIMEOUT, ML_HTTP_UNAVAILABLE, ML_INVALID_RESPONSE,

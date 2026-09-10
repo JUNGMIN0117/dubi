@@ -62,6 +62,14 @@ Collector와 같은 버전의 파일을 함께 배포·재시작하며 불일치
 
 ## 테스트
 
+지하철 시간표 연동용 최신값은 `observation.arrivalTrainType`과 `sourceGeneratedAt`을 함께 보존한다.
+버스 대기 연동은 `exps1/2`(초), `staOrd`, 운행/만차/우회 코드와 `mkTm`을 보존한다.
+기존 traTime(분)을 ArrivalSeconds에 저장한 오류를 수정했다. `arrivalTimeBasis=SEOUL_EXPS_SECONDS_V1`이
+없는 이전 Redis 값은 Backend가 사용하지 않으며 별도 데이터 삭제는 필요 없다. [대기시간 계약](../docs/contracts/transit-waiting.md).
+원본 생성시각이 없으면 수집시각으로 채우지 않는다. Backend는 새 필드 누락/만료 시 실시간 보정 대신
+시간표로 fallback한다. 기존 키와 TTL은 유지하며 잡 재시작 후 생성하는 값부터 새 필드가 포함된다.
+전체 계산 조건과 시간표 공급 형식은 [지하철 계산 계약](../docs/contracts/subway-timing.md)을 따른다.
+
 ```sh
 python -m pytest -q
 ```

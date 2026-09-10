@@ -51,6 +51,8 @@ class ApiAuthRepository implements AuthRepository {
       );
       _saveSession(response.data);
     } on DioException catch (error) {
+      final linkRequired = _accountLinkRequired(error, provider);
+      if (linkRequired != null) throw linkRequired;
       throw _mapDioException(error);
     } on AuthException {
       rethrow;
@@ -58,6 +60,29 @@ class ApiAuthRepository implements AuthRepository {
       throw const AuthException(
         AuthErrorCode.serverError,
         message: '소셜 로그인 처리 중 문제가 발생했습니다.',
+      );
+    }
+  }
+
+  @override
+  Future<void> linkOAuthAccount({
+    required String linkToken,
+    required String password,
+  }) async {
+    try {
+      final response = await _api.linkOAuthAccount(
+        linkToken: linkToken,
+        password: password,
+      );
+      _saveSession(response.data);
+    } on DioException catch (error) {
+      throw _mapDioException(error);
+    } on AuthException {
+      rethrow;
+    } on Object {
+      throw const AuthException(
+        AuthErrorCode.serverError,
+        message: '계정 연동 처리 중 문제가 발생했습니다.',
       );
     }
   }
@@ -74,6 +99,8 @@ class ApiAuthRepository implements AuthRepository {
       );
       _saveSession(response.data);
     } on DioException catch (error) {
+      final linkRequired = _accountLinkRequired(error, provider);
+      if (linkRequired != null) throw linkRequired;
       throw _mapDioException(error);
     } on AuthException {
       rethrow;
@@ -191,6 +218,32 @@ class ApiAuthRepository implements AuthRepository {
     return AuthException(
       AuthErrorCode.serverError,
       message: apiError?.message ?? '잠시 후 다시 시도해주세요.',
+    );
+  }
+
+  AccountLinkRequiredException? _accountLinkRequired(
+    DioException error,
+    String fallbackProvider,
+  ) {
+    final raw = error.response?.data;
+    if (raw is! Map) return null;
+    final body = raw.map((key, value) => MapEntry(key.toString(), value));
+    final rawError = body['error'];
+    final errorBody = rawError is Map
+        ? rawError.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final code = errorBody['code']?.toString() ?? body['code']?.toString();
+    if (code != 'ACCOUNT_LINK_REQUIRED') return null;
+
+    final rawData = body['data'] ?? errorBody['data'];
+    if (rawData is! Map) return null;
+    final data = rawData.map((key, value) => MapEntry(key.toString(), value));
+    final linkToken = data['linkToken']?.toString() ?? '';
+    if (linkToken.isEmpty) return null;
+    return AccountLinkRequiredException(
+      linkToken: linkToken,
+      provider: data['provider']?.toString() ?? fallbackProvider,
+      email: data['email']?.toString() ?? '',
     );
   }
 }

@@ -22,10 +22,10 @@ public class DatabaseCleaner {
 
     /** 자식 → 부모 순서. FK 검사를 끄더라도 의도를 남기기 위해 순서를 유지한다. */
     private static final List<String> TABLES = List.of(
-            "report_detail", "report",
+            "schedule_evaluation", "report_detail", "report",
             "notification",
             "recommendation",
-            "route_segment", "route", "route_request",
+            "route_segment_edge", "route_segment", "route", "route_request",
             "schedule", "schedule_repeat",
             "device_token", "place", "user_transport_pref", "user_auth", "user",
             "baseline_serving", "detection_log", "pipeline_config");

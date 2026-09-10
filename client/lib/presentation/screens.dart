@@ -19,6 +19,8 @@ import '../services/recommendation_api.dart';
 import 'auth_screens.dart';
 import 'micro_animations.dart';
 import 'widgets.dart';
+import 'schedule_evaluation_card.dart';
+import '../domain/schedule_evaluation.dart';
 
 void _open(BuildContext c, Widget page) =>
     Navigator.of(c).push(MaterialPageRoute(builder: (_) => page));
@@ -2429,6 +2431,8 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   final formKey = GlobalKey<FormState>();
   late final TextEditingController title;
   late final TextEditingController time;
+  late final TextEditingController departureTime;
+  late DateTime departureDate;
   PlaceLocation? origin;
   PlaceLocation? destination;
 
@@ -2438,6 +2442,10 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     final schedule = widget.schedule;
     title = TextEditingController(text: schedule?.title ?? '잠실야구장');
     time = TextEditingController(text: schedule?.time ?? '19:30');
+    final departure = schedule?.plannedDepartAt;
+    departureTime = TextEditingController(text: departure == null ? '' :
+        '${departure.hour.toString().padLeft(2, '0')}:${departure.minute.toString().padLeft(2, '0')}');
+    departureDate = departure ?? schedule?.date ?? widget.initialDate ?? DateTime.now();
     selectedDate = schedule?.date ?? widget.initialDate ?? DateTime.now();
     origin = schedule?.origin;
     destination = schedule?.destination;
@@ -2451,6 +2459,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   void dispose() {
     title.dispose();
     time.dispose();
+    departureTime.dispose();
     super.dispose();
   }
 
@@ -2488,6 +2497,18 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
           ),
           const SizedBox(height: 12),
           _field('반드시 도착해야 하는 시간', time, icon: Icons.schedule),
+          _field('출발 예정시간', departureTime, icon: Icons.schedule),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('출발 날짜: ${_fullDate(departureDate)}'),
+            trailing: const Icon(Icons.calendar_month_outlined),
+            onTap: () async {
+              final value = await showDatePicker(context: c, initialDate: departureDate,
+                  firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                  lastDate: DateTime.now().add(const Duration(days: 365 * 2)));
+              if (value != null && mounted) setState(() => departureDate = value);
+            },
+          ),
           PlaceSearchField(
             key: const Key('originPlaceField'),
             label: '출발지',
@@ -2542,6 +2563,9 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     if (origin == null || destination == null) return;
     final date = selectedDate;
     final parts = time.text.trim().split(':');
+    final departureParts = departureTime.text.trim().split(':');
+    final plannedDeparture = DateTime(departureDate.year, departureDate.month, departureDate.day,
+        int.parse(departureParts.first), int.parse(departureParts.last));
     final arriveBy = DateTime(
       date.year,
       date.month,
@@ -2557,12 +2581,17 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       origin: origin!,
       destination: destination!,
       arriveBy: arriveBy,
+      plannedDepartAt: plannedDeparture,
       importance: importance,
       considerLastTrip: considerLastTrip,
       preferredTransport: transport,
       repeatLabel: widget.schedule?.repeatLabel,
       updatedAt: widget.schedule?.updatedAt,
     );
+    if (!plannedDeparture.isBefore(arriveBy)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('출발시각은 도착시각보다 앞서야 합니다.')));
+      return;
+    }
     try {
       if (widget.schedule == null) {
         await widget.repository.addSchedule(schedule);
@@ -2618,7 +2647,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
           validator: (value) {
             final text = (value ?? '').trim();
             if (text.isEmpty) return '필수 입력 항목입니다.';
-            if (controller == time &&
+            if ((controller == time || controller == departureTime) &&
                 !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(text)) {
               return '시간을 HH:mm 형식으로 입력해주세요.';
             }
@@ -2706,83 +2735,11 @@ class ScheduleDetailScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: InfoCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('도착까지 남은 시간'),
-                    SizedBox(height: 7),
-                    Text(
-                      '2시간 48분',
-                      style: TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text('(17:57 출발 기준)', style: TextStyle(fontSize: 11)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: InfoCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('데이터 최신성'),
-                    SizedBox(height: 7),
-                    Text('12분 전 업데이트'),
-                    StatusBadge('최신 데이터'),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+        if (repository is ScheduleEvaluationRepository)
+          ScheduleEvaluationCard(repository: repository as ScheduleEvaluationRepository, scheduleId: schedule.id)
+        else
+          const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
         const SizedBox(height: 14),
-        InfoCard(
-          child: Row(
-            children: [
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  SizedBox(
-                    width: 75,
-                    height: 75,
-                    child: CircularProgressIndicator(
-                      value: .92,
-                      strokeWidth: 8,
-                      color: DdubiColors.green,
-                      backgroundColor: DdubiColors.surface,
-                    ),
-                  ),
-                  Text('92%', style: Theme.of(c).textTheme.titleLarge),
-                ],
-              ),
-              const SizedBox(width: 18),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('현재 도착 신뢰도'),
-                    StatusBadge('매우 있음'),
-                    Text('평소보다 15분 여유 있어요.', style: TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        PrimaryButton(
-          '추천 경로 보기',
-          onPressed: () => c.push('/recommendations/mock-recommendation-1'),
-        ),
-        const SizedBox(height: 10),
         OutlinedButton.icon(
           key: const Key('editScheduleButton'),
           onPressed: () async {

@@ -28,6 +28,19 @@ Future<void> _enterCredentials(
   await tester.pumpAndSettle();
 }
 
+Future<void> _enterMainLoginCredentials(
+  WidgetTester tester,
+  String id,
+  String password,
+) async {
+  final fields = find.byType(TextField);
+  expect(fields, findsNWidgets(2));
+  await tester.enterText(fields.at(0), id);
+  await tester.enterText(fields.at(1), password);
+  await tester.tap(find.widgetWithText(FilledButton, '로그인'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets(
     'local preview reaches real home without HTTP or a fake session',
@@ -59,9 +72,7 @@ void main() {
       );
       await tester.tap(find.text('건너뛰기'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, '로그인'));
-      await tester.pumpAndSettle();
-      await _enterCredentials(tester, 'localadmin', 'local1234');
+      await _enterMainLoginCredentials(tester, 'localadmin', 'local1234');
       expect(find.text('다음 중요 일정'), findsOneWidget);
       expect(container.read(authSessionStoreProvider).session, isNull);
       expect(requests, isEmpty);

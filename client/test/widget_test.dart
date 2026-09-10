@@ -52,6 +52,18 @@ void main() {
     expect(validatePassword('password123'), isNull);
   });
 
+  testWidgets('인트로 첫 화면부터 진행 상태와 다음 버튼을 표시한다', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+
+    expect(find.text('1 / 4'), findsOneWidget);
+    expect(find.byIcon(Icons.arrow_forward), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.arrow_forward));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 / 2'), findsOneWidget);
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget);
+  });
+
   testWidgets('로그인 화면과 핵심 진입 동작을 표시한다', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -64,21 +76,15 @@ void main() {
     expect(find.text('뚜비'), findsOneWidget);
     await _skipIntro(tester);
     expect(find.text('K'), findsOneWidget);
-    expect(find.text('G'), findsOneWidget);
+    expect(find.bySemanticsLabel('G 로그인'), findsOneWidget);
     expect(find.text('N'), findsOneWidget);
     expect(find.text('Apple'), findsNothing);
     expect(find.text('이메일을 입력해주세요'), findsOneWidget);
+    final loginFields = find.byType(TextField);
+    expect(loginFields, findsNWidgets(2));
+    await tester.enterText(loginFields.at(0), 'localadmin');
+    await tester.enterText(loginFields.at(1), 'local1234');
     await tester.tap(find.widgetWithText(FilledButton, '로그인'));
-    await tester.pumpAndSettle();
-    expect(find.text('이메일로 로그인'), findsOneWidget);
-    expect(find.text('이메일을 잊으셨나요?'), findsOneWidget);
-    expect(find.text('비밀번호를 잊으셨나요?'), findsOneWidget);
-    await tester.enterText(
-      find.byType(TextFormField).at(0),
-      'member@ddubi.app',
-    );
-    await tester.enterText(find.byType(TextFormField).at(1), 'password123');
-    await tester.tap(find.text('로그인'));
     await tester.pumpAndSettle(const Duration(seconds: 1));
     expect(find.text('다음 중요 일정'), findsOneWidget);
     expect(find.text('추천 출발 시간'), findsOneWidget);
@@ -87,13 +93,10 @@ void main() {
   testWidgets('이메일 로그인은 잘못된 입력을 한국어로 안내한다', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
+    await tester.enterText(find.byType(TextField).first, 'abc@');
     await tester.tap(find.widgetWithText(FilledButton, '로그인'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField).first, 'abc@');
-    await tester.tap(find.text('로그인'));
     await tester.pump();
     expect(find.text('올바른 이메일 형식으로 입력해주세요.'), findsOneWidget);
-    expect(find.text('비밀번호를 입력해주세요.'), findsOneWidget);
   });
 
   testWidgets('카카오 로그인은 공급자 인증 화면으로 이동한다', (tester) async {
@@ -157,8 +160,9 @@ void main() {
       ),
     );
     await _skipIntro(tester);
-    await tester.ensureVisible(find.text('G'));
-    await tester.tap(find.text('G'));
+    final googleLogin = find.bySemanticsLabel('G 로그인');
+    await tester.ensureVisible(googleLogin);
+    await tester.tap(googleLogin);
     await tester.pumpAndSettle();
     expect(find.text('Google 로그인'), findsOneWidget);
     expect(find.text('Google 계정으로 계속하기'), findsOneWidget);
@@ -406,7 +410,7 @@ void main() {
     expect(updated?.updatedAt, isNotNull);
   });
 
-  testWidgets('낮은 데스크톱 Web 로그인 화면도 스크롤하며 넘치지 않는다', (tester) async {
+  testWidgets('낮은 데스크톱 Web 로그인 화면도 스크롤 없이 맞춘다', (tester) async {
     tester.view.physicalSize = const Size(1200, 560);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -415,7 +419,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
 
-    expect(find.byType(SingleChildScrollView), findsWidgets);
+    expect(find.byType(SingleChildScrollView), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

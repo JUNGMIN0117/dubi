@@ -190,7 +190,7 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
                                 ),
                                 Positioned(
                                   left: 18,
-                                  bottom: compact ? 82 : 116,
+                                  bottom: compact ? 100 : 138,
                                   child: Transform.rotate(
                                     angle: -.06,
                                     child: const Text(
@@ -211,7 +211,7 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
                                   ),
                                 ),
                                 Align(
-                                  alignment: const Alignment(-.18, .66),
+                                  alignment: const Alignment(.10, .66),
                                   child: Transform.translate(
                                     offset: Offset(0, compact ? 7 : 12),
                                     child: TtubeeEntrance(
@@ -726,7 +726,7 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
                                 ),
                                 Positioned(
                                   left: 18,
-                                  bottom: compact ? 82 : 116,
+                                  bottom: compact ? 100 : 138,
                                   child: Transform.rotate(
                                     angle: -.06,
                                     child: const Text(
@@ -747,7 +747,7 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
                                   ),
                                 ),
                                 Align(
-                                  alignment: const Alignment(-.22, .62),
+                                  alignment: const Alignment(.08, .62),
                                   child: TtubeeEntrance(
                                     asset: 'assets/images/ttubee-guide.png',
                                     height: compact ? 160 : 220,

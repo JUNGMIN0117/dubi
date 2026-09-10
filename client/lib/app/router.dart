@@ -139,6 +139,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               repository: repository,
               userApi: userApi,
               authRepository: authRepository,
+              reportApi: reportApi,
             ),
             routes: [
               GoRoute(
@@ -152,6 +153,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: 'records',
                 builder: (context, state) =>
                     TravelRecordsScreen(api: reportApi),
+              ),
+              GoRoute(
+                path: 'account',
+                builder: (context, state) => AccountManagementScreen(
+                  userApi: userApi,
+                  authRepository: authRepository,
+                ),
               ),
             ],
           ),

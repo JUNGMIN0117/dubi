@@ -75,6 +75,10 @@ final placeApiProvider = Provider<PlaceSearchService>((ref) {
   return PlaceApi(ref.watch(dioProvider));
 });
 
+final savedPlaceApiProvider = Provider<PlaceApi>((ref) {
+  return PlaceApi(ref.watch(dioProvider));
+});
+
 final recommendationApiProvider = Provider<RecommendationApi>((ref) {
   return RecommendationApi(ref.watch(dioProvider));
 });
@@ -99,4 +103,12 @@ final notificationApiProvider = Provider<NotificationApi>((ref) {
 
 final userApiProvider = Provider<UserApi>((ref) {
   return UserApi(ref.watch(dioProvider), ref.watch(authSessionStoreProvider));
+});
+
+final arrivalApiProvider = Provider<ArrivalApi>((ref) {
+  return ArrivalApi(ref.watch(dioProvider));
+});
+
+final reportApiProvider = Provider<ReportApi>((ref) {
+  return ReportApi(ref.watch(dioProvider));
 });

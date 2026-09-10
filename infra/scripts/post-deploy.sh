@@ -30,15 +30,18 @@ health() { docker inspect "$1" --format '{{.State.Health.Status}}' 2>/dev/null |
 # 라벨로 거르는 이유: 서버2에는 GitLab 러너가 잡마다 만드는 보조 컨테이너(runner-…, Exited 0)가 잠깐 남아
 # 이름으로 거르면 배포 잡이 자기 러너 컨테이너를 보고 실패했다(2026-09-07 첫 배포). 일회성(run --rm) 컨테이너도 제외.
 report_bad_containers() {
-  local bad
-  bad=$(docker ps -a --filter label=com.docker.compose.project=ddubi \
-        --filter status=restarting --filter status=exited --filter status=dead \
-        --format '{{.Names}}\t{{.Status}}' | grep -vE '^(spark-streaming-replay|spark-batch|replay-producer|certbot)\b|-run-' || true)
-  if [ -n "$bad" ]; then
-    echo "WARN: 정상이 아닌 컨테이너:"; echo "$bad"
-    return 1
-  fi
-  echo "OK: 죽었거나 재시작 중인 컨테이너 없음"
+  # 의존 서비스(네임노드 등)가 방금 복구됐으면 그것을 기다리던 컨테이너가 재시작 백오프 중일 수 있다(2026-09-09 배포에서
+  # archiver 가 그랬다). 20초 간격으로 세 번 보고, 세 번 모두 남아 있을 때만 실패로 본다.
+  local bad try
+  for try in 1 2 3; do
+    bad=$(docker ps -a --filter label=com.docker.compose.project=ddubi \
+          --filter status=restarting --filter status=exited --filter status=dead \
+          --format '{{.Names}}\t{{.Status}}' | grep -vE '^(spark-streaming-replay|spark-batch|replay-producer|certbot)\b|-run-' || true)
+    [ -z "$bad" ] && { echo "OK: 죽었거나 재시작 중인 컨테이너 없음"; return 0; }
+    [ "$try" -lt 3 ] && { echo "재시작 중인 컨테이너가 있어 20초 뒤 다시 확인 ($try/3):"; echo "$bad"; sleep 20; }
+  done
+  echo "WARN: 정상이 아닌 컨테이너:"; echo "$bad"
+  return 1
 }
 
 case "$target" in
@@ -63,6 +66,13 @@ case "$target" in
     docker exec prometheus promtool check config /etc/prometheus/ddubi/prometheus.yml >/dev/null
     docker exec prometheus kill -HUP 1
     echo "OK: prometheus 설정 재적재"
+    # Grafana 는 대시보드 파일은 10초마다 다시 읽지만, 알림 규칙·수신처 파일은 기동 때만 읽는다(2026-09-10 발견: 규칙을 고쳐 배포해도
+    # 옛 규칙이 남아 있었다). 관리자 API 로 알림 프로비저닝을 다시 읽게 한다. 실패해도 배포 자체는 성공이므로 경고만 남긴다.
+    if docker exec grafana sh -c 'curl -sf -o /dev/null -u "admin:$GF_SECURITY_ADMIN_PASSWORD" -X POST http://localhost:3000/api/admin/provisioning/alerting/reload'; then
+      echo "OK: grafana 알림 규칙·수신처 재적재"
+    else
+      echo "WARN: grafana 알림 재적재 실패 — 규칙 변경이 있었다면 docker restart grafana 로 반영"
+    fi
     # 2) backend 기동 대기 (재빌드됐으면 Spring 기동에 40~90초)
     wait_for "backend healthy" 180 health backend
     # 3) 바깥에서 본 응답: 인증 없이 /api/health 를 부르면 401 이 정상. 502·000 이면 nginx→backend 경로 문제.

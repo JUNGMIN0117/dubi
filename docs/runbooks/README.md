@@ -2,6 +2,7 @@
 
 장애가 났을 때 무엇을 확인하고 어떤 순서로 조치하는지 적은 문서입니다. 각 절차는 실제로 장애를 내고 따라 해 본 뒤에만 "검증됨"으로 표시합니다.
 검증 기록은 [docs/experiments/2026-09-07-recovery-drill.md](../experiments/2026-09-07-recovery-drill.md)에 있습니다.
+데이터를 어디에 얼마나 두고 무엇이 백업되는지는 [docs/data-retention.md](../data-retention.md)에 있습니다.
 
 | 절차서 | 상황 | 검증 |
 |---|---|---|

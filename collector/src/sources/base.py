@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Literal
+from typing import Any, Callable, List, Literal
 
 import httpx
 
@@ -36,7 +36,9 @@ class Record:
     segment_ids: list[str] | None = None  # 영향받는 뚜비 내부 구간 ID. 수집기가 알 수 있을 때만 채운다
 
 
-FetchFn = Callable[[Settings, httpx.Client], list[Record]]
+# Collector 이미지는 Python 3.8도 지원하므로 런타임에 평가되는 타입 별칭은
+# PEP 585의 list[...] 대신 typing.List를 사용한다.
+FetchFn = Callable[[Settings, httpx.Client], List[Record]]
 
 
 @dataclass(frozen=True)

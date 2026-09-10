@@ -26,6 +26,7 @@ import requests
 log = logging.getLogger("baseline_upload")
 
 CHUNK_MAX = 5000          # 계약: 한 요청당 rows 최대 5000개
+SHRINK_REASON_MAX = 100   # 계약: shrinkReason maxLength (backend 의 pipeline_config.config_value 가 VARCHAR(100))
 RETRIABLE_STATUS = {500, 502, 503, 504}
 
 
@@ -99,10 +100,14 @@ class BaselineUploadClient:
         """
         payload = {"totalRows": total_rows}  # type: Dict[str, Any]
         if allow_shrink:
-            if not (shrink_reason or "").strip():
+            reason = (shrink_reason or "").strip()
+            if not reason:
                 raise ValueError("allow_shrink=True 이면 shrink_reason 이 필요합니다 (BASELINE_SHRINK_REASON)")
+            if len(reason) > SHRINK_REASON_MAX:
+                raise ValueError("shrink_reason 은 {}자 이내여야 합니다 (지금 {}자). 짧은 사유 + 이슈 번호로 쓰고 긴 근거는 이슈에 둡니다".format(
+                    SHRINK_REASON_MAX, len(reason)))
             payload["allowShrink"] = True
-            payload["shrinkReason"] = shrink_reason.strip()
+            payload["shrinkReason"] = reason
             log.warning("activate with allowShrink version=%s reason=%s", data_version, payload["shrinkReason"])
         return self._post("/internal/baselines/{}/versions/{}/activate".format(
             self.baseline_type, data_version), payload) or {}

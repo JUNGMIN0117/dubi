@@ -184,7 +184,7 @@ class ApiAuthRepository implements AuthRepository {
         error.type == DioExceptionType.sendTimeout) {
       return const AuthException(
         AuthErrorCode.connectionFailed,
-        message: '로컬 백엔드 서버에 연결할 수 없습니다.',
+        message: '서버에 연결할 수 없습니다.',
       );
     }
 

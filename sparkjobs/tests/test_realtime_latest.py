@@ -30,6 +30,9 @@ def spark():
 
 
 def _event(event_id, event_type, occurred, payload, *, segment_ids=None):
+    # 합성 BUS fixture도 원천 발급 체계를 명시한다. 미확인 출처를 서울로 기본 해석하지 않는다.
+    if event_type.startswith("bus."):
+        payload={"providerNamespace":"SEOUL_BUS",**payload}
     event = {
         "eventId": event_id,
         "eventType": event_type,
@@ -166,6 +169,8 @@ def test_missing_provider_identity_is_countable_but_not_served(spark):
          "city:latest:sdot-population:D1", 1800),
         ("subway.alert", {"providerAlertId": "A1", "raw": {}},
          "transit:latest:subway-alert:A1", 600),
+        ("topis.notice", {"providerNoticeId": "N1", "raw": {}},
+         "traffic:latest:topis-notice:N1", 1800),
     ],
 )
 def test_redis_key_and_ttl_match_contract(spark, event_type, payload, expected_key, expected_ttl):

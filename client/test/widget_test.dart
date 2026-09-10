@@ -8,8 +8,9 @@ import 'package:ddubi/presentation/auth_screens.dart';
 import 'package:ddubi/presentation/screens.dart';
 import 'package:ddubi/presentation/widgets.dart';
 import 'package:ddubi/providers/app_providers.dart';
-import 'package:ddubi/services/kakao_login_service.dart';
+import 'package:ddubi/services/app_api.dart';
 import 'package:ddubi/services/google_login_service.dart';
+import 'package:ddubi/services/kakao_login_service.dart';
 import 'package:ddubi/services/naver_login_service.dart';
 import 'package:ddubi/services/recommendation_api.dart';
 import 'package:dio/dio.dart';
@@ -21,6 +22,34 @@ Future<void> _skipIntro(WidgetTester tester) async {
   expect(find.text('건너뛰기'), findsOneWidget);
   await tester.tap(find.text('건너뛰기'));
   await tester.pumpAndSettle();
+}
+
+ReportApi _emptyReportApi() {
+  final dio = Dio()
+    ..interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) => handler.resolve(
+          Response<Map<String, dynamic>>(
+            requestOptions: options,
+            statusCode: 200,
+            data: {
+              'success': true,
+              'data': {
+                'summary': {
+                  'totalCount': 0,
+                  'onTimeCount': 0,
+                  'tightCount': 0,
+                  'lateCount': 0,
+                  'onTimeRate': 0,
+                },
+                'items': {'content': <Object>[]},
+              },
+            },
+          ),
+        ),
+      ),
+    );
+  return ReportApi(dio);
 }
 
 void main() {
@@ -598,7 +627,7 @@ void main() {
 
     expect(find.byKey(const Key('webRouteMapLayout')), findsOneWidget);
     expect(find.byKey(const Key('mobileRouteMapLayout')), findsNothing);
-    expect(find.byType(ChoiceChip), findsNWidgets(3));
+    expect(find.byType(ChoiceChip), findsOneWidget);
   });
 
   testWidgets('알림과 설정은 Web에서 데스크톱 정보 구조를 사용한다', (tester) async {
@@ -607,7 +636,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [reportApiProvider.overrideWithValue(_emptyReportApi())],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(container: container, child: const DdubiApp()),
@@ -625,7 +656,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('webSettingsLayout')), findsOneWidget);
     expect(find.byKey(const Key('mobileSettingsLayout')), findsNothing);
-    expect(find.text('경로 추천에 사용할 교통수단과 앱 권한을 관리하세요.'), findsOneWidget);
+    expect(find.text('앱 권한과 계정 상태를 관리하세요.'), findsOneWidget);
   });
 
   testWidgets('알림과 설정은 모바일에서 기존 세로형 구조를 유지한다', (tester) async {
@@ -634,7 +665,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [reportApiProvider.overrideWithValue(_emptyReportApi())],
+    );
     addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(container: container, child: const DdubiApp()),
@@ -650,9 +683,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mobileSettingsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webSettingsLayout')), findsNothing);
-    expect(find.text('지하철 우선'), findsOneWidget);
-    expect(find.text('버스 + 지하철'), findsOneWidget);
-    expect(find.text('버스 우선'), findsOneWidget);
+    expect(find.text('위치 권한'), findsOneWidget);
+    expect(find.text('알림 권한'), findsOneWidget);
+    expect(find.text('지하철 우선'), findsNothing);
+    expect(find.text('버스 + 지하철'), findsNothing);
+    expect(find.text('버스 우선'), findsNothing);
     expect(find.text('도보'), findsNothing);
     expect(find.text('택시'), findsNothing);
   });
@@ -685,13 +720,13 @@ void main() {
     expect(find.text('현재 위치 (Mock)'), findsOneWidget);
     expect(find.text('출발 · 강남역'), findsOneWidget);
     expect(find.text('도착 · 여의도역'), findsOneWidget);
-    expect(find.byType(ChoiceChip), findsNWidgets(3));
+    expect(find.byType(ChoiceChip), findsOneWidget);
     expect(find.byKey(const Key('mapEntireRouteButton')), findsOneWidget);
     expect(find.byKey(const Key('mapCurrentLocationButton')), findsOneWidget);
 
-    await tester.tap(find.text('가장 빠른 경로'));
+    await tester.tap(find.text('추천 경로'));
     await tester.pump();
-    expect(find.text('17:51 출발'), findsOneWidget);
+    expect(find.text('17:57 출발'), findsOneWidget);
   });
 
   testWidgets('출발 안내 후 이동 중 상태로 전환한다', (tester) async {

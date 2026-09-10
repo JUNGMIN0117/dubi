@@ -76,3 +76,16 @@ Windows sandbox의 임시 폴더 접근 문제가 있으면 프로젝트 `data/`
 
 현재 단계는 로컬 수치 확인이다. Redis 보정·기준선 적재·Spring 추천 정책을 변경하지 않는다.
 HTTP 계약: `docs/contracts/ml-serving-http.md`.
+
+## 백엔드 전달 자료
+
+[상세 HTTP 명세](../docs/contracts/ml-serving-http.md)에 필드별 타입·범위·nullable,
+Backend 매핑 대응표, 오류 JSON, 동시 호출/timeout과 기존 포트의 차이를 정리했다.
+아래 파일은 실행 코드에서 생성해 검증한 예시이며 모델 설치 후 동일 입력으로 호출할 수 있다.
+
+- [정상 일괄 요청](examples/bus-batch-request.json) / [실제 응답](examples/bus-batch-response.json)
+- [미지원 출처 포함 요청](examples/bus-batch-partial-request.json) / [부분 실패 응답](examples/bus-batch-partial-response.json)
+- [422 오류 응답](examples/bus-batch-invalid-response.json) / [readiness 응답](examples/bus-health-ready.json)
+
+정상 예시는 독립적인 두 검증 edge이며 연속된 사용자 경로를 의미하지 않는다.
+기존 `BusPredictionPort`의 운영 승인 조건을 충족한 응답으로 해석하지 않는다.

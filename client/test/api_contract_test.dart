@@ -4,6 +4,8 @@ import 'package:ddubi/core/network/api_error_response.dart';
 import 'package:ddubi/domain/auth.dart';
 import 'package:ddubi/domain/models.dart';
 import 'package:ddubi/services/device_token_service.dart';
+import 'package:ddubi/services/api_auth_repository.dart';
+import 'package:ddubi/services/auth_api.dart';
 import 'package:ddubi/services/app_api.dart';
 import 'package:ddubi/services/place_api.dart';
 import 'package:dio/dio.dart';
@@ -22,6 +24,7 @@ void main() {
     expect(ApiPaths.logout, '/auth/logout');
     expect(ApiPaths.oauthTokenLogin, '/auth/oauth/token');
     expect(ApiPaths.oauthIdTokenLogin, '/auth/oauth/id-token');
+    expect(ApiPaths.oauthLink, '/auth/oauth/link');
     expect(ApiPaths.placeSearch, '/places/search');
     expect(ApiPaths.home, '/home');
     expect(ApiPaths.notificationsReadAll, '/notifications/read-all');
@@ -112,6 +115,55 @@ void main() {
     );
     expect(notificationLocationFromData({'scheduleId': '12'}), '/schedules/12');
     expect(notificationLocationFromData(const {}), '/notifications');
+  });
+
+  test('소셜 로그인 계정 충돌 응답을 연동 확인 흐름으로 변환한다', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://example.test/api/v1'))
+      ..interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) => handler.reject(
+            DioException(
+              requestOptions: options,
+              response: Response<Map<String, dynamic>>(
+                requestOptions: options,
+                statusCode: 409,
+                data: {
+                  'success': false,
+                  'error': {'code': 'ACCOUNT_LINK_REQUIRED'},
+                  'data': {
+                    'linkToken': 'one-time-link-token',
+                    'provider': 'KAKAO',
+                    'email': 'm***@example.com',
+                  },
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+    final store = AuthSessionStore();
+    final repository = ApiAuthRepository(
+      api: AuthApi(dio),
+      sessionStore: store,
+      deviceTokenService: DeviceTokenService(dio, store),
+    );
+
+    await expectLater(
+      repository.loginWithOAuthToken(
+        provider: 'KAKAO',
+        accessToken: 'provider-token',
+      ),
+      throwsA(
+        isA<AccountLinkRequiredException>()
+            .having(
+              (error) => error.linkToken,
+              'linkToken',
+              'one-time-link-token',
+            )
+            .having((error) => error.provider, 'provider', 'KAKAO')
+            .having((error) => error.email, 'email', 'm***@example.com'),
+      ),
+    );
   });
 
   test('일정 조회 응답에서 좌표와 updatedAt을 잃지 않는다', () {

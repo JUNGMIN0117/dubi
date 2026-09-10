@@ -60,7 +60,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.arrow_forward));
     await tester.pumpAndSettle();
 
-    expect(find.text('1 / 2'), findsOneWidget);
+    expect(find.text('2 / 4'), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back), findsOneWidget);
   });
 
@@ -199,6 +199,7 @@ void main() {
         home: AccountLinkPromptScreen(
           provider: '카카오',
           email: 'member@ddubi.app',
+          linkToken: 'link-token',
           repository: repository,
           onLinked: () {},
         ),
@@ -258,7 +259,7 @@ void main() {
     expect(find.text('강남역 인근'), findsOneWidget);
   });
 
-  testWidgets('Web Home은 대시보드와 3열 추천 경로를 표시한다', (tester) async {
+  testWidgets('Web Home은 대시보드와 추천 경로 하나를 표시한다', (tester) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -279,7 +280,7 @@ void main() {
     expect(find.text('이동 대시보드'), findsOneWidget);
     expect(find.text('서비스 정상'), findsOneWidget);
     expect(find.text('도착 예정'), findsNWidgets(2));
-    expect(find.byType(RouteCard), findsNWidgets(3));
+    expect(find.byType(RouteCard), findsOneWidget);
   });
 
   testWidgets('일정 화면은 너비에 따라 모바일과 Web 구성을 나눈다', (tester) async {
@@ -430,7 +431,7 @@ void main() {
     expect(updated?.updatedAt, isNotNull);
   });
 
-  testWidgets('낮은 데스크톱 Web 로그인 화면도 스크롤 없이 맞춘다', (tester) async {
+  testWidgets('낮은 데스크톱 Web 로그인 화면은 하단 영역만 스크롤한다', (tester) async {
     tester.view.physicalSize = const Size(1200, 560);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -439,7 +440,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
 
-    expect(find.byType(SingleChildScrollView), findsNothing);
+    expect(find.byType(SingleChildScrollView), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -576,7 +577,7 @@ void main() {
     expect(find.byKey(const Key('webRouteResultsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webRouteResultsGrid')), findsOneWidget);
     expect(find.byKey(const Key('mobileRouteResultsLayout')), findsNothing);
-    expect(find.byType(RouteCard), findsNWidgets(3));
+    expect(find.byType(RouteCard), findsOneWidget);
   });
 
   testWidgets('전체 지도는 Web에서 지도와 상세 정보를 좌우로 표시한다', (tester) async {

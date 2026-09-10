@@ -47,7 +47,10 @@ class RouteSegmentEdgeDatabaseTest {
                 .containsExactly("BUS:R1:A:B","BUS:R1:B:C");
         // 기존 행에 구별 가능한 값을 둬 '실패 후 새 값이 일부 남는' 부분 성공까지 검출한다.
         jdbc.update("UPDATE route_segment_edge SET mapping_version='BEFORE'");
-        jdbc.execute("CREATE TRIGGER fail_second_edge BEFORE INSERT ON route_segment_edge FOR EACH ROW BEGIN IF NEW.edge_seq=2 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture insert failure'; END IF; END");
+        // GitLab Testcontainers의 일반 MySQL 계정은 binary log 환경에서 CREATE TRIGGER에 SUPER 권한이 필요하다.
+        // 기존 행은 통과하고 새 두 번째 edge만 거부하는 테스트 전용 CHECK로 같은 롤백 경계를 검증한다.
+        jdbc.execute("ALTER TABLE route_segment_edge ADD CONSTRAINT CK_TEST_FAIL_SECOND_EDGE "
+                + "CHECK (mapping_version='BEFORE' OR edge_seq<>2)");
         assertThatThrownBy(()->writer.replace(10,20,segment,0,0)).isInstanceOf(Exception.class);
         assertThat(jdbc.queryForList("SELECT mapping_version FROM route_segment_edge ORDER BY edge_seq",String.class))
                 .containsExactly("BEFORE","BEFORE");

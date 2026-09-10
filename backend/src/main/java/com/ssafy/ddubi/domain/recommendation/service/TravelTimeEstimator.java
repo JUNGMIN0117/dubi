@@ -26,25 +26,29 @@ import java.util.Set;
 /**
  * 경로의 구간별 소요시간을 정한다. 추천의 숫자는 전부 여기서 나온다.
  *
- * <h3>기본 소요시간은 3단으로 내려간다</h3>
+ * <h3>판단 단위는 step 이다</h3>
+ * 외부 경로 API 가 주는 이동 구간 하나가 판단 단위고, 그 안의 edge 들은 <b>같은 출처</b>를
+ * 쓴다. 분산팀 합의(2026-09-10)대로 한 step 안에서 일부 edge 만 ML 값으로 바꾸지 않는다 —
+ * 부분 혼합은 별도 정책과 검증이 필요하다.
+ *
+ * <h3>출처는 3단으로 내려간다</h3>
  * <ol>
- *   <li>예측 서비스 — 진입 예상시각 기준. 버스 구간만</li>
- *   <li>{@code baseline_serving} 평소값(p50)</li>
- *   <li>외부 경로 API 시간 — 마지막 보루. 도보는 처음부터 여기다</li>
+ *   <li>예측 서비스 — step 의 <b>모든</b> edge 를 예측했을 때만</li>
+ *   <li>{@code baseline_serving} 평소값(p50) — 역시 모든 edge 가 있을 때만</li>
+ *   <li>경로 API step 시간 — edge 가 있으면 균등 분배, 없으면 그대로</li>
  * </ol>
  *
  * <h3>실시간 상태는 4단째가 아니라 '보정'이다</h3>
  * Redis {@code segment:status} 는 <b>지금</b>의 상태다. 한 시간 뒤에 지나갈 구간에 지금의
  * 지연을 더하면 예측이 아니라 착각이 된다. ML 결정 문서(2026-09-08)의 "현재 관측을 미래 구간의
- * 실제 상태로 취급하지 않는다" 를 따라, <b>진입 예상시각이 그 값의 유효기간 안에 드는 구간에만</b>
- * 더한다. 그래서 이 클래스는 구간을 순서대로 훑으며 진입 시각을 누적한다.
+ * 실제 상태로 취급하지 않는다" 를 따라, <b>진입 예상시각이 그 값의 유효기간 안에 드는 edge 에만</b>
+ * 더한다. 보정은 기본 시간과 달리 edge 단위다 — 관측된 지연이지 배분한 추정치가 아니다.
  *
  * <h3>예측은 왜 두 번 훑고 부르나</h3>
  * 예측 입력에 "진입 예상 날짜·시간대" 가 들어가는데, 그 값은 앞 구간들의 소요시간이 정해져야
  * 나온다. 그렇다고 구간마다 따로 부르면 왕복이 구간 수만큼 쌓인다. 그래서
  * <b>1차로 경로 API 시간을 써서 진입 시각을 잡아 배치 요청을 한 번에 보내고</b>,
- * 2차에서 받은 예측으로 다시 누적한다. 1·2차의 시간대가 갈리는 경우가 있지만, 시간대 경계에
- * 걸친 구간 하나의 오차와 구간 수만큼의 왕복을 맞바꾼 것이다.
+ * 2차에서 받은 예측으로 다시 누적한다.
  */
 @Service
 public class TravelTimeEstimator {
@@ -78,23 +82,25 @@ public class TravelTimeEstimator {
     /**
      * @param departAt 이 시각에 출발한다고 보고 구간별 진입 시각을 누적한다
      */
-    public TravelTimeEstimate estimate(List<SegmentEstimateInput> segments, Instant departAt) {
+    public TravelTimeEstimate estimate(List<StepEstimateInput> steps, Instant departAt) {
         Objects.requireNonNull(departAt, "출발 시각이 있어야 진입 시각을 계산할 수 있습니다.");
-        if (segments.isEmpty()) {
+        if (steps.isEmpty()) {
             return new TravelTimeEstimate(List.of(), 0, Confidence.LOW, true);
         }
 
-        Map<String, BusTravelTimePrediction> predictions = fetchPredictions(segments, departAt);
-        Map<String, SegmentStatus> statuses = fetchStatuses(segments);
-        BaselineSnapshot baselines = loadBaselines(segments, departAt);
+        Map<String, BusTravelTimePrediction> predictions = fetchPredictions(steps, departAt);
+        Map<String, SegmentStatus> statuses = fetchStatuses(steps);
+        BaselineSnapshot baselines = loadBaselines(steps, departAt);
 
-        List<SegmentEstimate> results = new ArrayList<>(segments.size());
+        List<SegmentEstimate> results = new ArrayList<>();
         Instant cursor = departAt;
 
-        for (SegmentEstimateInput segment : segments) {
-            SegmentEstimate estimate = estimateOne(segment, cursor, predictions, statuses, baselines);
-            results.add(estimate);
-            cursor = cursor.plusSeconds(estimate.totalSeconds());
+        for (StepEstimateInput step : steps) {
+            List<SegmentEstimate> estimates = estimateStep(step, cursor, predictions, statuses, baselines);
+            results.addAll(estimates);
+            for (SegmentEstimate estimate : estimates) {
+                cursor = cursor.plusSeconds(estimate.totalSeconds());
+            }
         }
 
         long total = results.stream().mapToLong(SegmentEstimate::totalSeconds).sum();
@@ -102,42 +108,105 @@ public class TravelTimeEstimator {
     }
 
     // ------------------------------------------------------------------
-    // 구간 하나
+    // step 하나 — 출처를 하나만 고른다
     // ------------------------------------------------------------------
 
-    private SegmentEstimate estimateOne(SegmentEstimateInput segment,
-                                        Instant enteredAt,
-                                        Map<String, BusTravelTimePrediction> predictions,
-                                        Map<String, SegmentStatus> statuses,
-                                        BaselineSnapshot baselines) {
-        long base;
-        EstimateSource source;
-        String note = null;
-
-        BusTravelTimePrediction prediction = segment.isPredictable()
-                ? predictions.get(segment.segmentId())
-                : null;
-
-        if (prediction != null && prediction.isPredicted()) {
-            base = prediction.seconds();
-            source = EstimateSource.PREDICTION;
-        } else {
-            String predictionNote = prediction == null ? null : prediction.reason();
-            Long baseline = readBaseline(segment, enteredAt, baselines);
-            if (baseline != null) {
-                base = baseline;
-                source = EstimateSource.BASELINE;
-                note = predictionNote;
-            } else {
-                base = segment.routeApiSeconds();
-                source = EstimateSource.ROUTE_API;
-                note = segment.isPredictable() ? joinNotes(predictionNote, "기준선 없음") : null;
-            }
+    private List<SegmentEstimate> estimateStep(StepEstimateInput step,
+                                               Instant enteredAt,
+                                               Map<String, BusTravelTimePrediction> predictions,
+                                               Map<String, SegmentStatus> statuses,
+                                               BaselineSnapshot baselines) {
+        if (step.hasNoEdges()) {
+            // 도보이거나 매핑 실패. 나눌 것도 붙일 것도 없다.
+            return List.of(new SegmentEstimate(step.sequence(), 0, null, enteredAt,
+                    step.routeApiSeconds(), EstimateSource.ROUTE_API, 0, null));
         }
 
-        long adjustment = adjustmentFor(segment, enteredAt, statuses);
-        return new SegmentEstimate(segment.sequence(), segment.segmentId(), enteredAt,
-                base, source, adjustment, note);
+        long[] predicted = allPredicted(step, predictions);
+        if (predicted != null) {
+            return spread(step, enteredAt, predicted, EstimateSource.PREDICTION, null, statuses);
+        }
+
+        String note = predictionNote(step, predictions);
+
+        long[] baseline = allBaselines(step, enteredAt, baselines);
+        if (baseline != null) {
+            return spread(step, enteredAt, baseline, EstimateSource.BASELINE, note, statuses);
+        }
+
+        long[] split = EvenSplit.distribute(step.routeApiSeconds(), step.edges().size());
+        String splitNote = joinNotes(note, step.edges().size() == 1
+                ? "기준선 없음"
+                : "기준선 없음 · 경로 API step 시간을 " + step.edges().size() + "등분");
+        return spread(step, enteredAt, split, EstimateSource.ROUTE_API_SPLIT, splitNote, statuses);
+    }
+
+    /**
+     * edge 별 기본 시간을 실제 결과로 펼친다. 진입 시각은 edge 안에서도 누적된다 —
+     * 첫 edge 에서 5분 걸리면 두 번째 edge 진입은 5분 뒤다.
+     */
+    private List<SegmentEstimate> spread(StepEstimateInput step, Instant stepEnteredAt,
+                                         long[] baseSeconds, EstimateSource source, String note,
+                                         Map<String, SegmentStatus> statuses) {
+        List<SegmentEstimate> results = new ArrayList<>(step.edges().size());
+        Instant cursor = stepEnteredAt;
+
+        for (int i = 0; i < step.edges().size(); i++) {
+            EdgeEstimateInput edge = step.edges().get(i);
+            long adjustment = adjustmentFor(edge.segmentId(), cursor, statuses);
+            results.add(new SegmentEstimate(step.sequence(), edge.edgeSeq(), edge.segmentId(),
+                    cursor, baseSeconds[i], source, adjustment, note));
+            cursor = cursor.plusSeconds(baseSeconds[i] + adjustment);
+        }
+        return results;
+    }
+
+    /**
+     * step 의 <b>모든</b> edge 가 예측됐을 때만 값을 준다. 하나라도 빠지면 null —
+     * 부분 혼합 금지(분산팀 조건 3).
+     */
+    private long[] allPredicted(StepEstimateInput step, Map<String, BusTravelTimePrediction> predictions) {
+        if (!step.isPredictable()) {
+            return null;
+        }
+        long[] values = new long[step.edges().size()];
+        for (int i = 0; i < step.edges().size(); i++) {
+            BusTravelTimePrediction prediction = predictions.get(step.edges().get(i).segmentId());
+            if (prediction == null || !prediction.isPredicted()) {
+                return null;
+            }
+            values[i] = prediction.seconds();
+        }
+        return values;
+    }
+
+    /** 기준선도 마찬가지로 전부 있을 때만 쓴다. 일부만 채우면 나머지를 나눌 근거가 없다. */
+    private long[] allBaselines(StepEstimateInput step, Instant enteredAt, BaselineSnapshot baselines) {
+        ZonedDateTime entry = enteredAt.atZone(ZONE);
+        byte dow = (byte) entry.getDayOfWeek().getValue();
+        byte hourSlot = (byte) entry.getHour();
+
+        long[] values = new long[step.edges().size()];
+        for (int i = 0; i < step.edges().size(); i++) {
+            String segmentId = step.edges().get(i).segmentId();
+            Long p50 = segmentId == null ? null : baselines.p50(segmentId, dow, hourSlot);
+            if (p50 == null) {
+                return null;
+            }
+            values[i] = p50;
+        }
+        return values;
+    }
+
+    /** 예측이 왜 안 됐는지 — 첫 번째 이유만 남긴다. 같은 step 이면 대개 같은 이유다. */
+    private String predictionNote(StepEstimateInput step, Map<String, BusTravelTimePrediction> predictions) {
+        for (EdgeEstimateInput edge : step.edges()) {
+            BusTravelTimePrediction prediction = predictions.get(edge.segmentId());
+            if (prediction != null && !prediction.isPredicted()) {
+                return prediction.reason();
+            }
+        }
+        return null;
     }
 
     /**
@@ -145,29 +214,70 @@ public class TravelTimeEstimator {
      * 유효기간이 지난 값은 없는 것으로 본다 — 오래된 지연을 미래에 그대로 얹는 것이
      * 보정을 아예 안 하는 것보다 나쁘다.
      */
-    private long adjustmentFor(SegmentEstimateInput segment, Instant enteredAt,
-                               Map<String, SegmentStatus> statuses) {
-        if (segment.segmentId() == null) {
+    private long adjustmentFor(String segmentId, Instant enteredAt, Map<String, SegmentStatus> statuses) {
+        if (segmentId == null) {
             return 0;
         }
-        SegmentStatus status = statuses.get(segment.segmentId());
+        SegmentStatus status = statuses.get(segmentId);
         if (status == null || !status.isUsableAt(enteredAt)) {
             return 0;
         }
         return Math.max(0, status.delaySeconds());
     }
 
-    /**
-     * 기준선은 <b>진입 예상시각</b>의 요일·시간대로 찾는다. 조회 시각으로 찾으면
-     * 밤 11시에 다음 날 아침 경로를 물었을 때 심야 기준선이 나온다.
-     */
-    private Long readBaseline(SegmentEstimateInput segment, Instant enteredAt, BaselineSnapshot baselines) {
-        if (segment.segmentId() == null) {
-            return null;
+    // ------------------------------------------------------------------
+    // 배치 조회
+    // ------------------------------------------------------------------
+
+    /** 1차 훑기 — 경로 API 시간으로 진입 시각을 잡아 예측 요청을 한 번에 만든다. */
+    private Map<String, BusTravelTimePrediction> fetchPredictions(List<StepEstimateInput> steps,
+                                                                  Instant departAt) {
+        List<BusSegmentPredictionRequest> requests = new ArrayList<>();
+        Instant cursor = departAt;
+
+        for (StepEstimateInput step : steps) {
+            if (step.isPredictable()) {
+                long[] share = EvenSplit.distribute(step.routeApiSeconds(), step.edges().size());
+                Instant edgeCursor = cursor;
+                for (int i = 0; i < step.edges().size(); i++) {
+                    EdgeEstimateInput edge = step.edges().get(i);
+                    ZonedDateTime entry = edgeCursor.atZone(ZONE);
+                    requests.add(new BusSegmentPredictionRequest(
+                            edge.segmentId(),
+                            edge.busKey().providerRouteId(),
+                            edge.busKey().providerFromStopId(),
+                            edge.busKey().providerToStopId(),
+                            edge.busKey().fromStopSequence(),
+                            entry.toLocalDate(),
+                            entry.getHour()));
+                    edgeCursor = edgeCursor.plusSeconds(share[i]);
+                }
+            }
+            cursor = cursor.plusSeconds(step.routeApiSeconds());
         }
-        ZonedDateTime entry = enteredAt.atZone(ZONE);
-        return baselines.p50(segment.segmentId(),
-                (byte) entry.getDayOfWeek().getValue(), (byte) entry.getHour());
+
+        if (requests.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return predictor.predict(requests);
+        } catch (RuntimeException e) {
+            // 예측 서비스가 죽어도 추천은 나가야 한다.
+            log.warn("예측 서비스 호출 실패 — 기준선·경로 API 로 계산합니다: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private Map<String, SegmentStatus> fetchStatuses(List<StepEstimateInput> steps) {
+        Set<String> ids = new LinkedHashSet<>();
+        for (StepEstimateInput step : steps) {
+            for (EdgeEstimateInput edge : step.edges()) {
+                if (edge.segmentId() != null) {
+                    ids.add(edge.segmentId());
+                }
+            }
+        }
+        return ids.isEmpty() ? Map.of() : segmentStateReader.readAll(ids);
     }
 
     /**
@@ -179,7 +289,7 @@ public class TravelTimeEstimator {
      * 넘어가면 스냅샷에 없는 칸을 찾게 된다. 한 시간씩 여유를 두면 그 경우가 덮인다.
      * 자정을 넘나드는 경로를 위해 0시·23시가 걸리면 앞뒤 요일도 함께 넣는다.
      */
-    private BaselineSnapshot loadBaselines(List<SegmentEstimateInput> segments, Instant departAt) {
+    private BaselineSnapshot loadBaselines(List<StepEstimateInput> steps, Instant departAt) {
         String activeVersion = baselineVersionProvider.activeVersion();
         if (activeVersion == null) {
             return BaselineSnapshot.empty();
@@ -190,9 +300,13 @@ public class TravelTimeEstimator {
         Set<Byte> hours = new LinkedHashSet<>();
 
         Instant cursor = departAt;
-        for (SegmentEstimateInput segment : segments) {
-            if (segment.segmentId() != null) {
-                segmentIds.add(segment.segmentId());
+        for (StepEstimateInput step : steps) {
+            if (!step.hasNoEdges()) {
+                for (EdgeEstimateInput edge : step.edges()) {
+                    if (edge.segmentId() != null) {
+                        segmentIds.add(edge.segmentId());
+                    }
+                }
                 ZonedDateTime entry = cursor.atZone(ZONE);
                 int dow = entry.getDayOfWeek().getValue();
                 int hour = entry.getHour();
@@ -207,7 +321,7 @@ public class TravelTimeEstimator {
                     dows.add((byte) nextDow(dow));
                 }
             }
-            cursor = cursor.plusSeconds(segment.routeApiSeconds());
+            cursor = cursor.plusSeconds(step.routeApiSeconds());
         }
 
         if (segmentIds.isEmpty()) {
@@ -228,63 +342,19 @@ public class TravelTimeEstimator {
     }
 
     // ------------------------------------------------------------------
-    // 배치 조회
-    // ------------------------------------------------------------------
-
-    /** 1차 훑기 — 경로 API 시간으로 진입 시각을 잡아 예측 요청을 한 번에 만든다. */
-    private Map<String, BusTravelTimePrediction> fetchPredictions(List<SegmentEstimateInput> segments,
-                                                                  Instant departAt) {
-        List<BusSegmentPredictionRequest> requests = new ArrayList<>();
-        Instant cursor = departAt;
-        for (SegmentEstimateInput segment : segments) {
-            if (segment.isPredictable()) {
-                ZonedDateTime entry = cursor.atZone(ZONE);
-                requests.add(new BusSegmentPredictionRequest(
-                        segment.segmentId(),
-                        segment.busKey().providerRouteId(),
-                        segment.busKey().providerFromStopId(),
-                        segment.busKey().providerToStopId(),
-                        segment.busKey().fromStopSequence(),
-                        entry.toLocalDate(),
-                        entry.getHour()));
-            }
-            cursor = cursor.plusSeconds(segment.routeApiSeconds());
-        }
-        if (requests.isEmpty()) {
-            return Map.of();
-        }
-        try {
-            return predictor.predict(requests);
-        } catch (RuntimeException e) {
-            // 예측 서비스가 죽어도 추천은 나가야 한다.
-            log.warn("예측 서비스 호출 실패 — 기준선·경로 API 로 계산합니다: {}", e.getMessage());
-            return Map.of();
-        }
-    }
-
-    private Map<String, SegmentStatus> fetchStatuses(List<SegmentEstimateInput> segments) {
-        Set<String> ids = new LinkedHashSet<>();
-        for (SegmentEstimateInput segment : segments) {
-            if (segment.segmentId() != null) {
-                ids.add(segment.segmentId());
-            }
-        }
-        return segmentStateReader.readAll(ids);
-    }
-
-    // ------------------------------------------------------------------
     // 신뢰도
     // ------------------------------------------------------------------
 
-    /** 가장 약한 구간이 전체를 정한다. 도보는 항상 경로 API 라서 판정에서 뺀다. */
+    /** 가장 약한 구간이 전체를 정한다. 도보·미매핑 step 은 판정에서 뺀다. */
     private static Confidence confidenceOf(List<SegmentEstimate> results) {
         boolean anyRouteApi = false;
         boolean anyBaseline = false;
         for (SegmentEstimate estimate : results) {
             if (estimate.segmentId() == null) {
-                continue;   // 도보 — 경로 API 가 정해진 출처다
+                continue;   // 도보·미매핑 — 경로 API 가 정해진 출처다
             }
-            if (estimate.source() == EstimateSource.ROUTE_API) {
+            if (estimate.source() == EstimateSource.ROUTE_API
+                    || estimate.source() == EstimateSource.ROUTE_API_SPLIT) {
                 anyRouteApi = true;
             } else if (estimate.source() == EstimateSource.BASELINE) {
                 anyBaseline = true;
@@ -306,6 +376,6 @@ public class TravelTimeEstimator {
         if (first == null) {
             return second;
         }
-        return first + " " + second;
+        return first + " · " + second;
     }
 }

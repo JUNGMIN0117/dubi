@@ -50,6 +50,7 @@ public class DatabaseCleaner {
      *   <li>{@code seoul_*}, {@code transit_alias} — 서울 교통 정적 마스터. 한 번 적재하면
      *       테스트 전체가 공유한다. 매번 지우면 적재 비용이 테스트 수만큼 든다</li>
      *   <li>{@code provider_segment_mapping} — 위 마스터로 만든 매핑 캐시라 같이 남긴다</li>
+     *   <li>{@code metropolitan_bus_*} — 수도권 버스 마스터·캐시(2026-09-10 합류). 같은 이유로 남긴다</li>
      * </ul>
      */
     private static final Set<String> KEPT = Set.of(
@@ -58,7 +59,9 @@ public class DatabaseCleaner {
             "transit_alias",
             "seoul_bus_route", "seoul_bus_route_stop", "seoul_bus_stop",
             "seoul_subway_line", "seoul_subway_line_station", "seoul_subway_station",
-            "seoul_transit_master_version");
+            "seoul_transit_master_version",
+            "metropolitan_bus_master", "metropolitan_bus_master_active",
+            "metropolitan_bus_mapping_cache");
 
     @PersistenceContext
     private EntityManager em;

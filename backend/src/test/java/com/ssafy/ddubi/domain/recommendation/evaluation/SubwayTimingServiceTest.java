@@ -15,6 +15,37 @@ import static org.mockito.Mockito.*;
 
 /** 합성 시간표의 손계산, 놓친 환승, ID 오매칭, stale, 중복 대기 합산을 실제 Redis 없이 검증한다. */
 class SubwayTimingServiceTest {
+    @Test void timetableOnlyUsesCanonicalIdsWithoutInventingRealtimeTrainAndKeepsEndpointNulls() {
+        var trip = new SubwayTimetable.Trip("static-train", "L", null, "FORWARD", null,
+                null, null, null, null, null, LocalDate.parse("2026-09-10"), List.of(
+                new SubwayTimetable.Call("A",null,null,now.plusSeconds(60),true),
+                new SubwayTimetable.Call("B",null,now.plusSeconds(300),null,true)));
+        var result = estimate(service(false,trip),now);
+        assertThat(result.waitSeconds()).isEqualTo(60);
+        assertThat(result.rideSeconds()).isEqualTo(240);
+        assertThat(result.reasons()).contains("SUBWAY_REALTIME_TRAIN_CROSSWALK_MISSING");
+        verifyNoInteractions(redis);
+    }
+
+    @Test void timetableOnlyFindsLaterLapAfterFirstLapWasMissed() {
+        var trip = new SubwayTimetable.Trip("loop", "L", null, "FORWARD", null,
+                null,null,null,null,null,LocalDate.parse("2026-09-10"),List.of(
+                call("A",60,true),call("B",120,true),call("A",180,true),call("B",240,true)));
+        var result = estimate(service(false,trip),now.plusSeconds(61));
+        assertThat(result.boardingAt()).isEqualTo(now.plusSeconds(180));
+        assertThat(result.arrivalAt()).isEqualTo(now.plusSeconds(240));
+        verifyNoInteractions(redis);
+    }
+
+    @Test void partialTrainCrosswalkAndMissingIntermediateTimeAreRejected() {
+        assertThatThrownBy(() -> new SubwayTimetable(data(new SubwayTimetable.Trip("bad", "L", "1002", "FORWARD", null,
+                "내선",null,null,null,null,LocalDate.parse("2026-09-10"),List.of(call("A",60,true),call("B",120,true))))))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new SubwayTimetable(data(trip("T1",call("A",60,true),
+                new SubwayTimetable.Call("B","PB",null,now.plusSeconds(100),true),call("C",120,true)))))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     final Instant now = Instant.parse("2026-09-10T00:00:00Z");
     final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     final StringRedisTemplate redis = mock(StringRedisTemplate.class);

@@ -2,14 +2,17 @@
 
 2026-09-10. 지하철은 ML을 호출하지 않는다. `SubwayTimingService`가 시간표, 현재 도착예측,
 열차 위치를 사용하고 `MlRoutePreview`가 버스 ML·도보와 같은 타임라인에서 비교한다.
-운영 데이터 연결 완료를 뜻하지 않는다. 저장소에는 실제 운행일별 시간표 artifact가 없으며 기본값은 미설정이다.
+공식 CSV의 날짜별 변환 도구와 로컬 Replay가 있다. 기본 시간표 경로는 미설정이며,
+실시간 열차 대응표와 운영 유효성 확인을 완료했다는 의미는 아니다.
+실행 방법은 [시간표 생성·실제 응답 검증](../../backend/tools/transit-timing/README.md)을 따른다.
 
 ## 계산 흐름
 
 1. 카카오 SUBWAY step의 EXACT 매핑, 마스터 버전, canonical 노선·역·방향과 provider ID를 확인한다.
 2. 정규화된 시간표에서 같은 경로를 지나며 승차·하차역에 모두 정차하는 열차를 찾는다.
    급행의 무정차역, 다른 방향, 중간 종착, 버전 불일치는 선택하지 않는다.
-3. 알려진 열차 ID로 Spark Redis 도착·위치를 MGET한다. KEYS/SCAN과 외부 API 재호출은 없다.
+3. 검증된 열차 ID가 있으면 Spark Redis 도착·위치를 MGET한다. 없으면 시간표만 사용하고
+   `SUBWAY_REALTIME_TRAIN_CROSSWALK_MISSING`을 남긴다. KEYS/SCAN과 외부 API 재호출은 없다.
 4. 승강장 도착 전에 떠난 열차는 제외하고 다음 열차를 검토한다. 후보 중 하차역에 가장 일찍 도착하는 열차를 선택한다.
 5. 다음 도보·환승·탑승 계산은 앞 구간의 예상 도착시각부터 이어진다.
 
@@ -47,16 +50,23 @@ Spring property `ddubi.subway-timing.timetable-path`로 로컬 JSON 경로를 �
 | validFrom / validUntil | 운행 적용 시작/끝(끝 제외), 날짜를 포함한 ISO 8601 절대시각 |
 | trips[].key / serviceDate | 운행 식별자와 KST 운행일. 평일/주말/공휴일 시간표를 실제 날짜로 전개 |
 | lineId / direction | canonical 마스터 노선 ID와 방향 |
-| providerLineId / trainId | 실시간 API 노선 ID와 해당 운행 열차 ID. 시간표 TRAIN_NO와 동일하다고 추측 금지 |
+| providerLineId / trainId | 실시간 API 노선 ID와 해당 운행 열차 ID. 시간표 TRAIN_NO와 동일하다고 추측 금지. 정적 계산은 null 허용 |
 | arrivalDirection / positionDirection | 각각의 API에서 확인한 원문 방향 코드. 서로 같은 코드라고 추측 금지 |
 | arrivalDestination / positionDestination / trainType | 각각의 API 원문 행선지와 도착 API의 열차 종류 |
-| calls[].stationId / providerStationId | 정적 역 ID와 검증된 실시간 역 ID |
-| calls[].arrivalAt / departureAt / stops | 실제 날짜가 포함된 예정시각, 정차 여부. 통과역도 경로 순서에 포함 |
+| calls[].stationId / providerStationId | 정적 역 ID와 검증된 실시간 역 ID. 정적 계산은 providerStationId=null 허용 |
+| calls[].arrivalAt / departureAt / stops | 실제 날짜가 포함된 예정시각, 정차 여부. 첫 역 도착/끝 역 출발만 null 허용 |
+| limitations | 원천 커버리지·최신성·운행일 선택의 제약. estimate.reasons에도 전달 |
 
-모든 call은 순서대로 주어지며, 이전 출발보다 다음 도착이 늦어야 한다. 동일 역 재방문 및
-동일 운행일·provider 노선·열차 ID 중복은 현재 입력에서 지원하지 않는다. 반복 운행을 임의로 같은 열차로 매칭하지 않는다.
+모든 call은 순서대로 주어지며, 이전 출발보다 다음 도착이 늦어야 한다.
+정적 시간표는 같은 역의 재방문을 절대시각으로 구별해 다음 회차까지 검색한다.
+실시간 대응이 있는 trip은 동일 역 재방문 및 동일 운행일·provider 노선·열차 ID 중복을 거절한다.
+위치 스냅샷만으로 어느 회차인지 추측하지 않는다.
+`trainId=null`이면 arrivalDirection/positionDirection/arrivalDestination/positionDestination/trainType도
+모두 null이어야 한다. 부분 대응을 실시간 조회에 사용하지 않는다. `trainId`가 있으면 모든 provider ID와 원문 식별값이 필수다.
+첫 역 도착 결측은 0초 정차로 채우지 않으며 해당 역의 실시간 도착 보정은 적용하지 않는다.
 운행일 00:00부터 다음날 06:00 미만까지 지원하므로 24시 이후 자료는 다음날 날짜로 변환한다.
-최대 256개 열차, 한 평가 최대 1024개 Redis 키를 넘으면 일부만 평가하지 않고 `SUBWAY_LOOKUP_BUDGET_EXCEEDED`로 반환한다.
+최대 2048개 탑승 후보, 한 평가 최대 1024개 Redis 키를 넘으면 일부만 평가하지 않고 `SUBWAY_LOOKUP_BUDGET_EXCEEDED`로 반환한다.
+실제 일일 운행은 256회를 넘을 수 있어 정적 후보와 외부 조회 예산을 구분한다. 정적 시간표는 Redis 키를 소비하지 않는다.
 
 다음은 **실제 열차가 아닌 합성 예시**다. 테스트/형식 설명용이며 운영 기본값으로 배포하지 않는다.
 
@@ -118,5 +128,5 @@ true여도 `카카오 총시간 - step 합 != 0`이면 합계를 교체하지 �
 09:00 승강장 도착 → 09:01 탑승 → 09:05 하차라면 waitSeconds=60, rideSeconds=240,
 arrivalAt=09:05다. 환승 도보가 45초라면 다음 승강장 진입은 09:05:45이며 그 이전 열차는 선택하지 않는다.
 
-운영 연결 전 남은 작업: 공식 시간표의 날짜별 전개와 열차 ID crosswalk 공급, 실제 카카오 시간 분해 검증,
+운영 연결 전 남은 작업: 최신 시간표·운행 달력 검증 및 정기 배포, 실시간 열차 ID crosswalk 공급, 실제 카카오 시간 분해 확인,
 API 한도 내 수집 주기 조정(현재 주기가 120초 신선도보다 길면 대부분 시간표 fallback), 실제 경로로 정확도/호출량 검증.

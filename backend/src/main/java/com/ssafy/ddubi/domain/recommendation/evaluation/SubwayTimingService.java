@@ -61,7 +61,7 @@ public class SubwayTimingService {
 
     /**
      * 1. 버전·경로·정차역을 검증 → 2. 알려진 열차의 Redis 키를 MGET → 3. 탑승 가능 후보의 최소 도착 선택.
-     * 역/열차 ID를 찾으려고 Redis KEYS/SCAN을 실행하지 않는다. 256 후보/평가 1024키 초과는
+     * 역/열차 ID를 찾으려고 Redis KEYS/SCAN을 실행하지 않는다. 2048 시간표 후보/평가 1024키 초과는
      * 일부 열차만 보고 최적이라고 하지 않고 명시적으로 계산을 포기한다.
      */
     public Estimate estimate(RouteSegment segment, Instant asOf, Instant platformAt, Session session) {
@@ -75,17 +75,19 @@ public class SubwayTimingService {
                 || !platformAt.isBefore(data.validUntil())) return Estimate.missing("SUBWAY_TIMETABLE_OUTSIDE_VALIDITY");
         var matches = new ArrayList<Match>();
         for (var trip : data.trips()) {
-            Match match = match(trip, mapping.segments());
+            var tripMatches = matches(trip, mapping.segments());
             // 다음 24시간의 실제 운행표만 검토한다. 지난 열차도 최신 지연 도착을 확인할 수 있게 30분 포함한다.
-            if (match != null) {
+            for (Match match : tripMatches) {
                 Instant departure = trip.calls().get(match.from()).departureAt();
                 if (!departure.isBefore(platformAt.minusSeconds(1800)) && departure.isBefore(platformAt.plusSeconds(86400))) matches.add(match);
             }
         }
         if (matches.isEmpty()) return Estimate.missing("SUBWAY_NO_MATCHING_TRIP");
-        if (matches.size() > 256) return Estimate.missing("SUBWAY_LOOKUP_BUDGET_EXCEEDED");
+        if (matches.size() > 2048) return Estimate.missing("SUBWAY_LOOKUP_BUDGET_EXCEEDED");
         var keys = new LinkedHashSet<String>();
-        for (var m : matches) { keys.add(arrivalKey(m)); keys.add(positionKey(m.trip())); }
+        // 실제 평일 전체 시간표는 한 역에 256회 이상 운행한다. 정적 계산 예산과 외부 조회 예산을 구분한다.
+        // 검증된 열차 crosswalk가 없는 운행은 Redis에 null/정적 열차번호 키를 조회하지 않는다.
+        for (var m : matches) if (m.trip().realtimeVerified()) { keys.add(arrivalKey(m)); keys.add(positionKey(m.trip())); }
         var missing = keys.stream().filter(k -> !session.values.containsKey(k)).toList();
         if (session.values.size() + missing.size() > 1024) return Estimate.missing("SUBWAY_LOOKUP_BUDGET_EXCEEDED");
         if (!missing.isEmpty() && !session.unavailable) {
@@ -102,10 +104,15 @@ public class SubwayTimingService {
             var trip = m.trip();
             var from = trip.calls().get(m.from());
             var to = trip.calls().get(m.to());
-            var reasons = new ArrayList<String>();
+            var reasons = new ArrayList<String>(data.limitations());
             if (session.unavailable) reasons.add("SUBWAY_REDIS_UNAVAILABLE");
-            Observation arrival = read(session.values.get(arrivalKey(m)), "subway.arrival", trip, from.providerStationId(), asOf);
-            Observation position = read(session.values.get(positionKey(trip)), "subway.position", trip, null, asOf);
+            if (!trip.realtimeVerified()) reasons.add("SUBWAY_REALTIME_TRAIN_CROSSWALK_MISSING");
+            Observation arrival = trip.realtimeVerified()
+                    ? read(session.values.get(arrivalKey(m)), "subway.arrival", trip, from.providerStationId(), asOf)
+                    : new Observation(null, null, null, "TRAIN_CROSSWALK_MISSING");
+            Observation position = trip.realtimeVerified()
+                    ? read(session.values.get(positionKey(trip)), "subway.position", trip, null, asOf)
+                    : new Observation(null, null, null, "TRAIN_CROSSWALK_MISSING");
             String positionEvent = null;
             if (position.value() != null) {
                 var obs = position.value().path("observation");
@@ -137,7 +144,8 @@ public class SubwayTimingService {
                     rejected.add("SUBWAY_ARRIVAL_SECONDS_UNUSABLE"); continue;
                 }
                 Instant prediction = arrival.at().plusSeconds(seconds.asInt());
-                if (platformAt.isBefore(arrival.until()) && prediction.isBefore(arrival.until())) {
+                if (from.arrivalAt() == null) reasons.add("SUBWAY_BOARDING_DWELL_UNKNOWN");
+                else if (platformAt.isBefore(arrival.until()) && prediction.isBefore(arrival.until())) {
                     boarding = prediction;
                     ride = Duration.between(from.arrivalAt(), to.arrivalAt()).getSeconds();
                     source = "SUBWAY_REALTIME_ARRIVAL_AND_TIMETABLE";
@@ -158,22 +166,25 @@ public class SubwayTimingService {
         return estimates.stream().min(Comparator.comparing(Estimate::arrivalAt).thenComparing(Estimate::tripKey)).orElseThrow();
     }
 
-    private Match match(SubwayTimetable.Trip t, List<MappedTransitSegment> edges) {
+    private List<Match> matches(SubwayTimetable.Trip t, List<MappedTransitSegment> edges) {
+        var result = new ArrayList<Match>();
         var first = edges.get(0);
-        if (!t.lineId().equals(first.routeId()) || !t.providerLineId().equals(first.realtimeRouteId())
-                || !t.direction().equals(first.direction())) return null;
+        if (!t.lineId().equals(first.routeId()) || (t.realtimeVerified() && !t.providerLineId().equals(first.realtimeRouteId()))
+                || !t.direction().equals(first.direction())) return result;
         for (int start = 0; start + edges.size() < t.calls().size(); start++) {
             boolean valid = true;
             for (int i = 0; i < edges.size(); i++) {
                 var e = edges.get(i); var a = t.calls().get(start + i); var b = t.calls().get(start + i + 1);
                 if (e.mode() != TransportMode.SUBWAY || e.sequence() != i + 1 || !t.lineId().equals(e.routeId())
-                        || !t.providerLineId().equals(e.realtimeRouteId()) || !t.direction().equals(e.direction())
+                        || !t.direction().equals(e.direction())
                         || !a.stationId().equals(e.fromNodeId()) || !b.stationId().equals(e.toNodeId())
-                        || !a.providerStationId().equals(e.fromRealtimeNodeId()) || !b.providerStationId().equals(e.toRealtimeNodeId())) { valid = false; break; }
+                        || (t.realtimeVerified() && (!t.providerLineId().equals(e.realtimeRouteId())
+                        || !a.providerStationId().equals(e.fromRealtimeNodeId()) || !b.providerStationId().equals(e.toRealtimeNodeId())))) { valid = false; break; }
             }
-            if (valid && t.calls().get(start).stops() && t.calls().get(start + edges.size()).stops()) return new Match(t, start, start + edges.size());
+            // 순환선은 첫 방문을 놓쳐도 이후 회차의 실제 시각을 평가한다. 회차별 시각을 현재로 밀지 않는다.
+            if (valid && t.calls().get(start).stops() && t.calls().get(start + edges.size()).stops()) result.add(new Match(t, start, start + edges.size()));
         }
-        return null;
+        return result;
     }
 
     private Observation read(String raw, String type, SubwayTimetable.Trip trip, String station, Instant asOf) {

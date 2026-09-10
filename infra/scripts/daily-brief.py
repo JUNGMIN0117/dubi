@@ -161,6 +161,20 @@ def _errors(lines):
     return out
 
 
+REPO = os.path.expanduser("~/S15P21E202")
+
+
+def _is_ancestor(a, b):
+    """a 가 b 의 조상인가 (서버2 저장소 기준, 두 커밋은 develop 이력이라 둘 다 있다)."""
+    r = subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", a, b], capture_output=True, text=True, timeout=10)
+    return r.returncode == 0
+
+
+def _changed_paths(old, new):
+    out = _run(["git", "-C", REPO, "diff", "--name-only", old, new]) or ""
+    return [l.strip() for l in out.splitlines() if l.strip()]
+
+
 def cert_days_left(enddate):
     """openssl 의 'Dec  1 03:12:44 2026 GMT' 를 남은 일수로."""
     try:
@@ -276,8 +290,20 @@ def build(env):
             pass
     deploy1 = (rem.get("deploy") or ["?"])[0] if rem else "조회 실패"
     deploy2 = (loc.get("deploy") or ["?"])[0]
+    # 두 서버는 각자 필요할 때만 배포하므로 커밋이 다른 것 자체는 정상이다. 뒤처진 서버에 영향을 주는 파일이
+    # 그 사이에 바뀌었을 때만 "배포 필요" 로 본다 (서버1: infra·collector·archiver·sparkjobs·CI, 서버2: infra·backend·CI)
+    deploy_note = ""
     if rem and deploy1.split()[0] != deploy2.split()[0]:
-        w("운영", "두 서버 커밋 다름")
+        h1, h2 = deploy1.split()[0], deploy2.split()[0]
+        behind, ahead = (("서버1", h1, h2) if _is_ancestor(h1, h2) else ("서버2", h2, h1))
+        paths = ("infra/", "collector/", "archiver/", "sparkjobs/", ".gitlab-ci.yml") if behind == "서버1" else ("infra/", "backend/", ".gitlab-ci.yml")
+        changed = _changed_paths(h1 if behind == "서버1" else h2, h2 if behind == "서버1" else h1)
+        hit = sorted({c.split("/")[0] + ("/" if "/" in c else "") for c in changed if c.startswith(paths)})
+        if hit:
+            w("운영", f"{behind} 배포 필요({', '.join(hit)} 변경)")
+            deploy_note = f" — {behind} 뒤처짐, 관련 변경 있음"
+        else:
+            deploy_note = f" — {behind} 뒤처짐, 관련 변경 없음(정상)"
     redis_nottl = None
     if loc.get("redis_nottl"):
         try:
@@ -344,7 +370,7 @@ def build(env):
     disk_txt = " / ".join(f"{v:.0f}%" for _, v in sorted(disk.items()))
     mem_txt = " / ".join(f"{v:.0f}%" for _, v in sorted(mem.items()))
     same = rem and deploy1.split()[0] == deploy2.split()[0]
-    deploy_txt = f"{deploy1} (두 서버 동일)" if same else f"서버1 {deploy1} · 서버2 {deploy2}"
+    deploy_txt = f"{deploy1} (두 서버 동일)" if same else f"서버1 {deploy1} · 서버2 {deploy2}{deploy_note}"
     backup_txt = backup.split(" OK: ")[-1].split("/")[-1] if " OK: " in backup else backup
 
     rows = [

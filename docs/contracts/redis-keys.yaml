@@ -51,7 +51,19 @@ keys:
     owner: spark
     description: >-
       노선·정류장별 다음 두 차량의 도착예정 초와 메시지. 도착예정값은 현재 관측이지
-      실제 구간 운행시간 학습 정답이 아니며, 정적 마스터 crosswalk 적용 전 provider ID다.
+      실제 구간 운행시간 학습 정답이 아니다. 유일한 진입 edge 연결은 ARRIVAL_TARGET_INCOMING_EDGE이며 차량 위치를 뜻하지 않는다.
+
+  regionalBusPositionLatest:
+    pattern: "transit:latest:bus-position:{providerNamespace}:{providerRouteId}:{providerVehicleId}"
+    ttlSeconds: 120
+    owner: spark
+    description: GBIS·INCHEON_PUBLIC_CSV의 출처 ID 충돌 방지용 키. 해당 지역 수집기 구현 완료를 의미하지 않는다.
+
+  regionalBusArrivalLatest:
+    pattern: "transit:latest:bus-arrival:{providerNamespace}:{providerRouteId}:{providerStopId}"
+    ttlSeconds: 120
+    owner: spark
+    description: 서울은 기존 키를 유지한다. 값의 canonicalMapping에 대응표 버전·SHA·state·scope·reason을 보존한다.
 
   subwayPositionLatest:
     pattern: "transit:latest:subway-position:{providerLineId}:{providerTrainId}"
@@ -178,12 +190,12 @@ keys:
 # route_segment.segment_id, baseline_serving.segment_id, segment:status 키,
 # 수집기의 이벤트→구간 매핑이 전부 같은 체계를 써야 성립한다.
 #
-# 제안 형식 (확정 전, 코드 하드코딩 금지 — SegmentIdResolver 로 분리):
+# 확정 형식 (아래 segmentId 계약과 Factory·배포 대응표로 관리):
 #   BUS:{노선ID}:{정류장A}:{정류장B}
 #   SUB:{호선}:{역A}:{역B}
 #
 # 미해결:
-#   - 최초 채번 주체 (제안: 백엔드가 외부 API 응답을 분해하며 생성)
+#   - 최초 채번 주체: Backend Factory, Collector/Spark는 같은 정적 대응표 사용
 #   - WALK 구간 처리 (현재 segment_id = NULL. 도보 가중치를 백엔드가 직접
 #     계산할지, Spark가 도보용 키도 만들지 확정 필요) — B-1-b
 #
@@ -225,12 +237,12 @@ keys:
       인증을 마친 이메일에 주는 가입 통행증. 가입이 성립하면 소비(삭제)한다.
       한 번 인증으로 계정을 여러 개 만들지 못하게 한다.
 segmentId:
-  contractVersion: canonical-adjacent-v1
-  status: BACKEND_IMPLEMENTED_PIPELINE_DISTRIBUTION_PENDING
-  namespace: SEOUL_TRANSIT_STATIC_MASTER
+  contractVersion: canonical-adjacent-v2
+  status: VERSIONED_ARTIFACT_IMPLEMENTED_DEPLOYMENT_REQUIRED
+  namespace: METROPOLITAN_BUS_AND_SEOUL_SUBWAY
   issuer: backend
   issuerDescription: >-
-    Backend가 카카오 BUS/SUBWAY step을 활성 서울 정적 마스터에 EXACT로 매핑한 뒤,
+    Backend가 BUS는 수도권, SUBWAY는 서울 정적 마스터에서 확정한 뒤,
     승차~하차 경로를 공식 인접 노드 쌍으로 분해하며 최초 발급한다.
 
   # DB·이벤트 계약은 향후 namespace 확장을 고려해 180자를 허용한다.
@@ -247,8 +259,10 @@ segmentId:
     BUS:
       format: 'BUS:{staticRouteId}:{staticFromStopId}:{staticToStopId}'
       example: 'BUS:100100609:123456:123789'
-      routeIdSource: seoul_bus_route.route_id
-      nodeIdSource: seoul_bus_stop.stop_id
+      routeIdSource: metropolitan_bus_master.artifact.routes.namespace+routeId
+      nodeIdSource: metropolitan_bus_master.artifact.routes.stops.namespace+stopId
+      regionalExample: 'BUS:GBIS.1:GBIS.10:GBIS.11'
+      namespaceRule: 'SEOUL_BUS는 원본 ID 유지. GBIS·INCHEON_PUBLIC_CSV는 각 구성요소에 namespace. 접두사를 붙인다.'
     SUBWAY:
       format: 'SUB:{staticSubwayId}:{staticFromStationId}:{staticToStationId}'
       example: 'SUB:2:0222:0223'
@@ -263,7 +277,7 @@ segmentId:
     - A→B와 B→A는 서로 다른 segment_id다.
     - 카카오 노선명·정류장명·역명은 ID 구성요소로 사용하지 않는다.
     - 실시간 API의 subwayId·statnId는 ID 구성요소로 사용하지 않고 별도 crosswalk로 관리한다.
-    - EXACT가 아닌 PARTIAL·AMBIGUOUS·UNMAPPED에는 segment_id를 발급하지 않는다.
+    - 미확정 경로에는 ID를 발급하지 않는다. 다중 대안 PARTIAL은 CONFIRMED+VERIFIED인 후보를 명시적으로 선택한 후 그 경로만 발급한다.
     - 여러 정거장을 지나는 provider step은 하나의 집계 ID가 아니라 인접 segment_id 목록으로 저장한다.
     - masterDataVersion과 mappingPolicyVersion은 재현 메타데이터이며 segment_id 문자열에는 넣지 않는다.
 
@@ -278,14 +292,16 @@ segmentId:
       - events/city-event.schema.json#segmentIds
     redis: 'segment:status:{segmentId}'
 
+  pipelineDistribution:
+    artifact: metropolitan-bus-v6.crosswalk.json.gz
+    schemaVersion: 1
+    configuration: [BUS_CROSSWALK_PATH, BUS_CROSSWALK_SHA256]
+    lifecycle: 같은 마스터에서 생성한 파일·SHA를 Collector/Spark 기동 시 고정하고 함께 재시작한다.
+    contract: metropolitan-segment-integration.md
   unresolved:
-    pipelineDistribution: >-
-      Collector·Spark가 동일한 활성 topology와 정적↔실시간 crosswalk 버전을 받는
-      인증 API·versioned artifact·compacted Kafka topic 중 하나를 팀 계약으로 확정해야 한다.
-      이 경계가 구현되기 전에는 Backend의 로컬 EXACT를 end-to-end 실시간 매핑 완료로 보지 않는다.
-    regionalExpansion: >-
-      현재 namespace는 서울 마스터 전용이다. 경기·인천 등 다른 기관을 포함하기 전에
-      기관 namespace 또는 충돌 없는 canonical ID 규칙을 새 계약 버전으로 정의해야 한다.
+    vehiclePosition: 검증된 from/to 정류장 ID가 없는 위치 관측은 구간 ID를 추측하지 않는다.
+    trainingCrosswalk: 모델 학습 ID 대응·전처리·bundle의 운영 승인은 별도 검증이 필요하다.
+    deployment: 코드 구현과 운영 배포는 구분한다. V4·마스터 적재·대응표 배포가 필요하다.
 
 units:
   baselineServingPercentiles: seconds

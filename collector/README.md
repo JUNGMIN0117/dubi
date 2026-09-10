@@ -232,5 +232,13 @@ python -m pytest -q -p no:cacheprovider
 - 여러 수집기의 SQLite 동시 접근
 - 버스 100개 노선 제한과 수집 주기
 
-현재 기준 전체 테스트는 `65 passed, 1 skipped`다.
+수도권 대응표 경계는 `tests/test_bus_crosswalk.py`에서 출처 충돌·모호한 진입 구간·실제 배포 파일을 검증한다.
 
+## 버스 공통 ID 대응표
+
+`BUS_CROSSWALK_PATH`와 manifest의 `BUS_CROSSWALK_SHA256`을 설정하면 버전 고정
+대응표를 한 번 검증하고 캐시한다. Spark에도 같은 파일·SHA를 배포하고 함께 재시작한다.
+미설정 상태에서도 원본 관측은 보존하되 BUS `segmentIds`는 비우고 payload의
+`canonicalMapping`에 사유를 남긴다. 도착 대상 정류장의 진입 edge는 차량 현재 위치가 아니다.
+위치 관측의 `sectOrd`만으로 구간을 추측하지 않는다.
+생성·배포 방법은 [마스터 안내](../backend/transit-master/README.md)를 따른다.

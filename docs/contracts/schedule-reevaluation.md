@@ -108,6 +108,7 @@ V5 migration은 출발 입력, nullable percentile, `schedule_evaluation` 작업
 ## 실행과 검증
 
 실행 설정과 테스트 명령은 [백엔드 실행 메모](../../backend/SCHEDULE_EVALUATION.md)를 따른다.
-2026-09-10 현재 계산·관측·경로 회귀 테스트 20개 통과. MySQL/Redis 통합 테스트 5개는 작성했지만
-로컬 Docker 엔진 연결 실패로 실행 시작 단계에서 실패했다. Flutter SDK 부재로 화면 빌드/실기기 검증은 미실행이다.
+2026-09-10 계산·관측·경로 회귀 테스트 20개 통과. 이후 로컬 Docker 연결 후 JDBC 날짜 반환 타입 오류를 수정하여
+MySQL/Redis 통합 테스트 5개와 계산 테스트 14개를 함께 재실행해 모두 통과했다. V5 적용도 테스트 DB에서 확인했다.
+Flutter SDK 부재로 화면 빌드/실기기 검증은 미실행이다.
 실제 카카오·FCM·Kafka 연동과 운영 주기/호출량 검증도 배포 전에 필요하다.

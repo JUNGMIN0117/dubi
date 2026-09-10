@@ -60,12 +60,12 @@ public class ScheduleEvaluationStore {
         jdbc.update("INSERT IGNORE INTO schedule_evaluation(schedule_id,next_check_at) VALUES (?,?)", scheduleId, ts(now));
         var state = jdbc.queryForMap("SELECT * FROM schedule_evaluation WHERE schedule_id=? FOR UPDATE", scheduleId);
         if (Boolean.TRUE.equals(state.get("stopped"))) throw new BusinessException(ErrorCode.INVALID_STATE, "출발 확인으로 감시가 종료됐습니다.");
-        Timestamp until = (Timestamp) state.get("lease_until");
-        if (until != null && until.toLocalDateTime().isAfter(local(now)))
+        LocalDateTime until = databaseTime(state.get("lease_until"));
+        if (until != null && until.isAfter(local(now)))
             throw new BusinessException(ErrorCode.INVALID_STATE, "이 일정은 이미 계산 중입니다.");
         String token = UUID.randomUUID().toString();
         jdbc.update("UPDATE schedule_evaluation SET lease_token=?,lease_until=? WHERE schedule_id=?", token, ts(now.plusSeconds(120)), scheduleId);
-        boolean sameInput = state.get("input_updated_at") instanceof Timestamp t && t.toLocalDateTime().equals(s.getUpdatedAt());
+        boolean sameInput = Objects.equals(databaseTime(state.get("input_updated_at")), s.getUpdatedAt());
         Cache cache = sameInput ? read((String) state.get("candidates_json"), Cache.class) : null;
         return new Job(scheduleId, s.getUser().getId(), s.getUpdatedAt(), instant(s.getPlannedDepartAt()), instant(s.getArriveBy()),
                 new Coordinate(s.getOrigin().getLng().doubleValue(), s.getOrigin().getLat().doubleValue()),
@@ -152,15 +152,14 @@ public class ScheduleEvaluationStore {
         if (!rows.isEmpty() && rows.get(0).get("last_error") != null) {
             response.put("state", "FAILED"); response.put("lastError", rows.get(0).get("last_error")); return response;
         }
-        if (rows.isEmpty() || !(rows.get(0).get("input_updated_at") instanceof Timestamp version)
-                || !version.toLocalDateTime().equals(schedule.getUpdatedAt())) { response.put("state", "PENDING"); return response; }
+        if (rows.isEmpty() || !Objects.equals(databaseTime(rows.get(0).get("input_updated_at")), schedule.getUpdatedAt())) { response.put("state", "PENDING"); return response; }
         var row = rows.get(0);
         response.put("state", Boolean.TRUE.equals(row.get("stopped")) ? "STOPPED" : row.get("last_error") != null ? "FAILED"
                 : row.get("result_json") == null ? "PENDING"
-                : !((Timestamp) row.get("next_check_at")).toLocalDateTime().isAfter(local(Instant.now())) ? "STALE" : "READY");
+                : !databaseTime(row.get("next_check_at")).isAfter(local(Instant.now())) ? "STALE" : "READY");
         response.put("lastError", row.get("last_error"));
         response.put("result", read((String) row.get("result_json"), ScheduleEvaluationWorkflow.Outcome.class));
-        response.put("nextCheckAt", ((Timestamp) row.get("next_check_at")).toLocalDateTime().atZone(KST).toOffsetDateTime());
+        response.put("nextCheckAt", databaseTime(row.get("next_check_at")).atZone(KST).toOffsetDateTime());
         return response;
     }
 
@@ -200,7 +199,7 @@ public class ScheduleEvaluationStore {
         var row = pending.get(0);
         var result = read((String) row.get("result_json"), ScheduleEvaluationWorkflow.Outcome.class);
         if (result == null || !result.evaluationId().equals(evaluationId) || result.suggestion().proposed() == null
-                || !(row.get("input_updated_at") instanceof Timestamp version) || !version.toLocalDateTime().equals(s.getUpdatedAt())
+                || !Objects.equals(databaseTime(row.get("input_updated_at")), s.getUpdatedAt())
                 || row.get("last_error") != null || Boolean.TRUE.equals(row.get("stopped")) || s.getStatus() != ScheduleStatus.UPCOMING
                 || ((Number) row.get("event_revision")).longValue() != result.eventRevision()
                 || result.suggestion().proposed().departureAt().isBefore(now) || result.checkedAt().plusSeconds(60).isBefore(now))
@@ -228,6 +227,17 @@ public class ScheduleEvaluationStore {
     private void release(Job job, Instant now) { jdbc.update("UPDATE schedule_evaluation SET lease_token=NULL,lease_until=NULL,next_check_at=? WHERE schedule_id=? AND lease_token=?", ts(now), job.scheduleId(), job.token()); }
     public String write(Object value) { try { return json.writeValueAsString(value); } catch (Exception e) { throw new IllegalStateException("평가 직렬화 실패"); } }
     public <T> T read(String value, Class<T> type) { if (value == null) return null; try { return json.readValue(value, type); } catch (Exception e) { throw new IllegalStateException("저장 평가 형식 불일치"); } }
+    /**
+     * MySQL DATETIME의 JDBC getObject 결과를 KST 업무시각으로 통일한다. Connector/J는
+     * LocalDateTime을 반환할 수 있고 다른 JDBC 경로는 Timestamp를 반환한다. 시간대를 재해석하거나
+     * 정밀도를 잘라 입력 버전을 바꾸지 않는다. null은 미평가 상태이고 알 수 없는 타입은 실패시킨다.
+     */
+    static LocalDateTime databaseTime(Object value) {
+        if (value == null) return null;
+        if (value instanceof LocalDateTime time) return time;
+        if (value instanceof Timestamp time) return time.toLocalDateTime();
+        throw new IllegalStateException("평가 DB 시각 타입을 확인할 수 없습니다.");
+    }
     static Instant instant(LocalDateTime value) { return value.atZone(KST).toInstant(); }
     static LocalDateTime local(Instant value) { return LocalDateTime.ofInstant(value, KST); }
     static Timestamp ts(Instant value) { return Timestamp.valueOf(local(value)); }

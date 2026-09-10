@@ -17,6 +17,14 @@ public enum ErrorCode {
     /* 401 */
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
 
+    /**
+     * 계정 연동 티켓이 만료됐거나 이미 썼다.
+     *
+     * 비밀번호 불일치와 <b>구분해서</b> 준다. 화면이 달라야 하기 때문이다 — 만료면 소셜
+     * 로그인부터 다시, 불일치면 비밀번호만 다시 입력하면 된다.
+     */
+    LINK_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "연동 요청이 만료되었습니다. 소셜 로그인부터 다시 시도해 주세요."),
+
     /* 403 */
     FORBIDDEN_RESOURCE(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
 
@@ -33,6 +41,24 @@ public enum ErrorCode {
 
     /* 409 */
     DUPLICATE_RESOURCE(HttpStatus.CONFLICT, "이미 존재하는 리소스입니다."),
+
+    /**
+     * 그 소셜 계정이 <b>다른 사용자</b>에게 이미 연결돼 있다.
+     *
+     * 연동 화면을 띄운 뒤 다른 창에서 같은 소셜을 다른 계정에 붙인 경우다. 조용히 옮기면
+     * 먼저 붙여 둔 쪽이 로그인 수단을 잃는다.
+     */
+    SOCIAL_ALREADY_LINKED(HttpStatus.CONFLICT, "이 소셜 계정은 다른 사용자에게 연결되어 있습니다."),
+
+    /**
+     * 같은 이메일의 기존 계정에 <b>비밀번호가 없다</b> — 소셜로만 가입한 계정이다.
+     *
+     * 확인할 비밀번호가 없어 소유를 증명받을 방법이 없다. 그렇다고 새 계정을 만들 수도 없다:
+     * {@code UK_USER_EMAIL} 때문에 같은 이메일로 두 번째 사용자를 만들 수 없고, 만들어진다
+     * 해도 사용자는 자기 일정이 사라진 줄 안다. 그래서 <b>기존에 쓰던 소셜로 로그인하라고
+     * 안내</b>한다. 마이페이지에서 새 소셜을 추가로 연결하면 된다.
+     */
+    ACCOUNT_LINK_UNAVAILABLE(HttpStatus.CONFLICT, "이 이메일은 다른 로그인 수단으로 가입되어 있습니다."),
     INVALID_STATE(HttpStatus.CONFLICT, "현재 상태에서는 처리할 수 없습니다."),
     STALE_RECOMMENDATION(HttpStatus.CONFLICT, "추천 결과가 최신이 아닙니다. 다시 조회해 주세요."),
 

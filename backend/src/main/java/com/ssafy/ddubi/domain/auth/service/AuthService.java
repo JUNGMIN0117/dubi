@@ -8,8 +8,10 @@ import com.ssafy.ddubi.domain.auth.dto.request.LogoutRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.OAuthLinkRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
+import com.ssafy.ddubi.domain.auth.dto.response.OAuthLoginResponse;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthUserResponse;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
 import com.ssafy.ddubi.domain.auth.entity.UserAuth;
@@ -41,8 +43,9 @@ import java.util.UUID;
  * 인증 흐름 전부. AUTH-001~005.
  *
  * 이 클래스가 지키는 도메인 규칙:
- *  - 규칙 3 계정 통합: 이메일이 계정 키. 같은 이메일로 소셜 로그인하면 user 를 새로 만들지 않고
- *    user_auth 에 provider 행만 추가한다. 카카오가 이메일을 안 주면 통합할 수 없어 별도 계정이다.
+ *  - 규칙 3 계정 연동: 이메일이 계정 키다. 같은 <b>검증된</b> 이메일로 소셜 로그인하면 계정을
+ *    새로 만들지 않지만, <b>자동으로 붙이지도 않는다</b>(2026-09-10 변경). 기존 계정의 비밀번호로
+ *    소유를 증명해야 user_auth 에 provider 행이 추가된다. 이메일이 없거나 미검증이면 별도 계정이다.
  *  - 리프레시 회전: 재발급마다 jti 를 교체하고, 옛 jti 가 다시 오면 탈취로 보고 전 기기를 폐기한다.
  */
 @Service
@@ -67,6 +70,7 @@ public class AuthService {
      * 구현체가 몇 개뿐이라 순회 비용은 무시할 수 있다.
      */
     private final List<OAuthClient> oauthClients;
+    private final AccountLinkStore accountLinkStore;
 
     public AuthService(UserRepository userRepository,
                        UserAuthRepository userAuthRepository,
@@ -76,7 +80,8 @@ public class AuthService {
                        RefreshTokenStore refreshTokenStore,
                        RevokedAccessTokenStore revokedStore,
                        EmailVerificationService emailVerificationService,
-                       List<OAuthClient> clients) {
+                       List<OAuthClient> clients,
+                       AccountLinkStore accountLinkStore) {
         this.userRepository = userRepository;
         this.userAuthRepository = userAuthRepository;
         this.deviceTokenRepository = deviceTokenRepository;
@@ -86,6 +91,7 @@ public class AuthService {
         this.revokedStore = revokedStore;
         this.emailVerificationService = emailVerificationService;
         this.oauthClients = List.copyOf(clients);
+        this.accountLinkStore = accountLinkStore;
     }
 
     private OAuthClient clientFor(AuthProvider provider) {
@@ -102,9 +108,12 @@ public class AuthService {
 
     @Transactional
     public AuthTokenResponse signupLocal(LocalSignupRequest request) {
-        // 규칙 3 의 전제: 이메일이 계정 통합의 유일한 키다. 소유가 확인되지 않은 이메일로
-        // 계정을 만들게 두면, 남의 이메일을 선점해 두었다가 그 사람이 소셜 로그인하는
-        // 순간 자동 통합으로 계정을 가져갈 수 있다.
+        // 규칙 3 의 전제: 이메일이 계정의 유일한 키다(UK_USER_EMAIL). 소유가 확인되지 않은
+        // 이메일로 계정을 만들게 두면 남의 이메일을 선점할 수 있고, 그러면 진짜 주인은
+        // 그 이메일로 영영 가입하지 못한다.
+        //
+        // 예전에는 여기에 "선점해 두면 자동 통합으로 계정을 가져간다" 는 위험도 있었다.
+        // 자동 통합을 없앴으므로(2026-09-10) 그 경로는 사라졌지만, 선점 자체를 막을 이유는 그대로다.
         emailVerificationService.requireVerified(request.email());
 
         userRepository.findByEmail(request.email()).ifPresent(existing -> {
@@ -201,37 +210,112 @@ public class AuthService {
         return loginOAuthUser(request.provider(), request.deviceId(), info);
     }
 
+    /**
+     * <h3>자동 통합을 하지 않는다 (2026-09-10 변경)</h3>
+     * 예전에는 소셜 이메일이 기존 계정과 같으면 <b>묻지 않고</b> 그 계정에 붙였다. 그러면
+     * 제공자가 이메일 소유를 잘못 확인한 순간, 남의 계정으로 그대로 들어간다. 이제는
+     * <b>기존 계정의 비밀번호로 소유를 증명</b>해야 붙는다.
+     */
     private OAuthResult loginOAuthUser(AuthProvider provider, String deviceId, OAuthUserInfo info) {
 
         // ① 이미 연결된 소셜 계정 — 그냥 로그인
         Optional<UserAuth> linked =
                 userAuthRepository.findByProviderAndProviderUserId(provider, info.providerUserId());
         if (linked.isPresent()) {
-            return new OAuthResult(issueTokens(linked.get().getUser(), deviceId, provider), false);
+            return OAuthResult.authenticated(
+                    issueTokens(linked.get().getUser(), deviceId, provider), false);
         }
 
-        // ② 같은 이메일의 기존 계정 — user 를 새로 만들지 않고 인증 수단만 추가(계정 통합)
-        if (info.hasEmail()) {
+        // ② 같은 이메일의 기존 계정 — 바로 붙이지 않고 연동 티켓을 낸다
+        if (info.hasVerifiedEmail()) {
             Optional<User> existing = userRepository.findByEmail(info.email());
             if (existing.isPresent()) {
-                User user = existing.get();
-                userAuthRepository.save(
-                        UserAuth.ofSocial(user, provider, info.providerUserId()));
-                log.info("계정 통합 — userId={} 에 {} 인증 수단 추가", user.getId(), provider);
-                return new OAuthResult(issueTokens(user, deviceId, provider), false);
+                return requireLink(existing.get(), provider, info);
             }
+        } else if (info.hasEmail()) {
+            // 값은 왔지만 제공자가 소유를 확인해 주지 않았다. 이 이메일로는 아무 판단도 하지 않고,
+            // 새 계정에 저장하지도 않는다 — 저장하면 UK_USER_EMAIL 을 차지해 진짜 주인이 막힌다.
+            log.info("{} 이메일 미검증 — 연동 판단과 저장에서 모두 제외한다", provider);
         } else {
-            // 이메일이 없으면 통합 판단 자체가 불가능하다. 별도 계정이 생기는 것은 정상 동작이다.
-            log.info("{} 로그인에 이메일이 없어 계정 통합을 건너뜀 — 별도 계정 생성", provider);
+            log.info("{} 로그인에 이메일이 없어 연동 판단을 건너뜀 — 별도 계정 생성", provider);
         }
 
         // ③ 완전 신규
         User user = userRepository.save(User.builder()
-                .email(info.email())
+                .email(info.hasVerifiedEmail() ? info.email() : null)
                 .nickname(resolveNickname(info))
                 .build());
         userAuthRepository.save(UserAuth.ofSocial(user, provider, info.providerUserId()));
-        return new OAuthResult(issueTokens(user, deviceId, provider), true);
+        return OAuthResult.authenticated(issueTokens(user, deviceId, provider), true);
+    }
+
+    /**
+     * 기존 계정을 찾았을 때. 비밀번호를 확인할 수 있으면 티켓을 내고, 없으면 안내한다.
+     *
+     * <h3>LOCAL 인증 수단이 없으면 왜 새 계정을 만들지 않나</h3>
+     * {@code UK_USER_EMAIL} 때문에 같은 이메일로 두 번째 사용자를 만들 수 없다. 이메일을
+     * 비워 만들 수는 있지만, 그러면 사용자는 <b>자기 일정이 사라진 빈 계정</b>을 보게 된다.
+     * 그래서 이미 쓰던 소셜로 들어가라고 알려 준다.
+     */
+    private OAuthResult requireLink(User user, AuthProvider provider, OAuthUserInfo info) {
+        boolean hasPassword = userAuthRepository.findLocalAuthByEmail(user.getEmail()).isPresent();
+        if (!hasPassword) {
+            List<AuthProvider> usable = userAuthRepository.findAllByUserId(user.getId()).stream()
+                    .map(UserAuth::getProvider)
+                    .toList();
+            log.info("연동 불가(비밀번호 없음) — userId={} 사용 가능 수단={}", user.getId(), usable);
+            throw new BusinessException(ErrorCode.ACCOUNT_LINK_UNAVAILABLE, String.format(
+                    "이 이메일은 %s 로 가입되어 있습니다. 해당 방식으로 로그인한 뒤 "
+                            + "마이페이지에서 %s 을(를) 연결해 주세요.", describe(usable), provider));
+        }
+
+        String linkToken = accountLinkStore.issue(user.getId(), provider, info.providerUserId());
+        log.info("계정 연동 필요 — userId={} provider={}", user.getId(), provider);
+        return OAuthResult.linkRequired(linkToken, provider, EmailMask.mask(user.getEmail()));
+    }
+
+    private static String describe(List<AuthProvider> providers) {
+        return providers.isEmpty() ? "다른 방식" : providers.stream()
+                .map(Enum::name)
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    // ------------------------------------------------------------------
+    // AUTH-003b 계정 연동 확정
+    // ------------------------------------------------------------------
+
+    /**
+     * 기존 계정의 비밀번호를 확인하고 소셜 인증 수단을 추가한다.
+     *
+     * <p>티켓은 <b>성공·실패와 무관하게</b> 소비된다({@link AccountLinkStore#consume}).
+     * 비밀번호가 틀렸다고 티켓을 살려 두면 이 화면이 비밀번호 대입 창구가 된다.
+     */
+    @Transactional
+    public AuthTokenResponse linkOAuthAccount(OAuthLinkRequest request) {
+        AccountLinkStore.Ticket ticket = accountLinkStore.consume(request.linkToken())
+                .orElseThrow(() -> new BusinessException(ErrorCode.LINK_TOKEN_INVALID));
+
+        User user = userRepository.findById(ticket.userId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.LINK_TOKEN_INVALID));
+
+        UserAuth local = userAuthRepository.findLocalAuthByEmail(user.getEmail())
+                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_LINK_UNAVAILABLE));
+
+        if (!passwordEncoder.matches(request.password(), local.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "비밀번호가 일치하지 않습니다.");
+        }
+
+        // 티켓을 받아 든 사이에 그 소셜이 다른 사용자에게 붙었을 수 있다.
+        // 조용히 옮기면 먼저 붙여 둔 쪽이 로그인 수단을 잃는다.
+        userAuthRepository.findByProviderAndProviderUserId(ticket.provider(), ticket.providerUserId())
+                .ifPresent(existing -> {
+                    throw new BusinessException(ErrorCode.SOCIAL_ALREADY_LINKED);
+                });
+
+        userAuthRepository.save(UserAuth.ofSocial(user, ticket.provider(), ticket.providerUserId()));
+        log.info("계정 연동 완료 — userId={} 에 {} 추가", user.getId(), ticket.provider());
+
+        return issueTokens(user, request.deviceId(), ticket.provider());
     }
 
     private String resolveNickname(OAuthUserInfo info) {
@@ -242,7 +326,26 @@ public class AuthService {
         return FALLBACK_NICKNAME_PREFIX + info.providerUserId();
     }
 
-    public record OAuthResult(AuthTokenResponse tokens, boolean created) {
+    /**
+     * 소셜 로그인 결과. 토큰이 나오거나, 연동을 요구하거나 둘 중 하나다.
+     *
+     * @param created 신규 가입이면 true → 컨트롤러가 201. 연동 요구일 때는 항상 false
+     */
+    public record OAuthResult(OAuthLoginResponse response, boolean created) {
+
+        static OAuthResult authenticated(AuthTokenResponse tokens, boolean created) {
+            return new OAuthResult(OAuthLoginResponse.authenticated(tokens), created);
+        }
+
+        static OAuthResult linkRequired(String linkToken, AuthProvider provider, String maskedEmail) {
+            return new OAuthResult(
+                    OAuthLoginResponse.linkRequired(linkToken, provider, maskedEmail), false);
+        }
+
+        /** 연동을 요구했는가. 컨트롤러가 상태 코드를 정할 때 쓴다. */
+        public boolean isLinkRequired() {
+            return response.status() == OAuthLoginResponse.Status.ACCOUNT_LINK_REQUIRED;
+        }
     }
 
     // ------------------------------------------------------------------

@@ -605,7 +605,9 @@ void main() {
     expect(find.byKey(const Key('webNotificationsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webNotificationMetrics')), findsOneWidget);
     expect(find.byKey(const Key('mobileNotificationsLayout')), findsNothing);
-    expect(find.text('최근 알림'), findsOneWidget);
+    expect(find.text('출발과 일정 관련 알림을 한눈에 확인해요.'), findsWidgets);
+    expect(find.byKey(const Key('notificationEmptyState')), findsOneWidget);
+    expect(find.byKey(const Key('notificationFilter-all')), findsNothing);
 
     router.go('/settings');
     await tester.pumpAndSettle();
@@ -631,6 +633,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mobileNotificationsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webNotificationsLayout')), findsNothing);
+    expect(find.byKey(const Key('notificationEmptyState')), findsOneWidget);
+    expect(find.text('아직 도착한 알림이 없어요.'), findsOneWidget);
 
     router.go('/settings');
     await tester.pumpAndSettle();

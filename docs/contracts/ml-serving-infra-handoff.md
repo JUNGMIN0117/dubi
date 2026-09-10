@@ -43,9 +43,9 @@ Dockerfile, Compose, CI/CD 변경은 인프라 담당자 작업이다. 이 문�
 ### Git으로 전달
 
 - `ml-serving/`: HTTP 서비스, requirements, 설치/검증 도구, 실제 요청·응답 예시
-- [API 상세 명세](contracts/ml-serving-http.md)
-- [OpenAPI JSON](contracts/ml-serving.openapi.json)
-- [설치·검증 README](../ml-serving/README.md)
+- [API 상세 명세](ml-serving-http.md)
+- [OpenAPI JSON](ml-serving.openapi.json)
+- [설치·검증 README](../../ml-serving/README.md)
 
 배포할 코드는 승인된 커밋으로 고정하고, 이미지 태그도 프로젝트 인프라 원칙에 맞춰 고정한다.
 현재 로컬 모델은 `20260908-v12`이며, 다른 모델 파일만 바꿔 끼우는 방식으로 배포하지 않는다.
@@ -201,7 +201,7 @@ curl 예시의 연결 2초·전체 10초는 수동 점검 예산이며 운영 SL
 
 현재 `PREVIEW`/`production_ready=false`는 의도된 모델 상태다. 인프라 설정으로 true로 바꾸거나
 readiness 성공을 운영 승인으로 취급하지 않는다. 기존 Backend 포트의 ID 조합·유효시각·승인 조건은
-[상세 API 명세](contracts/ml-serving-http.md)의 연결 범위를 따른다.
+[상세 API 명세](ml-serving-http.md)의 연결 범위를 따른다.
 
 ## 9. 인프라 확인 후 회신받을 항목
 

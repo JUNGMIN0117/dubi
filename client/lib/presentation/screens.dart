@@ -84,7 +84,7 @@ class _IntroScreenState extends State<IntroScreen> {
                 'assets/images/ttubee/${_page == 1
                     ? 'intro-bg-bus-stop.png'
                     : _page == 2
-                    ? 'intro-bg-2.png'
+                    ? 'intro-bg-plaza.png'
                     : _page == 3
                     ? 'intro-bg-skyline.png'
                     : 'intro-bg-4.png'}',
@@ -123,23 +123,7 @@ class _IntroScreenState extends State<IntroScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 22, 16, 8),
                         child: Column(
                           children: [
-                            Container(
-                              width: 70,
-                              height: 30,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDDF2EA),
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '$index / 4',
-                                  style: const TextStyle(
-                                    color: Color(0xFF078C83),
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
+                            _IntroProgressBadge(_progressLabel(index)),
                             const SizedBox(height: 12),
                             Text(
                               page['title']!,
@@ -166,19 +150,28 @@ class _IntroScreenState extends State<IntroScreen> {
                               child: Stack(
                                 fit: StackFit.expand,
                                 children: [
+                                  if (index == 2)
+                                    const Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: _IntroBench(),
+                                    ),
                                   Align(
                                     alignment: Alignment.bottomCenter,
                                     child: Padding(
                                       padding: EdgeInsets.only(
                                         bottom: index == 2
-                                            ? 148
+                                            ? 8
                                             : index == 3
                                             ? 128
                                             : 18,
                                       ),
                                       child: Image.asset(
                                         'assets/images/ttubee/${page['character']}',
-                                        height: index == 1 ? 355 : 305,
+                                        height: index == 1
+                                            ? 355
+                                            : index == 2
+                                            ? 220
+                                            : 305,
                                         fit: BoxFit.contain,
                                       ),
                                     ),
@@ -212,8 +205,7 @@ class _IntroScreenState extends State<IntroScreen> {
                     },
                   ),
                 ),
-                if (_page != 0)
-                  Padding(
+                Padding(
                     padding: const EdgeInsets.fromLTRB(24, 4, 24, 18),
                     child: SizedBox(
                       height: 48,
@@ -230,10 +222,10 @@ class _IntroScreenState extends State<IntroScreen> {
                                   margin: const EdgeInsets.symmetric(
                                     horizontal: 3,
                                   ),
-                                  width: i == _page - 1 ? 10 : 8,
+                                  width: i == _page ? 10 : 8,
                                   height: 8,
                                   decoration: BoxDecoration(
-                                    color: i == _page - 1
+                                    color: i == _page
                                         ? const Color(0xFF08A79D)
                                         : const Color(0xFFD4DAD8),
                                     borderRadius: BorderRadius.circular(8),
@@ -242,7 +234,7 @@ class _IntroScreenState extends State<IntroScreen> {
                               ),
                             ),
                           ),
-                          if (_page > 1)
+                          if (_page > 0)
                             Align(
                               alignment: Alignment.centerLeft,
                               child: _roundNav(
@@ -269,9 +261,7 @@ class _IntroScreenState extends State<IntroScreen> {
                         ],
                       ),
                     ),
-                  )
-                else
-                  const SizedBox(height: 34),
+                  ),
               ],
             ),
           ],
@@ -292,6 +282,13 @@ class _IntroScreenState extends State<IntroScreen> {
       child: Icon(icon),
     ),
   );
+
+  String _progressLabel(int index) => switch (index) {
+    0 => '1 / 4',
+    1 => '1 / 2',
+    2 => '3 / 4',
+    _ => '4 / 4',
+  };
 }
 
 class _IntroStartPage extends StatelessWidget {
@@ -301,6 +298,12 @@ class _IntroStartPage extends StatelessWidget {
   Widget build(BuildContext context) => Stack(
     fit: StackFit.expand,
     children: [
+      const Positioned(
+        top: 18,
+        left: 0,
+        right: 0,
+        child: Center(child: _IntroProgressBadge('1 / 4')),
+      ),
       const Positioned(
         top: 78,
         left: 0,
@@ -365,6 +368,30 @@ class _IntroStartPage extends StatelessWidget {
         ),
       ),
     ],
+  );
+}
+
+class _IntroProgressBadge extends StatelessWidget {
+  const _IntroProgressBadge(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 70,
+    height: 30,
+    decoration: BoxDecoration(
+      color: const Color(0xFFDDF2EA),
+      borderRadius: BorderRadius.circular(18),
+    ),
+    alignment: Alignment.center,
+    child: Text(
+      label,
+      style: const TextStyle(
+        color: Color(0xFF078C83),
+        fontWeight: FontWeight.w800,
+      ),
+    ),
   );
 }
 
@@ -510,6 +537,66 @@ class _MiniStatus extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ],
+    ),
+  );
+}
+
+class _IntroBench extends StatelessWidget {
+  const _IntroBench();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 286,
+    height: 142,
+    child: Stack(
+      children: [
+        const Positioned(left: 34, bottom: 4, child: _BenchLeg()),
+        const Positioned(right: 34, bottom: 4, child: _BenchLeg()),
+        Positioned(left: 12, right: 12, top: 28, child: _slat(24)),
+        Positioned(left: 8, right: 8, top: 58, child: _slat(22)),
+        Positioned(left: 0, right: 0, top: 88, child: _slat(18)),
+      ],
+    ),
+  );
+
+  Widget _slat(double height) => Container(
+    height: height,
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0xFFF5C98F), Color(0xFFD99A57)],
+      ),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: const Color(0x33A8642B)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x22003F3B),
+          blurRadius: 7,
+          offset: Offset(0, 4),
+        ),
+      ],
+    ),
+  );
+}
+
+class _BenchLeg extends StatelessWidget {
+  const _BenchLeg();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 17,
+    height: 47,
+    decoration: BoxDecoration(
+      color: const Color(0xFF718083),
+      borderRadius: BorderRadius.circular(5),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x25003F3B),
+          blurRadius: 5,
+          offset: Offset(0, 3),
         ),
       ],
     ),
@@ -682,7 +769,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   Positioned(
-                    bottom: 24,
+                    bottom: -12,
                     left: 0,
                     right: 0,
                     child: Image.asset(
@@ -695,12 +782,18 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             Positioned.fill(
               top: box.maxHeight * .50,
-              child: SingleChildScrollView(
+              child: Padding(
                 padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
-                child: Form(
-                  key: formKey,
-                  child: Column(
-                    children: [
+                child: LayoutBuilder(
+                  builder: (context, loginBox) => FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                      width: loginBox.maxWidth,
+                      child: Form(
+                        key: formKey,
+                        child: Column(
+                          children: [
                       TextFormField(
                         key: const Key('loginEmailField'),
                         controller: email,
@@ -887,7 +980,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-                    ],
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -950,25 +1046,31 @@ class _LoginScreenState extends State<LoginScreen> {
     VoidCallback onTap,
   ) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 8),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(28),
-      child: Container(
-        width: 48,
-        height: 48,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFE0E3E5)),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-            color: text,
+    child: Semantics(
+      label: '$label 로그인',
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          width: 48,
+          height: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFE0E3E5)),
           ),
+          child: label == 'G'
+              ? const _GoogleMark()
+              : Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: text,
+                  ),
+                ),
         ),
       ),
     ),
@@ -985,6 +1087,19 @@ class _LoginScreenState extends State<LoginScreen> {
       naverLoginService: provider == '네이버' ? widget.naverLoginService : null,
       onAuthenticated: () => _completeLogin(c),
     ),
+  );
+}
+
+class _GoogleMark extends StatelessWidget {
+  const _GoogleMark();
+
+  @override
+  Widget build(BuildContext context) => Image.asset(
+    'assets/images/auth/google_g_logo.png',
+    width: 24,
+    height: 24,
+    fit: BoxFit.contain,
+    semanticLabel: 'Google',
   );
 }
 

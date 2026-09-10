@@ -269,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Image.asset('assets/images/ttubee/intro-bg-2.png', fit: BoxFit.cover),
         const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter,end:Alignment.bottomCenter,colors:[Color(0xBFFFFFFF),Color(0x00FFFFFF)]))),
         const Positioned(top: 22,left:0,right:0,child:Column(children:[Text('뚜비',style:TextStyle(fontSize:38,fontWeight:FontWeight.w900,color:Color(0xFF087A76))),Text('뚜벅이의 비서',style:TextStyle(fontWeight:FontWeight.w900,color:Color(0xFF08A79D))),SizedBox(height:10),Text('오늘도, 더 안전한 출발.',style:TextStyle(fontSize:15,fontWeight:FontWeight.w800,color:Color(0xFF222222)))])),
-        Positioned(bottom:24,left:0,right:0,child:Image.asset('assets/images/ttubee/empty-schedule.png',height:205)),
+        Positioned(bottom:-12,left:0,right:0,child:Image.asset('assets/images/ttubee/empty-schedule.png',height:205)),
       ])),
       Positioned.fill(top: box.maxHeight * .50, child: Padding(padding: const EdgeInsets.fromLTRB(28, 12, 28, 18), child: LayoutBuilder(builder: (context, loginBox) => FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.topCenter, child: SizedBox(width: loginBox.maxWidth, child: Column(children:[
         _field(email, '이메일을 입력해주세요', Icons.mail_outline, keyboardType: TextInputType.emailAddress), const SizedBox(height:9), _field(password, '비밀번호를 입력해주세요', Icons.lock_outline, obscureText: obscurePassword, onSubmitted: (_) => _submit()),

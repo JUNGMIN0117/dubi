@@ -724,7 +724,7 @@ void main() {
     expect(find.byKey(const Key('mapEntireRouteButton')), findsOneWidget);
     expect(find.byKey(const Key('mapCurrentLocationButton')), findsOneWidget);
 
-    await tester.tap(find.text('추천 경로'));
+    await tester.tap(find.byType(ChoiceChip));
     await tester.pump();
     expect(find.text('17:57 출발'), findsOneWidget);
   });

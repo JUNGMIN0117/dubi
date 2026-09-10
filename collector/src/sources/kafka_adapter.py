@@ -16,14 +16,14 @@ log = logging.getLogger(__name__)
 DEFAULT_BUS_ROUTE_LIMIT = 100
 # module: (key, event type, interval, schema)
 POLICIES = {
-    "bus_arrival": ("BUS_ARRIVAL", "bus.arrival", 28800, "transport"),
-    "bus_location": ("BUS_LOCATION", "bus.position", 28800, "transport"),
+    "bus_arrival": ("BUS_ARRIVAL_API_KEY", "bus.arrival", 28800, "transport"),
+    "bus_location": ("BUS_LOCATION_API_KEY", "bus.position", 28800, "transport"),
     "subway_arrival": ("SUBWAY_API_KEY", "subway.arrival", 360, "transport"),
     "subway_location": ("SUBWAY_API_KEY", "subway.position", 3600, "transport"),
     "subway_alert": ("SUBWAY_ALERT_API_KEY", "subway.alert", 900, "transport"),
-    "city_realtime": ("CITY_API_KEY", "city.realtime", 21600, "city"),
+    "city_realtime": ("CITY_REALTIME_API_KEY", "city.realtime", 21600, "city"),
     "topis_notice": ("TOPIS_NOTICE_API_KEY", "topis.notice", 900, "city"),
-    "traffic_incident": ("SEOUL_EMERGENCY_API_KEY", "traffic.incident", 900, "city"),
+    "traffic_incident": ("TRAFFIC_INCIDENT_API_KEY", "traffic.incident", 900, "city"),
 }
 
 

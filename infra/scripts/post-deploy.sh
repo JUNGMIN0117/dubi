@@ -66,6 +66,13 @@ case "$target" in
     docker exec prometheus promtool check config /etc/prometheus/ddubi/prometheus.yml >/dev/null
     docker exec prometheus kill -HUP 1
     echo "OK: prometheus 설정 재적재"
+    # Grafana 는 대시보드 파일은 10초마다 다시 읽지만, 알림 규칙·수신처 파일은 기동 때만 읽는다(2026-09-10 발견: 규칙을 고쳐 배포해도
+    # 옛 규칙이 남아 있었다). 관리자 API 로 알림 프로비저닝을 다시 읽게 한다. 실패해도 배포 자체는 성공이므로 경고만 남긴다.
+    if docker exec grafana sh -c 'curl -sf -o /dev/null -u "admin:$GF_SECURITY_ADMIN_PASSWORD" -X POST http://localhost:3000/api/admin/provisioning/alerting/reload'; then
+      echo "OK: grafana 알림 규칙·수신처 재적재"
+    else
+      echo "WARN: grafana 알림 재적재 실패 — 규칙 변경이 있었다면 docker restart grafana 로 반영"
+    fi
     # 2) backend 기동 대기 (재빌드됐으면 Spring 기동에 40~90초)
     wait_for "backend healthy" 180 health backend
     # 3) 바깥에서 본 응답: 인증 없이 /api/health 를 부르면 401 이 정상. 502·000 이면 nginx→backend 경로 문제.

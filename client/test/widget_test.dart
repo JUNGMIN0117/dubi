@@ -52,6 +52,18 @@ void main() {
     expect(validatePassword('password123'), isNull);
   });
 
+  testWidgets('인트로 첫 화면부터 진행 상태와 다음 버튼을 표시한다', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+
+    expect(find.text('1 / 4'), findsOneWidget);
+    expect(find.byIcon(Icons.arrow_forward), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.arrow_forward));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 / 2'), findsOneWidget);
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget);
+  });
+
   testWidgets('로그인 화면과 핵심 진입 동작을 표시한다', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -64,7 +76,7 @@ void main() {
     expect(find.text('뚜비'), findsOneWidget);
     await _skipIntro(tester);
     expect(find.text('K'), findsOneWidget);
-    expect(find.text('G'), findsOneWidget);
+    expect(find.bySemanticsLabel('G 로그인'), findsOneWidget);
     expect(find.text('N'), findsOneWidget);
     expect(find.text('Apple'), findsNothing);
     expect(find.text('이메일을 입력해주세요'), findsOneWidget);
@@ -168,8 +180,9 @@ void main() {
       ),
     );
     await _skipIntro(tester);
-    await tester.ensureVisible(find.text('G'));
-    await tester.tap(find.text('G'));
+    final googleLogin = find.bySemanticsLabel('G 로그인');
+    await tester.ensureVisible(googleLogin);
+    await tester.tap(googleLogin);
     await tester.pumpAndSettle();
     expect(find.text('Google 로그인'), findsOneWidget);
     expect(find.text('Google 계정으로 계속하기'), findsOneWidget);
@@ -417,7 +430,7 @@ void main() {
     expect(updated?.updatedAt, isNotNull);
   });
 
-  testWidgets('낮은 데스크톱 Web 로그인 화면도 스크롤하며 넘치지 않는다', (tester) async {
+  testWidgets('낮은 데스크톱 Web 로그인 화면도 스크롤 없이 맞춘다', (tester) async {
     tester.view.physicalSize = const Size(1200, 560);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -426,7 +439,7 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
 
-    expect(find.byType(SingleChildScrollView), findsWidgets);
+    expect(find.byType(SingleChildScrollView), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

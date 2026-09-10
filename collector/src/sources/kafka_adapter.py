@@ -7,6 +7,8 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from functools import lru_cache
+from bus_crosswalk import BusCrosswalk, POLICY as BUS_ID_POLICY
 
 from config import Settings
 from request_budget import RequestBudget
@@ -56,10 +58,18 @@ def _time(value, fallback):
         return fallback
 
 
-def to_record(name, raw, context=""):
+@lru_cache(maxsize=2)
+def _crosswalk(path, sha):
+    """기동 설정의 고정 파일을 한 번 검증한다. 버전 교체는 재시작으로 적용한다."""
+    return BusCrosswalk(path, sha) if path else None
+
+
+def to_record(name, raw, context="", crosswalk=None):
     """공급자 ID와 원본을 보존. 원본 시각이 없으면 수신 시각 사용을 표시한다."""
     ids, source_time = {}, None
     if name.startswith("bus_"):
+        # 이 adapter의 버스 API는 서울 제공자다. 지역 문자열이나 노선 번호로 출처를 추정하지 않는다.
+        ids["providerNamespace"] = "SEOUL_BUS"
         ids["providerRouteId"] = str(raw.get("busRouteId") or context)
         if name == "bus_arrival":
             ids["providerStopId"] = str(raw.get("stId") or "")
@@ -93,11 +103,19 @@ def to_record(name, raw, context=""):
     payload = {**ids, "raw": raw, "observedAt": received.isoformat(),
                "timestampBasis": "received" if occurred == received else "provider",
                "contentHash": hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()}
-    key = ":".join(v for v in ids.values() if v) or payload["contentHash"]
-    return Record(key=key, event_type=POLICIES[name][1], occurred_at=occurred, payload=payload)
+    key = ":".join(v for k,v in ids.items() if v and k!="providerNamespace") or payload["contentHash"]
+    segment_ids=None
+    if name.startswith("bus_"):
+        mapping=crosswalk.resolve(POLICIES[name][1],payload) if crosswalk else dict(
+            segmentIds=[],state="UNRESOLVED",scope="NONE",reason="CROSSWALK_NOT_CONFIGURED",
+            masterVersion=None,idPolicy=BUS_ID_POLICY,crosswalkSha256=None)
+        segment_ids=mapping["segmentIds"] or None
+        payload["canonicalMapping"]={k:v for k,v in mapping.items() if k!="segmentIds"}
+    return Record(key=key, event_type=POLICIES[name][1], occurred_at=occurred, payload=payload,segment_ids=segment_ids)
 
 
 def collect(name, settings: Settings, client):
+    crosswalk=_crosswalk(settings.extra.get("BUS_CROSSWALK_PATH"),settings.extra.get("BUS_CROSSWALK_SHA256")) if name.startswith("bus_") else None
     module = importlib.import_module(f"sources.{name}")
     key_name, _, default_interval, _ = POLICIES[name]
     key = settings.api_key(key_name)
@@ -126,11 +144,11 @@ def collect(name, settings: Settings, client):
     try:
         if name == "bus_arrival":
             result = module.fetch_all_bus_arrivals(key, targets, client=client, requests_per_second=1)
-            return [to_record(name, row, route) for route, response in result["routeResults"].items()
+            return [to_record(name, row, route, crosswalk) for route, response in result["routeResults"].items()
                     for row in _rows(response.get("msgBody", {}).get("itemList"))]
         if name == "bus_location":
             result = module.fetch_all_bus_locations(key, targets, client=client, requests_per_second=1)
-            return [to_record(name, row, route) for route, response in result["routeResults"].items()
+            return [to_record(name, row, route, crosswalk) for route, response in result["routeResults"].items()
                     for row in _rows(response.get("msgBody", {}).get("itemList"))]
         if name == "subway_arrival":
             result = module.fetch_all_subway_arrivals(key, client=client)

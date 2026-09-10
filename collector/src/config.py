@@ -44,6 +44,8 @@ class Settings:
     # 수집 범위는 코드에 박지 않는다. 운영 환경마다 대상 노선·역·도로 링크와 호출 한도가
     # 다르므로 쉼표 구분 환경변수로 주입하고, 비밀값은 위 API_KEY_NAMES에만 둔다.
     EXTRA_NAMES = (
+        "BUS_CROSSWALK_PATH",
+        "BUS_CROSSWALK_SHA256",
         "API_BUDGET_PATH",
         "API_DAILY_LIMIT",
         "WEATHER_GRID_POINTS",

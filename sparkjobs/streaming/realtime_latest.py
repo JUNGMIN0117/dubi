@@ -6,8 +6,8 @@ Kafka 원문은 별도 Archiver가 Parquet/HDFS에 보존하므로 이 잡은 �
 서울 실시간 도시데이터, S-DoT 유동인구다. 날씨는 격자·관측 구조가 달라 기존
 ``weather_latest.py``가 계속 담당한다.
 
-아직 정적↔실시간 crosswalk 배포 계약이 없으므로 제공자 노선·정류장·역·링크 ID를 DDUBI
-``segment_id``로 변조하지 않는다. 입력에 검증된 ``segmentIds``가 있을 때만 함께 전달하고,
+BUS는 버전 고정 대응표로 검증하고 Collector와 버전이 다르면 ID를 비운다. 그 외 제공자
+노선·역·링크 ID를 ``segment_id``로 추측하지 않으며 검증된 입력만 함께 전달하고,
 그 외에는 ``canonicalMappingAvailable=false``로 표시한다. 따라서 이 결과는 수집·최신성 확인과
 후속 매핑의 입력이며, 그 자체를 구간 지연 계산 완료나 ``EXACT`` 매핑으로 해석하면 안 된다.
 
@@ -28,6 +28,7 @@ from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 from common.kafka_source import read_events_stream
+from common.bus_crosswalk import load_crosswalk, apply_crosswalk
 from common.redis_sink import (
     COLLECTED_TIME_COL,
     EVENT_TIME_COL,
@@ -124,7 +125,7 @@ def _provider_key(event_type: Column, route_id: Column, vehicle_id: Column, stop
     )
 
 
-def transform(events: DataFrame) -> DataFrame:
+def transform(events: DataFrame, crosswalk=None) -> DataFrame:
     """계약 봉투를 제공자별 최신 상태 후보로 정규화한다.
 
     입력은 ``common.kafka_source.parse_envelope``의 컬럼이다. ``payload.raw``에서 서비스에
@@ -138,6 +139,8 @@ def transform(events: DataFrame) -> DataFrame:
 
     # 1. canonical ID와 혼동하지 않도록 payload의 provider ID를 종류별 독립 컬럼으로 꺼낸다.
     route_id = _json("$.providerRouteId")
+    namespace = F.coalesce(_json("$.providerNamespace"),
+        F.when(F.col("source").isin("seoul.bus_location", "seoul.bus_arrival"),F.lit("SEOUL_BUS")))
     vehicle_id = _json("$.providerVehicleId")
     stop_id = _json("$.providerStopId")
     line_id = _json("$.providerLineId")
@@ -239,24 +242,34 @@ def transform(events: DataFrame) -> DataFrame:
         _for("topis.notice", _json("$.raw.categoryName")).alias("noticeCategory"),
     )
 
-    # 3. Redis의 provider key와 값에 사용할 공통 메타데이터를 결합한다. segmentIds는 upstream
-    #    Resolver가 실제로 검증해 넣은 경우에만 전달하고, 비어 있으면 매핑 완료로 표현하지 않는다.
+    # 3. Redis provider key·출처를 보존하고 마지막에 BUS ID를 고정 대응표로 다시 검증한다.
+    #    upstream의 segmentIds만으로 성공 처리하지 않으며 다른 모드의 기존 ID는 유지한다.
     provider_key = _provider_key(
         F.col("eventType"), route_id, vehicle_id, stop_id, line_id, station_id, train_id,
         link_id, incident_id, area_id, sensor_id, alert_id, notice_id,
     )
-    return supported.select(
+    # 서울의 기존 provider 키는 유지하고 다른 출처는 별도 공간으로 분리한다.
+    is_bus=F.col("eventType").isin("bus.position","bus.arrival")
+    provider_key=F.when(is_bus,
+        F.when(namespace=="SEOUL_BUS",provider_key)
+         .when(namespace.isin("GBIS","INCHEON_PUBLIC_CSV") & provider_key.isNotNull(),F.concat_ws(":",namespace,provider_key)))        .otherwise(provider_key)
+    normalized = supported.select(
         "eventId", "eventType", "source", "occurredAt", "collectedAt", "latitude", "longitude",
         "segmentIds", "kafkaPartition", "kafkaOffset",
         provider_key.alias("providerKey"),
+        _json("$.providerFromStopId").alias("mappingFromStopId"),
+        _json("$.providerToStopId").alias("mappingToStopId"),
+        _json("$.canonicalMapping.masterVersion").alias("claimedMappingVersion"),
+        _json("$.canonicalMapping.crosswalkSha256").alias("claimedCrosswalkSha"),
         F.struct(
-            route_id.alias("routeId"), vehicle_id.alias("vehicleId"), stop_id.alias("stopId"),
+            namespace.alias("namespace"),route_id.alias("routeId"), vehicle_id.alias("vehicleId"), stop_id.alias("stopId"),
             line_id.alias("lineId"), station_id.alias("stationId"), train_id.alias("trainId"),
             link_id.alias("linkId"), incident_id.alias("incidentId"), area_id.alias("areaId"),
             sensor_id.alias("sensorId"), alert_id.alias("alertId"), notice_id.alias("noticeId"),
         ).alias("providerIds"),
         observation.alias("observation"),
     )
+    return apply_crosswalk(normalized,crosswalk)
 
 
 def latest_per_provider(df: DataFrame) -> DataFrame:
@@ -312,7 +325,7 @@ def to_redis_rows(df: DataFrame) -> DataFrame:
             F.struct(
                 "eventType", "providerKey", "providerIds", "observation",
                 F.struct("latitude", "longitude").alias("location"),
-                "segmentIds",
+                "segmentIds", "canonicalMapping",
                 (F.size(F.coalesce(F.col("segmentIds"), F.array())) > 0).alias("canonicalMappingAvailable"),
                 "occurredAt", "collectedAt", "eventId", "source",
             )
@@ -341,8 +354,11 @@ def main() -> int:
     )
     spark.sparkContext.setLogLevel("WARN")
 
+    crosswalk_path=os.environ.get("BUS_CROSSWALK_PATH")
+    crosswalk=load_crosswalk(spark,crosswalk_path,os.environ.get("BUS_CROSSWALK_SHA256")) if crosswalk_path else None
+
     def process_batch(batch_df: DataFrame, batch_id: int) -> None:
-        normalized = transform(batch_df).cache()
+        normalized = transform(batch_df,crosswalk).cache()
         latest = None
         rows = None
         try:

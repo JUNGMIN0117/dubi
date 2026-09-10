@@ -40,9 +40,10 @@ Collector는 자료별 갱신주기와 호출 설정이 다르므로 `collector/
 ## 식별자와 현재 제한
 
 Redis의 `providerRouteId`, `providerStationId`, `providerLinkId`는 서울 API가 준 외부 ID다.
-검증된 `segmentIds`가 이벤트에 들어온 경우에만 `canonicalMappingAvailable=true`가 된다.
-정적↔실시간 crosswalk 배포 계약이 완성되기 전에는 이 잡이 `EXACT`를 추측하거나
-`segment:status:{segmentId}`를 생성하지 않는다. 따라서 현재 범위는 다음과 같다.
+BUS는 동일 SHA의 대응표로 재검증한 `segmentIds`만 사용하며 다른 모드의 기존 ID는 보존한다.
+값에 `canonicalMappingAvailable`와 버전·범위·실패 사유를 남긴다. 도착 대상 진입 edge를
+차량 현재 구간으로 간주하거나 관측만으로 `segment:status:{segmentId}`를 생성하지 않는다.
+현재 범위는 다음과 같다.
 
 1. 외부 API 수집과 Kafka 발행
 2. HDFS 원문 보존
@@ -50,6 +51,14 @@ Redis의 `providerRouteId`, `providerStationId`, `providerLinkId`는 서울 API�
 4. 누락 ID·늦은 이벤트·TTL 기반 stale 방어
 
 canonical 구간 상태와 지연시간 계산은 crosswalk가 공급된 뒤 별도 변환에서 이어 붙인다.
+
+BUS 대응표를 사용하려면 driver에서 읽을 수 있는 `BUS_CROSSWALK_PATH`와 manifest의
+`BUS_CROSSWALK_SHA256`을 잡 환경에 설정한다. `.env`를 자동으로 읽지 않는다.
+Collector와 같은 버전의 파일을 함께 배포·재시작하며 불일치한 BUS ID는 비운다.
+전체 인접 edge는 기동 시 JVM 인덱스로 만들고 원천 이벤트는 DataFrame 조인으로 처리한다.
+파일 미설정은 `CROSSWALK_NOT_CONFIGURED`, SHA 오류는 잡 기동 실패다.
+재생성·배포 방법은 [마스터 안내](../backend/transit-master/README.md), 의미·키 규칙은
+[구간 연결 계약](../docs/contracts/metropolitan-segment-integration.md)을 따른다.
 
 ## 테스트
 

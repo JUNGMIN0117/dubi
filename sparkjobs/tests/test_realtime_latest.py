@@ -30,6 +30,9 @@ def spark():
 
 
 def _event(event_id, event_type, occurred, payload, *, segment_ids=None):
+    # 합성 BUS fixture도 원천 발급 체계를 명시한다. 미확인 출처를 서울로 기본 해석하지 않는다.
+    if event_type.startswith("bus."):
+        payload={"providerNamespace":"SEOUL_BUS",**payload}
     event = {
         "eventId": event_id,
         "eventType": event_type,

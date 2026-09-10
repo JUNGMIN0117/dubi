@@ -6,6 +6,8 @@ import com.ssafy.ddubi.domain.route.dto.RouteSearchResponse;
 import com.ssafy.ddubi.domain.route.model.Coordinate;
 import com.ssafy.ddubi.domain.route.model.RouteSearchQuery;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.ssafy.ddubi.domain.route.prediction.BusJourneyEvaluator;
 
 /** Controller의 입력을 내부 모델로 바꾸고 길찾기 Client 호출을 조정하는 응용 서비스. */
 @Service
@@ -14,8 +16,14 @@ public class RouteSearchService {
     // 구현체는 현재 KakaoPublicTransitClient지만, 인터페이스를 사용해 다른 업체로 교체할 수 있다.
     private final PublicTransitRouteClient routeClient;
 
+    private final BusJourneyEvaluator evaluator;
+    @Autowired
+    public RouteSearchService(PublicTransitRouteClient routeClient,BusJourneyEvaluator evaluator) {
+        this.routeClient=routeClient;this.evaluator=evaluator;
+    }
+    /** 기존 단위 테스트는 외부 모델 없이 명시적 fallback으로 실행한다. */
     public RouteSearchService(PublicTransitRouteClient routeClient) {
-        this.routeClient = routeClient;
+        this(routeClient,new BusJourneyEvaluator(input->java.util.Optional.empty()));
     }
 
     /**
@@ -29,6 +37,6 @@ public class RouteSearchService {
                 new Coordinate(request.endLongitude(), request.endLatitude())
         );
         // 외부 응답을 그대로 노출하지 않고 우리 서비스 응답 DTO로 한 번 더 감싼다.
-        return RouteSearchResponse.from(routeClient.search(query));
+        return RouteSearchResponse.from(routeClient.search(query),evaluator);
     }
 }

@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -37,11 +38,13 @@ val ddubiKeystorePath = System.getenv("DDUBI_KEYSTORE_PATH")
 val ddubiKeystorePassword = System.getenv("DDUBI_KEYSTORE_PASSWORD")
 val ddubiKeyAlias = System.getenv("DDUBI_KEY_ALIAS") ?: "ddubi"
 val ddubiKeyPassword = System.getenv("DDUBI_KEY_PASSWORD")
+val ddubiKeystoreFile = ddubiKeystorePath
+    ?.takeIf { it.isNotBlank() }
+    ?.let(::File)
 val releaseSigningConfigured = listOf(
-    ddubiKeystorePath,
     ddubiKeystorePassword,
     ddubiKeyPassword,
-).all { !it.isNullOrBlank() }
+).all { !it.isNullOrBlank() } && ddubiKeystoreFile?.isFile == true
 val releaseTaskRequested = gradle.startParameter.taskNames.any {
     it.contains("release", ignoreCase = true)
 }
@@ -73,7 +76,7 @@ android {
     signingConfigs {
         if (releaseSigningConfigured) {
             create("release") {
-                storeFile = file(ddubiKeystorePath!!)
+                storeFile = ddubiKeystoreFile
                 storePassword = ddubiKeystorePassword
                 keyAlias = ddubiKeyAlias
                 keyPassword = ddubiKeyPassword

@@ -33,6 +33,26 @@ val naverClientName = System.getenv("NAVER_CLIENT_NAME")
     ?: localEnv.getProperty("NAVER_CLIENT_NAME")
     ?: "DDUBI"
 
+val ddubiKeystorePath = System.getenv("DDUBI_KEYSTORE_PATH")
+val ddubiKeystorePassword = System.getenv("DDUBI_KEYSTORE_PASSWORD")
+val ddubiKeyAlias = System.getenv("DDUBI_KEY_ALIAS") ?: "ddubi"
+val ddubiKeyPassword = System.getenv("DDUBI_KEY_PASSWORD")
+val releaseSigningConfigured = listOf(
+    ddubiKeystorePath,
+    ddubiKeystorePassword,
+    ddubiKeyPassword,
+).all { !it.isNullOrBlank() }
+val releaseTaskRequested = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
+}
+
+if (releaseTaskRequested && !releaseSigningConfigured) {
+    throw GradleException(
+        "Release signing is not configured. Set DDUBI_KEYSTORE_PATH, " +
+            "DDUBI_KEYSTORE_PASSWORD, and DDUBI_KEY_PASSWORD.",
+    )
+}
+
 fun String.asBuildConfigString(): String =
     "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
@@ -48,6 +68,17 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(ddubiKeystorePath!!)
+                storePassword = ddubiKeystorePassword
+                keyAlias = ddubiKeyAlias
+                keyPassword = ddubiKeyPassword
+            }
+        }
     }
 
     defaultConfig {
@@ -71,9 +102,13 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                // IDE model sync and debug builds remain usable, while an actual
+                // release task is rejected by the guard above.
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

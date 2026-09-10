@@ -40,11 +40,22 @@ class RequestBudget:
         )
         try:
             db.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_MS}")
-            # journal_mode는 DB 파일에 유지된다. 모든 프로세스가 같은 값을 다시
-            # 요청해도 안전하며, 최초 실행 시에만 실제 모드 전환이 일어난다.
-            journal_mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
-            if str(journal_mode).lower() != "wal":
-                raise RuntimeError("request budget SQLite WAL mode is unavailable")
+            # journal_mode 전환은 busy_timeout을 적용하기 전에도 locked를 반환할 수
+            # 있다. 이미 WAL이면 읽기만 하고, 최초 전환을 다른 프로세스가 진행
+            # 중이면 제한 시간 동안 재시도한다.
+            deadline = time.monotonic() + self.BUSY_TIMEOUT_MS / 1000
+            while True:
+                try:
+                    journal_mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+                    if str(journal_mode).lower() != "wal":
+                        journal_mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+                    if str(journal_mode).lower() != "wal":
+                        raise RuntimeError("request budget SQLite WAL mode is unavailable")
+                    break
+                except sqlite3.OperationalError as error:
+                    if "locked" not in str(error).lower() or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.01)
             db.execute("PRAGMA synchronous=NORMAL")
             db.execute("BEGIN IMMEDIATE")
             yield db

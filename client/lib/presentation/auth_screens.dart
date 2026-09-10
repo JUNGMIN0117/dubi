@@ -1009,6 +1009,19 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
           );
       }
       if (mounted) widget.onAuthenticated();
+    } on AccountLinkRequiredException catch (error) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => AccountLinkPromptScreen(
+            provider: _providerLabel(error.provider),
+            email: error.email,
+            linkToken: error.linkToken,
+            repository: widget.repository,
+            onLinked: widget.onAuthenticated,
+          ),
+        ),
+      );
     } on KakaoLoginException catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on GoogleLoginException catch (error) {
@@ -1023,6 +1036,13 @@ class _SocialAuthScreenState extends State<SocialAuthScreen> {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  String _providerLabel(String provider) => switch (provider.toUpperCase()) {
+    'KAKAO' => '카카오',
+    'NAVER' => '네이버',
+    'GOOGLE' => 'Google',
+    _ => provider,
+  };
 }
 
 class _KakaoBenefit extends StatelessWidget {
@@ -1169,12 +1189,14 @@ class AccountLinkPromptScreen extends StatelessWidget {
     super.key,
     required this.provider,
     required this.email,
+    required this.linkToken,
     required this.repository,
     required this.onLinked,
   });
 
   final String provider;
   final String email;
+  final String linkToken;
   final AuthRepository repository;
   final VoidCallback onLinked;
 
@@ -1230,6 +1252,7 @@ class AccountLinkPromptScreen extends StatelessWidget {
                     builder: (_) => EmailAccountLinkScreen(
                       provider: provider,
                       email: email,
+                      linkToken: linkToken,
                       repository: repository,
                       onLinked: onLinked,
                     ),
@@ -1255,12 +1278,14 @@ class EmailAccountLinkScreen extends StatefulWidget {
     super.key,
     required this.provider,
     required this.email,
+    required this.linkToken,
     required this.repository,
     required this.onLinked,
   });
 
   final String provider;
   final String email;
+  final String linkToken;
   final AuthRepository repository;
   final VoidCallback onLinked;
 
@@ -1358,8 +1383,8 @@ class _EmailAccountLinkScreenState extends State<EmailAccountLinkScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _loading = true);
     try {
-      await widget.repository.login(
-        email: widget.email,
+      await widget.repository.linkOAuthAccount(
+        linkToken: widget.linkToken,
         password: _password.text,
       );
       if (!mounted) return;

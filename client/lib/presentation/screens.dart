@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
@@ -25,8 +27,73 @@ void _open(BuildContext c, Widget page) =>
 const _pad = EdgeInsets.fromLTRB(16, 8, 16, 20);
 const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
 
+RouteOption? _primaryRoute(List<RouteOption> routes) {
+  if (routes.isEmpty) return null;
+  return routes.firstWhere(
+    (route) => route.kind == RouteKind.recommended,
+    orElse: () => routes.first,
+  );
+}
+
+class _RouteSearchHistory {
+  static final List<RouteSearchCondition> items = [];
+
+  static void add(RouteSearchCondition condition) {
+    items.removeWhere(
+      (item) =>
+          item.origin.name == condition.origin.name &&
+          item.destination.name == condition.destination.name,
+    );
+    items.insert(0, condition);
+    if (items.length > 5) items.removeRange(5, items.length);
+  }
+}
+
+class _ProfileImageCache {
+  static int? characterIndex = 0;
+  static Uint8List? bytes;
+}
+
+class _AppPermissionController {
+  static const _channel = MethodChannel('com.ssafy.ddubi/app_permissions');
+
+  static Future<bool> hasLocationPermission() async {
+    if (kIsWeb) return false;
+    return await _channel.invokeMethod<bool>('hasLocationPermission') ?? false;
+  }
+
+  static Future<bool> requestLocationPermission() async {
+    if (kIsWeb) return false;
+    return await _channel.invokeMethod<bool>('requestLocationPermission') ??
+        false;
+  }
+
+  static Future<bool> hasNotificationPermission() async {
+    final settings = await FirebaseMessaging.instance.getNotificationSettings();
+    return settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional;
+  }
+
+  static Future<bool> requestNotificationPermission() async {
+    final settings = await FirebaseMessaging.instance.requestPermission();
+    return settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional;
+  }
+
+  static Future<void> openSettings() async {
+    if (!kIsWeb) await _channel.invokeMethod<void>('openAppSettings');
+  }
+}
+
 String _fullDate(DateTime date) =>
     '${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')} (${_weekdays[date.weekday - 1]})';
+
+String _arrivalResultText(String? result) => switch (result) {
+  'ON_TIME' => '정시',
+  'TIGHT' => '빠듯',
+  'LATE_RISK' => '지연',
+  _ => '판정 없음',
+};
 
 class IntroScreen extends StatefulWidget {
   const IntroScreen({super.key});
@@ -206,62 +273,62 @@ class _IntroScreenState extends State<IntroScreen> {
                   ),
                 ),
                 Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 4, 24, 18),
-                    child: SizedBox(
-                      height: 48,
-                      child: Stack(
-                        children: [
-                          Align(
-                            alignment: Alignment.center,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: List.generate(
-                                4,
-                                (i) => AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 3,
-                                  ),
-                                  width: i == _page ? 10 : 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: i == _page
-                                        ? const Color(0xFF08A79D)
-                                        : const Color(0xFFD4DAD8),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
+                  padding: const EdgeInsets.fromLTRB(24, 4, 24, 18),
+                  child: SizedBox(
+                    height: 48,
+                    child: Stack(
+                      children: [
+                        Align(
+                          alignment: Alignment.center,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              4,
+                              (i) => AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 3,
+                                ),
+                                width: i == _page ? 10 : 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: i == _page
+                                      ? const Color(0xFF08A79D)
+                                      : const Color(0xFFD4DAD8),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
                             ),
                           ),
-                          if (_page > 0)
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: _roundNav(
-                                Icons.arrow_back,
-                                () => _controller.previousPage(
-                                  duration: const Duration(milliseconds: 260),
-                                  curve: Curves.easeOut,
-                                ),
+                        ),
+                        if (_page > 0)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _roundNav(
+                              Icons.arrow_back,
+                              () => _controller.previousPage(
+                                duration: const Duration(milliseconds: 260),
+                                curve: Curves.easeOut,
                               ),
                             ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: _roundNav(Icons.arrow_forward, () {
-                              if (last) {
-                                context.go('/login');
-                              } else {
-                                _controller.nextPage(
-                                  duration: const Duration(milliseconds: 260),
-                                  curve: Curves.easeOut,
-                                );
-                              }
-                            }),
                           ),
-                        ],
-                      ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: _roundNav(Icons.arrow_forward, () {
+                            if (last) {
+                              context.go('/login');
+                            } else {
+                              _controller.nextPage(
+                                duration: const Duration(milliseconds: 260),
+                                curve: Curves.easeOut,
+                              );
+                            }
+                          }),
+                        ),
+                      ],
                     ),
                   ),
+                ),
               ],
             ),
           ],
@@ -285,7 +352,7 @@ class _IntroScreenState extends State<IntroScreen> {
 
   String _progressLabel(int index) => switch (index) {
     0 => '1 / 4',
-    1 => '1 / 2',
+    1 => '2 / 4',
     2 => '3 / 4',
     _ => '4 / 4',
   };
@@ -782,18 +849,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             Positioned.fill(
               top: box.maxHeight * .50,
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
-                child: LayoutBuilder(
-                  builder: (context, loginBox) => FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.topCenter,
-                    child: SizedBox(
-                      width: loginBox.maxWidth,
-                      child: Form(
-                        key: formKey,
-                        child: Column(
-                          children: [
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    children: [
                       TextFormField(
                         key: const Key('loginEmailField'),
                         controller: email,
@@ -980,10 +1041,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    ],
                   ),
                 ),
               ),
@@ -1229,7 +1287,7 @@ class _MobileHomeContent extends StatelessWidget {
                     Text(
                       routes.isEmpty
                           ? '목적지에 맞는 경로를 찾아보세요.'
-                          : '${routes.first.departure}에 출발하면 안전해요!',
+                          : '${_primaryRoute(routes)!.departure}에 출발하면 안전해요!',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -1237,9 +1295,12 @@ class _MobileHomeContent extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    const Text(
-                      '아직 준비할 시간이 충분해요.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF617783)),
+                    Text(
+                      _primaryRoute(routes)?.margin ?? '일정을 등록하면 이동을 챙겨드려요.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF617783),
+                      ),
                     ),
                   ],
                 ),
@@ -1273,27 +1334,7 @@ class _MobileHomeContent extends StatelessWidget {
             child: Text('표시할 추천 경로가 없어요.'),
           )
         else
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final columns =
-                  constraints.maxWidth >= 400 &&
-                      MediaQuery.textScalerOf(context).scale(1) <= 1.2
-                  ? 3
-                  : 2;
-              return Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (var i = 0; i < routes.length; i++)
-                    SizedBox(
-                      width:
-                          (constraints.maxWidth - (columns - 1) * 10) / columns,
-                      child: _HomeRouteTile(route: routes[i], index: i),
-                    ),
-                ],
-              );
-            },
-          ),
+          _HomeRouteTile(route: _primaryRoute(routes)!, index: 0),
         const SizedBox(height: 14),
         const Text(
           '오늘의 이동 변수',
@@ -1624,21 +1665,21 @@ class _WebHomeContent extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: DashboardMetricCard(
               label: '추천 출발',
-              value: '17:57',
-              caption: '15분 여유',
+              value: _primaryRoute(routes)?.departure ?? '--:--',
+              caption: _primaryRoute(routes)?.margin ?? '경로 탐색 필요',
               icon: Icons.directions_run_outlined,
               tone: DdubiColors.green,
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: DashboardMetricCard(
               label: '도착 예정',
-              value: '18:45',
-              caption: '이동 48분',
+              value: _primaryRoute(routes)?.arrival ?? '--:--',
+              caption: _primaryRoute(routes)?.detail ?? '경로 탐색 필요',
               icon: Icons.flag_outlined,
               tone: Color(0xFF7257E8),
             ),
@@ -1668,17 +1709,35 @@ class _WebHomeContent extends StatelessWidget {
             flex: 2,
             child: Column(
               children: [
-                const TtubeeGuideCard(
-                  '17:57에 출발하면 안전해요!\n아직 준비할 시간이 충분해요.',
+                TtubeeGuideCard(
+                  _primaryRoute(routes) == null
+                      ? '다음 일정을 등록하면 출발 시간을 챙겨드릴게요.'
+                      : '${_primaryRoute(routes)!.departure}에 출발하면 안전해요!\n'
+                            '${_primaryRoute(routes)!.margin}',
                   compact: true,
                 ),
                 const SizedBox(height: 12),
                 InfoCard(
                   child: Row(
-                    children: const [
-                      Expanded(child: _HomeMetric('도착 예정', '18:45')),
-                      Expanded(child: _HomeMetric('이동 시간', '48분')),
-                      Expanded(child: _HomeMetric('여유 시간', '15분')),
+                    children: [
+                      Expanded(
+                        child: _HomeMetric(
+                          '도착 예정',
+                          _primaryRoute(routes)?.arrival ?? '--:--',
+                        ),
+                      ),
+                      Expanded(
+                        child: _HomeMetric(
+                          '이동 정보',
+                          _primaryRoute(routes)?.detail ?? '-',
+                        ),
+                      ),
+                      Expanded(
+                        child: _HomeMetric(
+                          '여유 시간',
+                          _primaryRoute(routes)?.margin ?? '-',
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1691,7 +1750,7 @@ class _WebHomeContent extends StatelessWidget {
       SectionHeader(
         '추천 경로',
         trailing: Text(
-          '${routes.length}개의 경로를 비교해보세요',
+          '가장 알맞은 경로 하나를 안내해요',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ),
@@ -1700,14 +1759,14 @@ class _WebHomeContent extends StatelessWidget {
         key: const Key('webHomeRouteGrid'),
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        itemCount: routes.length,
+        itemCount: routes.isEmpty ? 0 : 1,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
           crossAxisSpacing: 12,
           mainAxisExtent: 220,
         ),
         itemBuilder: (_, i) => RouteCard(
-          routes[i],
+          _primaryRoute(routes)!,
           compact: true,
           fillWidth: true,
           onTap: () => context.push('/recommendations/mock-recommendation-1'),
@@ -3093,8 +3152,8 @@ class RouteResultsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext c) => AppPage(
     title: '추천 결과',
-    webTitle: '경로 비교',
-    webSubtitle: '도착 시간과 이동 조건을 기준으로 추천 경로를 비교하세요.',
+    webTitle: '추천 경로',
+    webSubtitle: '도착 시간과 이동 조건을 기준으로 가장 알맞은 경로를 안내해요.',
     index: go == null ? null : 1,
     onNav: go,
     actions: const [IconButton(onPressed: null, icon: Icon(Icons.refresh))],
@@ -3109,20 +3168,24 @@ class RouteResultsScreen extends StatelessWidget {
         if (!s.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
+        final route = _primaryRoute(s.data!);
+        if (route == null) {
+          return const Center(child: Text('표시할 추천 경로가 없어요.'));
+        }
         return LayoutBuilder(
           builder: (context, constraints) {
             final isWide =
                 constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
             return isWide
-                ? _webRouteResults(c, s.data!)
-                : _mobileRouteResults(c, s.data!);
+                ? _webRouteResults(c, route)
+                : _mobileRouteResults(c, route);
           },
         );
       },
     ),
   );
 
-  Widget _mobileRouteResults(BuildContext context, List<RouteOption> routes) =>
+  Widget _mobileRouteResults(BuildContext context, RouteOption route) =>
       ListView(
         key: const Key('mobileRouteResultsLayout'),
         padding: _pad,
@@ -3133,58 +3196,44 @@ class RouteResultsScreen extends StatelessWidget {
           ],
           _routeGuide,
           const SizedBox(height: 12),
-          ...routes.map(
-            (route) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: RouteCard(
-                route,
-                onTap: () => _openRouteMap(context, route),
-              ),
-            ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: RouteCard(route, onTap: () => _openRouteMap(context, route)),
           ),
           _recommendationReason,
         ],
       );
 
-  Widget _webRouteResults(BuildContext context, List<RouteOption> routes) =>
-      ListView(
-        key: const Key('webRouteResultsLayout'),
-        padding: _pad,
+  Widget _webRouteResults(BuildContext context, RouteOption route) => ListView(
+    key: const Key('webRouteResultsLayout'),
+    padding: _pad,
+    children: [
+      if (condition != null) ...[
+        _RouteSearchSummary(condition: condition!),
+        const SizedBox(height: 16),
+      ],
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (condition != null) ...[
-            _RouteSearchSummary(condition: condition!),
-            const SizedBox(height: 16),
-          ],
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Expanded(flex: 3, child: _routeGuide),
-              const SizedBox(width: 16),
-              const Expanded(flex: 2, child: _recommendationReason),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text('경로 비교', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          Row(
-            key: const Key('webRouteResultsGrid'),
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var index = 0; index < routes.length; index++) ...[
-                if (index > 0) const SizedBox(width: 12),
-                Expanded(
-                  child: RouteCard(
-                    routes[index],
-                    compact: true,
-                    fillWidth: true,
-                    onTap: () => _openRouteMap(context, routes[index]),
-                  ),
-                ),
-              ],
-            ],
-          ),
+          const Expanded(flex: 3, child: _routeGuide),
+          const SizedBox(width: 16),
+          const Expanded(flex: 2, child: _recommendationReason),
         ],
-      );
+      ),
+      const SizedBox(height: 20),
+      Text('추천 경로', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 12),
+      KeyedSubtree(
+        key: const Key('webRouteResultsGrid'),
+        child: RouteCard(
+          route,
+          compact: true,
+          fillWidth: true,
+          onTap: () => _openRouteMap(context, route),
+        ),
+      ),
+    ],
+  );
 
   void _openRouteMap(BuildContext context, RouteOption route) => _open(
     context,
@@ -3294,6 +3343,10 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
                     ),
                     const SizedBox(height: 16),
                     _searchFormCard(context, false),
+                    if (_RouteSearchHistory.items.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _recentSearches(),
+                    ],
                   ],
                 ),
             ],
@@ -3337,6 +3390,30 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
         ),
         const SizedBox(height: 20),
         PrimaryButton('추천 경로 찾기', onPressed: _search),
+      ],
+    ),
+  );
+
+  Widget _recentSearches() => InfoCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('최근 검색', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        for (final item in _RouteSearchHistory.items.take(3))
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.history_rounded),
+            title: Text('${item.departurePlace} → ${item.destinationPlace}'),
+            subtitle: Text(_formatArrival(item.desiredArrivalAt)),
+            onTap: () => setState(() {
+              _origin = item.origin;
+              _destination = item.destination;
+              _desiredArrivalAt = item.desiredArrivalAt;
+              _arrival.text = _formatArrival(_desiredArrivalAt);
+            }),
+          ),
       ],
     ),
   );
@@ -3394,6 +3471,7 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
       destination: _destination!,
       desiredArrivalAt: _desiredArrivalAt,
     );
+    setState(() => _RouteSearchHistory.add(condition));
     context.push('/recommendations/mock-recommendation-1', extra: condition);
   }
 }
@@ -3483,7 +3561,12 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   void initState() {
     super.initState();
     _selectedKind = widget.selectedRoute?.kind ?? RouteKind.recommended;
-    _routes = widget.repository.routes(condition: widget.condition);
+    _routes = widget.selectedRoute != null
+        ? Future.value([widget.selectedRoute!])
+        : widget.repository.routes(condition: widget.condition).then((routes) {
+            final primary = _primaryRoute(routes);
+            return primary == null ? <RouteOption>[] : [primary];
+          });
   }
 
   @override
@@ -3501,6 +3584,9 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         final routes = snapshot.data!;
+        if (routes.isEmpty) {
+          return const Center(child: Text('표시할 추천 경로가 없어요.'));
+        }
         final selected = routes.firstWhere(
           (route) => route.kind == _selectedKind,
           orElse: () => routes.first,
@@ -4410,10 +4496,23 @@ class _RepeatSchedulesScreenState extends State<RepeatSchedulesScreen> {
                   Icons.event_repeat,
                   color: rule.active ? DdubiColors.blue : Colors.grey,
                 ),
-                title: Text(rule.title),
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        rule.title,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    StatusBadge(
+                      rule.active ? '반복 중' : '중지됨',
+                      tone: rule.active ? DdubiColors.green : Colors.grey,
+                    ),
+                  ],
+                ),
                 subtitle: Text(
-                  '${days.map((day) => _weekdays[day - 1]).join('·')} ${rule.time}\n'
-                  '${rule.departurePlace} → ${rule.place}',
+                  '${days.map((day) => _weekdays[day - 1]).join(' · ')}  ${rule.time}\n'
+                  '출발 ${rule.departurePlace}\n도착 ${rule.place}',
                 ),
                 isThreeLine: true,
                 trailing: PopupMenuButton<String>(
@@ -4784,7 +4883,7 @@ class _TravelRecordsScreenState extends State<TravelRecordsScreen> {
     leading: const Icon(Icons.directions_transit_outlined),
     title: Text(item.title),
     subtitle: Text(_fullDate(item.arriveBy)),
-    trailing: Text(_arrivalResultLabel(item.result)),
+    trailing: Text(_arrivalResultText(item.result)),
   );
 
   Future<void> _showReport(WeeklyReport report) async {
@@ -4810,13 +4909,6 @@ class _TravelRecordsScreenState extends State<TravelRecordsScreen> {
           .showSnackBar(const SnackBar(content: Text('리포트 상세를 불러오지 못했어요.')));
     }
   }
-
-  String _arrivalResultLabel(String? result) => switch (result) {
-    'ON_TIME' => '정시',
-    'TIGHT' => '빠듯',
-    'LATE_RISK' => '지연',
-    _ => '판정 없음',
-  };
 }
 
 class NotificationsScreen extends StatefulWidget {
@@ -5032,6 +5124,197 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
   );
 }
 
+class AccountManagementScreen extends StatefulWidget {
+  const AccountManagementScreen({
+    super.key,
+    required this.userApi,
+    required this.authRepository,
+  });
+
+  final UserApi userApi;
+  final AuthRepository authRepository;
+
+  @override
+  State<AccountManagementScreen> createState() =>
+      _AccountManagementScreenState();
+}
+
+class _AccountManagementScreenState extends State<AccountManagementScreen> {
+  late Future<UserProfile> _profile = widget.userApi.getMe();
+
+  @override
+  Widget build(BuildContext context) => AppPage(
+    title: '계정 관리',
+    child: FutureBuilder<UserProfile>(
+      future: _profile,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const DataLoadError(message: '계정 정보를 불러오지 못했어요.');
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final user = snapshot.data!;
+        return ListView(
+          padding: _pad,
+          children: [
+            InfoCard(
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.person_outline_rounded),
+                    title: const Text('닉네임'),
+                    subtitle: Text(user.nickname),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: () => _editNickname(user),
+                  ),
+                  const Divider(),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.mail_outline_rounded),
+                    title: const Text('이메일'),
+                    subtitle: Text(user.email ?? '이메일 정보 없음'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const InfoCard(
+              color: Color(0xFFF4F8FF),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SectionHeader('소셜 계정 연결'),
+                  SizedBox(height: 8),
+                  Text(
+                    '카카오·네이버·Google 로그인에서 기존 이메일이 확인되면 '
+                    '비밀번호 확인 후 이 계정에 안전하게 연결돼요.',
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '연결된 제공자 목록과 연결 해제 기능은 백엔드 계정 관리 API 반영 후 표시됩니다.',
+                    style: TextStyle(color: Color(0xFF64708B), fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            InfoCard(
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.logout_rounded),
+                    title: const Text('로그아웃'),
+                    onTap: _logout,
+                  ),
+                  const Divider(),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(
+                      Icons.person_remove_outlined,
+                      color: DdubiColors.red,
+                    ),
+                    title: const Text(
+                      '회원 탈퇴',
+                      style: TextStyle(color: DdubiColors.red),
+                    ),
+                    onTap: _withdraw,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  Future<void> _editNickname(UserProfile user) async {
+    final controller = TextEditingController(text: user.nickname);
+    final nickname = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('닉네임 변경'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 20,
+          decoration: const InputDecoration(labelText: '닉네임'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (nickname == null || nickname.isEmpty || nickname == user.nickname) {
+      return;
+    }
+    try {
+      final updated = await widget.userApi.update(nickname: nickname);
+      if (mounted) setState(() => _profile = Future.value(updated));
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('닉네임을 변경하지 못했어요.')));
+      }
+    }
+  }
+
+  Future<void> _logout() async {
+    try {
+      await widget.authRepository.logout();
+      if (mounted) context.go('/login');
+    } on AuthException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message ?? '로그아웃하지 못했어요.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _withdraw() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('정말 탈퇴할까요?'),
+        content: const Text('계정과 저장된 정보가 삭제되며 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('탈퇴'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.userApi.withdraw();
+      if (mounted) context.go('/login');
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('회원 탈퇴를 처리하지 못했어요.')));
+      }
+    }
+  }
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
@@ -5039,38 +5322,57 @@ class SettingsScreen extends StatefulWidget {
     required this.repository,
     required this.userApi,
     required this.authRepository,
+    required this.reportApi,
   });
   final ValueChanged<int>? go;
   final DdubiRepository repository;
   final UserApi userApi;
   final AuthRepository authRepository;
+  final ReportApi reportApi;
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  TransportPreferenceChoice selectedTransport =
-      TransportPreferenceChoice.balanced;
   late Future<UserProfile> profile;
-  int? _selectedProfileCharacter = 0;
-  Uint8List? _selectedProfileBytes;
+  late Future<TravelHistory> travelHistory;
+  int? _selectedProfileCharacter = _ProfileImageCache.characterIndex;
+  Uint8List? _selectedProfileBytes = _ProfileImageCache.bytes;
   bool _photoAccessExplained = false;
+  bool? _locationAllowed;
+  bool? _notificationAllowed;
 
   @override
   void initState() {
     super.initState();
-    profile = widget.userApi.getMe().then((value) {
-      final preferredModes = value.transportPrefs
-          .where((item) => item['preference'] == 'PREFER')
-          .map((item) => item['mode'])
-          .toSet();
-      if (preferredModes.contains('SUBWAY')) {
-        selectedTransport = TransportPreferenceChoice.subwayFirst;
-      } else if (preferredModes.contains('BUS')) {
-        selectedTransport = TransportPreferenceChoice.busFirst;
+    profile = widget.userApi.getMe();
+    final now = DateTime.now();
+    travelHistory = widget.reportApi.history(
+      from: DateTime(now.year, now.month - 2, 1),
+      to: now,
+    );
+    _loadPermissionStatus();
+  }
+
+  Future<void> _loadPermissionStatus() async {
+    try {
+      final location = await _AppPermissionController.hasLocationPermission();
+      final notification =
+          await _AppPermissionController.hasNotificationPermission();
+      if (mounted) {
+        setState(() {
+          _locationAllowed = location;
+          _notificationAllowed = notification;
+        });
       }
-      return value;
-    });
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _locationAllowed ??= false;
+          _notificationAllowed ??= false;
+        });
+      }
+    }
   }
 
   @override
@@ -5097,7 +5399,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return AppPage(
         title: '이동 설정',
         webTitle: '서비스 설정',
-        webSubtitle: '경로 추천 방식과 앱 권한, 계정 상태를 관리하세요.',
+        webSubtitle: '앱 권한과 계정 상태를 관리하세요.',
         child: content,
       );
     }
@@ -5126,15 +5428,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: _mobileAccountCard(context, user),
             ),
             const SizedBox(height: 2),
-            _settingsSectionTitle('교통수단 선호'),
-            const SizedBox(height: 10),
-            _mobileTransportSelector(),
-            const SizedBox(height: 16),
-            _mobilePermissionCard(),
-            const SizedBox(height: 14),
             _mobileServiceStatus(context),
             const SizedBox(height: 14),
+            _travelHistoryPreview(context),
+            const SizedBox(height: 14),
             _accountActionsCard(context),
+            const SizedBox(height: 14),
+            _mobilePermissionCard(),
             const SizedBox(height: 14),
             _logoutCard(context),
           ],
@@ -5253,22 +5553,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Text('이동 설정', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 4),
-                const Text('경로 추천에 사용할 교통수단과 앱 권한을 관리하세요.'),
-                const SizedBox(height: 16),
-                InfoCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const SectionHeader('교통수단 선호'),
-                      const SizedBox(height: 12),
-                      _transportSelector(),
-                    ],
-                  ),
-                ),
+                const Text('앱 권한과 계정 정보를 한곳에서 관리하세요.'),
                 const SizedBox(height: 16),
                 _permissionCard(),
                 const SizedBox(height: 16),
                 _serviceStatus(context),
+                const SizedBox(height: 16),
+                _travelHistoryPreview(context),
                 const SizedBox(height: 16),
                 _accountActionsCard(context),
               ],
@@ -5388,29 +5679,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 13),
-            const Row(
-              children: [
-                Expanded(
-                  child: _SettingsAccountAction(
-                    icon: Icons.person_outline_rounded,
-                    label: '닉네임 변경',
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: _SettingsAccountAction(
-                    icon: Icons.lock_outline_rounded,
-                    label: '비밀번호 변경',
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: _SettingsAccountAction(
-                    icon: Icons.delete_outline_rounded,
-                    label: '탈퇴하기',
-                  ),
-                ),
-              ],
+            _SettingsAccountAction(
+              icon: Icons.manage_accounts_outlined,
+              label: '계정 관리 화면 열기',
+              onTap: () => context.push('/settings/account'),
             ),
           ],
         ),
@@ -5441,6 +5713,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _selectedProfileCharacter = selection.characterIndex;
       _selectedProfileBytes = selection.bytes;
+      _ProfileImageCache.characterIndex = selection.characterIndex;
+      _ProfileImageCache.bytes = selection.bytes;
     });
   }
 
@@ -5499,118 +5773,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Widget _mobileTransportSelector() => RadioGroup<TransportPreferenceChoice>(
-    groupValue: selectedTransport,
-    onChanged: (choice) {
-      if (choice != null) _updateTransportPreference(choice);
-    },
-    child: Column(
-      children: TransportPreferenceChoice.values
-          .map((choice) {
-            final selected = choice == selectedTransport;
-            final icon = choice == TransportPreferenceChoice.subwayFirst
-                ? Icons.subway_rounded
-                : choice == TransportPreferenceChoice.busFirst
-                ? Icons.directions_bus_rounded
-                : Icons.commute_rounded;
-            final description = switch (choice) {
-              TransportPreferenceChoice.subwayFirst => '지하철을 우선으로 경로를 안내해요.',
-              TransportPreferenceChoice.balanced =>
-                '버스와 지하철을 모두 고려해 최적의 경로를 안내해요.',
-              TransportPreferenceChoice.busFirst => '버스를 우선으로 경로를 안내해요.',
-            };
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Material(
-                color: selected ? const Color(0xFFE8FBF8) : Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                child: InkWell(
-                  key: Key('transportPreference-${choice.name}'),
-                  onTap: () => _updateTransportPreference(choice),
-                  borderRadius: BorderRadius.circular(18),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.fromLTRB(14, 13, 8, 13),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFF12B8A6)
-                            : const Color(0xFFE8EEF2),
-                        width: selected ? 1.5 : 1,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x0D174B61),
-                          blurRadius: 14,
-                          offset: Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFDDF8F3),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            icon,
-                            color: const Color(0xFF10AD9E),
-                            size: 27,
-                          ),
-                        ),
-                        const SizedBox(width: 13),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                choice.label,
-                                style: const TextStyle(
-                                  color: Color(0xFF102454),
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                description,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xFF64708B),
-                                  fontSize: 12,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Radio<TransportPreferenceChoice>(value: choice),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          })
-          .toList(growable: false),
-    ),
-  );
-
   Widget _mobilePermissionCard() => _settingsCard(
-    child: const Column(
+    child: Column(
       children: [
         _SettingsPermissionRow(
           icon: Icons.location_on_outlined,
           title: '위치 권한',
           subtitle: '현재 위치 기반 경로 안내에 사용',
-          status: '항상 허용',
+          status: _permissionLabel(_locationAllowed),
+          onTap: _changeLocationPermission,
         ),
-        Padding(
+        const Padding(
           padding: EdgeInsets.symmetric(vertical: 4),
           child: Divider(height: 1, color: Color(0xFFE1E9EE)),
         ),
@@ -5618,11 +5791,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
           icon: Icons.notifications_none_rounded,
           title: '알림 권한',
           subtitle: '출발 시간과 지연 안내에 사용',
-          status: '허용됨',
+          status: _permissionLabel(_notificationAllowed),
+          onTap: _changeNotificationPermission,
         ),
       ],
     ),
   );
+
+  String _permissionLabel(bool? value) => switch (value) {
+    true => '허용됨',
+    false => '허용 안 됨',
+    null => '확인 중',
+  };
+
+  Future<void> _changeLocationPermission() async {
+    if (_locationAllowed == true) {
+      await _AppPermissionController.openSettings();
+      return;
+    }
+    final allowed = await _AppPermissionController.requestLocationPermission();
+    if (mounted) setState(() => _locationAllowed = allowed);
+  }
+
+  Future<void> _changeNotificationPermission() async {
+    if (_notificationAllowed == true) {
+      await _AppPermissionController.openSettings();
+      return;
+    }
+    final allowed =
+        await _AppPermissionController.requestNotificationPermission();
+    if (mounted) setState(() => _notificationAllowed = allowed);
+  }
 
   Widget _mobileServiceStatus(BuildContext context) => _settingsCard(
     color: const Color(0xFFFFFCFA),
@@ -5789,6 +5988,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         ListTile(
           contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.manage_accounts_outlined),
+          title: const Text('계정 관리'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/settings/account'),
+        ),
+        const Divider(),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.bookmarks_outlined),
           title: const Text('저장 장소 관리'),
           trailing: const Icon(Icons.chevron_right),
@@ -5816,58 +6023,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
-  Widget _transportSelector() => TransportPreferenceSelector(
-    value: selectedTransport,
-    onChanged: (value) async {
-      final previous = selectedTransport;
-      setState(() => selectedTransport = value);
-      try {
-        final updated = await widget.userApi.update(
-          transportPrefs: value.apiTransportPrefs,
+  Widget _travelHistoryPreview(BuildContext context) => InfoCard(
+    child: FutureBuilder<TravelHistory>(
+      future: travelHistory,
+      builder: (context, snapshot) {
+        final items = snapshot.data?.items.take(3).toList() ?? const [];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(child: SectionHeader('최근 이동 기록')),
+                TextButton(
+                  onPressed: () => context.push('/settings/records'),
+                  child: const Text('전체 보기'),
+                ),
+              ],
+            ),
+            if (snapshot.connectionState != ConnectionState.done)
+              const LinearProgressIndicator()
+            else if (snapshot.hasError)
+              const Text('이동 기록을 불러오지 못했어요.')
+            else if (items.isEmpty)
+              const Text('최근 이동 기록이 없어요.')
+            else
+              for (final item in items)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.directions_transit_outlined),
+                  title: Text(item.title),
+                  subtitle: Text(_fullDate(item.arriveBy)),
+                  trailing: Text(_arrivalResultText(item.result)),
+                ),
+          ],
         );
-        if (mounted) setState(() => profile = Future.value(updated));
-      } on Object {
-        if (!mounted) return;
-        setState(() => selectedTransport = previous);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('교통수단 설정을 저장하지 못했어요.')));
-      }
-    },
+      },
+    ),
   );
 
-  Future<void> _updateTransportPreference(
-    TransportPreferenceChoice value,
-  ) async {
-    final previous = selectedTransport;
-    setState(() => selectedTransport = value);
-    try {
-      final updated = await widget.userApi.update(
-        transportPrefs: value.apiTransportPrefs,
-      );
-      if (mounted) setState(() => profile = Future.value(updated));
-    } on Object {
-      if (!mounted) return;
-      setState(() => selectedTransport = previous);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('교통수단 설정을 저장하지 못했어요.')));
-    }
-  }
-
-  Widget _permissionCard() => const InfoCard(
+  Widget _permissionCard() => InfoCard(
     child: Column(
       children: [
         ListTile(
-          leading: Icon(Icons.location_on_outlined),
-          title: Text('위치 권한'),
-          subtitle: Text('현재 위치 기반 경로 안내에 사용'),
-          trailing: Text('항상 허용  ›'),
+          leading: const Icon(Icons.location_on_outlined),
+          title: const Text('위치 권한'),
+          subtitle: const Text('현재 위치 기반 경로 안내에 사용'),
+          trailing: Text('${_permissionLabel(_locationAllowed)}  ›'),
+          onTap: _changeLocationPermission,
         ),
-        Divider(),
+        const Divider(),
         ListTile(
-          leading: Icon(Icons.notifications_none),
-          title: Text('알림 권한'),
-          subtitle: Text('출발 시간과 지연 안내에 사용'),
-          trailing: Text('허용됨  ›'),
+          leading: const Icon(Icons.notifications_none),
+          title: const Text('알림 권한'),
+          subtitle: const Text('출발 시간과 지연 안내에 사용'),
+          trailing: Text('${_permissionLabel(_notificationAllowed)}  ›'),
+          onTap: _changeNotificationPermission,
         ),
       ],
     ),
@@ -6326,43 +6537,47 @@ class _ProfileImageSheetState extends State<_ProfileImageSheet> {
 }
 
 class _SettingsAccountAction extends StatelessWidget {
-  const _SettingsAccountAction({required this.icon, required this.label});
+  const _SettingsAccountAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 54,
-    padding: const EdgeInsets.symmetric(horizontal: 8),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF2F8FC),
+  Widget build(BuildContext context) => Material(
+    color: const Color(0xFFF2F8FC),
+    borderRadius: BorderRadius.circular(14),
+    child: InkWell(
+      onTap: onTap,
       borderRadius: BorderRadius.circular(14),
-    ),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, color: const Color(0xFF17243F), size: 20),
-        const SizedBox(width: 5),
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Color(0xFF17243F),
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
+      child: SizedBox(
+        height: 54,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: const Color(0xFF17243F), size: 20),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF17243F),
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
+            const SizedBox(width: 3),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: Color(0xFF62708B),
+              size: 18,
+            ),
+          ],
         ),
-        const SizedBox(width: 1),
-        const Icon(
-          Icons.chevron_right_rounded,
-          color: Color(0xFF62708B),
-          size: 17,
-        ),
-      ],
+      ),
     ),
   );
 }
@@ -6373,65 +6588,71 @@ class _SettingsPermissionRow extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.status,
+    required this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final String status;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 9),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 39,
-          child: Icon(icon, color: const Color(0xFF17243F), size: 27),
-        ),
-        const SizedBox(width: 7),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Color(0xFF102454),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF64708B),
-                  fontSize: 12,
-                  height: 1.3,
-                ),
-              ),
-            ],
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 39,
+            child: Icon(icon, color: const Color(0xFF17243F), size: 27),
           ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          status,
-          style: const TextStyle(
-            color: Color(0xFF5F6D89),
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF102454),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF64708B),
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 2),
-        const Icon(
-          Icons.chevron_right_rounded,
-          color: Color(0xFF65718B),
-          size: 20,
-        ),
-      ],
+          const SizedBox(width: 8),
+          Text(
+            status,
+            style: const TextStyle(
+              color: Color(0xFF5F6D89),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 2),
+          const Icon(
+            Icons.chevron_right_rounded,
+            color: Color(0xFF65718B),
+            size: 20,
+          ),
+        ],
+      ),
     ),
   );
 }

@@ -114,7 +114,7 @@ public class ScheduleEvaluationStore {
         if (cache == null) throw new IllegalStateException("후보 캐시가 없습니다.");
         var chosenResult = outcome.suggestion().proposed() != null ? outcome.suggestion().proposed() : outcome.selected();
         Long recommendationId = null;
-        if (chosenResult != null && chosenResult.estimatedArrivalAt() != null) {
+        if (outcome.preview() == null && chosenResult != null && chosenResult.estimatedArrivalAt() != null) {
             long seconds = Duration.between(chosenResult.departureAt(), chosenResult.estimatedArrivalAt()).getSeconds();
             Recommendation recommendation = recommendations.saveAndFlush(Recommendation.builder().schedule(s)
                     .route(routes.getReferenceById(cache.routeIds().get(chosenResult.journeyKey())))
@@ -198,6 +198,8 @@ public class ScheduleEvaluationStore {
         if (pending.isEmpty()) throw new BusinessException(ErrorCode.STALE_RECOMMENDATION);
         var row = pending.get(0);
         var result = read((String) row.get("result_json"), ScheduleEvaluationWorkflow.Outcome.class);
+        if (result != null && result.preview() != null)
+            throw new BusinessException(ErrorCode.INVALID_STATE, "검증용 ML 결과는 일정에 적용할 수 없습니다.");
         if (result == null || !result.evaluationId().equals(evaluationId) || result.suggestion().proposed() == null
                 || !Objects.equals(databaseTime(row.get("input_updated_at")), s.getUpdatedAt())
                 || row.get("last_error") != null || Boolean.TRUE.equals(row.get("stopped")) || s.getStatus() != ScheduleStatus.UPCOMING

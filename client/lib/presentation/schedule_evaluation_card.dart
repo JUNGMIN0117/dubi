@@ -75,7 +75,9 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
   Widget build(BuildContext context) {
     final state = data?['state'];
     final result = _map(data?['result']);
-    final selected = _map(result['selected']);
+    final preview = _map(result['preview']);
+    final isPreview = preview.isNotEmpty;
+    final selected = isPreview ? _map(preview['fastest']) : _map(result['selected']);
     final suggestion = _map(result['suggestion']);
     final proposed = _map(suggestion['proposed']);
     final hasChange = proposed.isNotEmpty && (proposed['journeyKey'] != result['selectedKey'] ||
@@ -104,17 +106,23 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
         const SizedBox(height: 8), Text(label),
         if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         if (result.isNotEmpty) ...[
+          if (isPreview) const Text('검증용 최소시간 후보 · 구간별 ML 적용 여부는 아래 표시'),
+          if (isPreview && selected.isEmpty) const Text('계산 가능하고 통제되지 않은 후보가 없습니다.'),
           Text('입력 출발: ${_time(result['plannedDepartAt'])}'),
           Text('예상 도착: ${_time(selected['estimatedArrivalAt'])}'),
           Text('계산: ${_time(result['checkedAt'])}'),
           const Text('배차와 실제 도착은 달라질 수 있습니다.'),
-          if (selected['tentative'] == true) const Text('일부 정보가 없어 경로 API 예상시간을 사용했습니다.'),
-          if (hasChange) ...[
+          if (selected['tentative'] == true) const Text('잠정 예측입니다. 배차와 모델 정확도 검증이 필요합니다.'),
+          if (isPreview) ...[
+            for (final candidate in (preview['candidates'] as List? ?? const []))
+              Text('${_map(_map(candidate)['result'])['journeyKey']}: ML 적용 ${_map(candidate)['mlSteps']}개, API 사용 ${_map(candidate)['apiSteps']}개'),
+          ],
+          if (hasChange || isPreview && proposed.isNotEmpty) ...[
             const Divider(),
             Text('제안 출발: ${_time(proposed['departureAt'])}'),
             Text('제안 도착: ${_time(proposed['estimatedArrivalAt'])}'),
             for (final value in routeSteps) Text(_stepLabel(_map(value))),
-            FilledButton(onPressed: busy || error != null || state != 'READY' ? null : () => _action(() =>
+            if (!isPreview) FilledButton(onPressed: busy || error != null || state != 'READY' ? null : () => _action(() =>
                 widget.repository.acceptEvaluation(widget.scheduleId, result['evaluationId'] as String)),
                 child: const Text('이 제안 적용')),
           ],

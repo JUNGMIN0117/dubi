@@ -30,11 +30,13 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
     @Autowired ScheduleEvaluationStore store;
     @Autowired JdbcTemplate jdbc;
     @MockitoBean PublicTransitRouteClient routeClient;
+    @MockitoBean BusPreviewClient mlClient;
     long owner;
     long scheduleId;
     Instant now;
 
     @BeforeEach void fixture() {
+        when(mlClient.predict(any())).thenReturn(BusPreviewClient.Estimate.unavailable("ML_NOT_CONFIGURED"));
         now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         owner = users.save(User.builder().email("evaluation@example.test").nickname("평가 테스트").build()).getId();
         var location = new LocationRequest("강남",new BigDecimal("37.4979"),new BigDecimal("127.0276"));
@@ -59,15 +61,30 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
                 .isEqualTo(LocalDateTime.ofInstant(now.plusSeconds(600),ZoneId.of("Asia/Seoul")));
     }
 
-    @Test void acceptingProposalRequiresOwnershipAndFreshEvaluationAndDoesNotUseArbitraryInput() {
+    @Test void previewCannotBeAcceptedOrCreateProductionRecommendation() {
         var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        assertThat(result.preview().status()).isEqualTo("PREVIEW");
         assertThatThrownBy(() -> store.accept(scheduleId,owner+1000,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> store.accept(scheduleId,owner,"wrong",now)).isInstanceOf(BusinessException.class);
-        store.accept(scheduleId,owner,result.evaluationId(),now);
-        assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("PENDING");
-        var after = workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(1));
-        assertThat(after.selectedKey()).isEqualTo("candidate-1");
-        verify(routeClient,times(1)).search(any());
+        assertThatThrownBy(() -> store.accept(scheduleId,owner,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recommendation",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT notification_json FROM schedule_evaluation WHERE schedule_id=?",String.class,scheduleId)).isNull();
+        assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("READY");
+    }
+
+    @Test void storedEvaluationUsesMlAndReturnsFastestCandidateAtUserDeparture() {
+        when(routeClient.search(any())).thenReturn(new RouteSearchResult("KAKAO",now,null,
+                List.of(MlRoutePreviewTest.route(0,"1",10,0,1),MlRoutePreviewTest.route(1,"2",900,0,1))));
+        when(mlClient.predict(any())).thenAnswer(call -> new BusPreviewClient.Estimate(
+                ((BusPreviewClient.Input)call.getArgument(0)).routeId().equals("1") ? 200.0 : 30.0,
+                "MODEL_NOT_PRODUCTION_READY","test-model",now,0,8,false));
+        var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        assertThat(result.preview().fastest().journeyKey()).isEqualTo("candidate-1");
+        assertThat(result.preview().fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(630));
+        assertThat(result.preview().fastest().departureAt()).isEqualTo(now.plusSeconds(600));
+        var stored = (ScheduleEvaluationWorkflow.Outcome) store.latest(scheduleId,owner).get("result");
+        assertThat(stored.preview().predictions()).hasSize(2);
+        assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("ML_PREVIEW");
+        assertThat(stored.recommendationId()).isNull();
     }
 
     @Test void canceledOrEditedScheduleCannotBeOverwrittenByInFlightEvaluation() {

@@ -12,7 +12,7 @@ import static com.ssafy.ddubi.domain.recommendation.evaluation.JourneyEvidence.*
 
 /**
  * 카카오 후보와 Spark 구간 상태를 한 번의 평가 증거로 고정한다. Redis는 읽기만 하며,
- * 미매핑·만료·형식 오류·연결 실패를 원본 fallback과 진단으로 남긴다. 현재 미승인 ML은 호출하지 않는다.
+ * 미매핑·만료·형식 오류·연결 실패를 원본 fallback과 진단으로 남긴다. ML 호출은 MlRoutePreview가 담당한다.
  * 대기 포함 여부가 확정되지 않은 카카오 step에는 도착 API의 대기를 임의 추가하지 않는다.
  */
 @Component
@@ -76,7 +76,7 @@ public class RouteEvidenceAssembler {
 
     /**
      * 카카오 총시간과 step 합의 차이는 위치 미확정 시간으로 한 번만 보존한다. 각 step 진입은
-     * 이 잔여시간만큼의 불확실성을 가지며, 그 범위 전체를 덮는 관측만 사용한다.
+     * 이 잔여시간만큼의 불확실성을 가진다. Redis의 이동 관측값은 시간 교체에 사용하지 않는다.
      * step 합이 총시간을 초과하면 분해를 신뢰하지 않고 전체 API 예상시간으로 fallback한다.
      */
     public Journey assemble(RouteCandidate candidate, Snapshot snapshot, Instant asOf) {
@@ -89,39 +89,10 @@ public class RouteEvidenceAssembler {
         var legs = new ArrayList<Leg>();
         for (RouteSegment segment : candidate.segments()) {
             var ids = edges(segment).stream().map(MappedTransitSegment::segmentId).toList();
-            // 전체 edge의 실제 이동 관측이 있을 때만 이동 step을 통째로 교체한다. delaySeconds를 다시 더하지 않는다.
-            // 응답에 분리되지 않은 대기/환승 합계는 뒤에서 한 번만 보존하고, 실제 진입은 [cursor,cursor+unassigned]로 본다.
-            Long observed = null;
-            Window usable = null;
-            if (!ids.isEmpty() && segment.mode() != TransportMode.WALK) {
-                double seconds = 0;
-                Instant available = Instant.MIN, expires = Instant.MAX;
-                boolean complete = true;
-                for (String id : ids) {
-                    JsonNode state = snapshot.states().get(id);
-                    if (state == null || !Set.of("normal", "slow", "delayed").contains(state.path("status").asText())
-                            || !state.path("observedSeconds").isNumber() || state.path("observationCount").asInt(0) < 1) {
-                        complete = false; break;
-                    }
-                    double value = state.path("observedSeconds").asDouble();
-                    if (!Double.isFinite(value) || value <= 0) { complete = false; break; }
-                    try {
-                        Instant computed = Instant.parse(state.path("computedAt").asText());
-                        Instant observation = Instant.parse(state.path("observedAt").asText());
-                        Instant until = Instant.parse(state.path("validUntil").asText());
-                        if (observation.isAfter(computed) || observation.isBefore(asOf.minusSeconds(300))) { complete = false; break; }
-                        if (computed.isAfter(available)) available = computed;
-                        if (until.isBefore(expires)) expires = until;
-                        seconds += value;
-                    } catch (RuntimeException badTime) { complete = false; break; }
-                }
-                if (complete && seconds < Long.MAX_VALUE && expires.isAfter(available)) {
-                    observed = (long) Math.ceil(seconds);
-                    usable = new Window("SEGMENT_OBSERVATION", available, available, expires);
-                }
-            }
+            // Redis는 통제/위험 근거만 제공한다. 이동시간은 ML 비교기가 별도로 계산하며
+            // 관측 중앙값을 모델 예측인 것처럼 교체하지 않는다.
             legs.add(new Leg("step-" + segment.sequence(), segment.mode() == TransportMode.WALK ? Kind.WALK : Kind.RIDE,
-                    ids, segment.durationSeconds(), observed, usable, List.of(), unassigned));
+                    ids, segment.durationSeconds(), null, null, List.of(), unassigned));
         }
         if (unassigned > 0) legs.add(new Leg("unassigned", Kind.UNASSIGNED, List.of(), unassigned, null, null, List.of()));
         return new Journey(key(candidate), legs);

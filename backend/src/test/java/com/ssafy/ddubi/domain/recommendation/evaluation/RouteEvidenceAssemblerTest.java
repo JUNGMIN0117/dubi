@@ -25,7 +25,7 @@ class RouteEvidenceAssemblerTest {
         return new RouteCandidate(index,RouteType.BUS,1000,seconds+residual,0,new FareRange(1500,1500),0,residual,List.of(leg));
     }
 
-    @Test void completeObservationReplacesMovementAndPreservesUnassignedTime() throws Exception {
+    @Test void redisObservationDoesNotReplaceMovementAndUnassignedTimeIsPreserved() throws Exception {
         var assembler = new RouteEvidenceAssembler(mock(StringRedisTemplate.class),json);
         var state = json.readTree("""
                 {"segmentId":"BUS:1:2:3","status":"delayed","observedSeconds":120,
@@ -35,8 +35,8 @@ class RouteEvidenceAssemblerTest {
         var snapshot = new RouteEvidenceAssembler.Snapshot(Map.of("BUS:1:2:3",state),List.of());
         var journey = assembler.assemble(candidate(0,60,30),snapshot,now);
         var result = new RouteTimelineEvaluator().evaluate(journey,now,now,now.plusSeconds(300),List.of());
-        // 120초 관측으로 60초 이동을 대체 + 원래 미배치 30초 = 150초. delaySeconds는 재가산하지 않는다.
-        assertThat(result.estimatedArrivalAt()).isEqualTo(now.plusSeconds(150));
+        // 관측 120초/지연 60초로 API 이동을 교체하지 않는다. API 60초 + 잔여 30초만 보존한다.
+        assertThat(result.estimatedArrivalAt()).isEqualTo(now.plusSeconds(90));
         assertThat(result.tentative()).isTrue();
         var future = new RouteTimelineEvaluator().evaluate(journey,now,now.plusSeconds(600),now.plusSeconds(1000),List.of());
         assertThat(future.estimatedArrivalAt()).isEqualTo(now.plusSeconds(690));

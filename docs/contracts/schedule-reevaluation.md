@@ -1,114 +1,93 @@
-# 일정 출발 전 재평가 — sched-v1
+# 일정 경로 ML 검증 — ml-prev-v1
 
-관련 Jira: S15P21E202-46. 사용자 입력 출발시각 저장부터 후보 재평가·제안 수락까지의 계약이다.
-새 코드가 작성된 상태이며, 아래 검증 현황과 미연결 범위를 배포 완료로 해석하지 않는다.
+## 현재 동작
 
-## 사용자 흐름
+사용자 일정 등록 → 카카오 후보 경로 조회/매핑 → 버스 인접 구간 ML 호출 → 후보별 총 소요시간 계산 → 최소시간 후보 하나 반환.
+현재는 **검증용 PREVIEW**다. 실제 모델은 버스 인접 구간의 시간대별 평균 초만 예측한다.
+버스 대기·지하철·환승·일반 도보는 카카오 시간이다. Redis 관측 소요시간으로 이동시간을 교체하지 않는다.
+Redis는 통제/위험 근거로만 읽으며 모델 HTTP 입력에는 포함되지 않는다.
 
-1. 일정 등록/수정에서 출발 날짜·시각과 도착 목표를 입력한다.
-2. `schedule.planned_depart_at`에 입력을 저장한다. `recommendation.depart_at`은 별도 제안이다.
-3. 감시기가 후보 경로를 확보하고 입력한 시각에 출발했을 때의 도착을 계산한다.
-4. 선택 경로가 늦거나 막히면 같은 출발시각의 대안을 먼저 찾고, 없으면 더 이른 출발 후보를 다시 계산한다.
-5. 화면에서 제안 경로·출발·도착·계산시각을 확인한다. 적용 버튼을 누른 경우에만 입력 출발과 선택 경로를 바꾼다.
-6. 실제 출발 확인, 일정 취소/완료 또는 목표 도착시각 경과 시 감시를 끝낸다.
+## 계산 규칙
 
-사용자 여유시간은 추가하지 않는다. 미래 버스 도착을 보장하지 않는다. 기존 출발 입력 없는 일정과
-반복 규칙에서 생성된 일정은 `DEPARTURE_REQUIRED`이며, 개별 일정에 출발 입력을 넣어야 감시한다.
-반복 규칙 자체의 출발시각 일괄 생성은 이 변경에 포함하지 않는다.
+- 같은 출발시각으로 모든 후보를 평가한다. 입력이 이미 과거면 현재시각으로 평가하고 결과의 departureAt에 남긴다.
+- 확정된 단일 canonical 버스 경로 중 서울 provider ID와 순번이 확인된 인접 edge만 요청한다.
+  경기·인천 namespace, 모호한 매핑, 비연속 순번은 임의로 서울 ID로 바꾸지 않는다.
+- Python `/v1/bus/predictions:batch`에 노선/출발·도착 정류장/순번/KST 진입 날짜·시간대를 보낸다.
+  앞 edge의 예측 초(올림)를 반영해 다음 edge의 날짜·시간대를 결정한다. 자정을 넘으면 날짜도 바뀐다.
+- 한 BUS step의 **전체 edge**가 예측되어야 카카오 step 시간을 ML 합으로 교체한다.
+  일부 실패는 해당 BUS step 전체를 카카오 시간으로 되돌리고 부분 예측은 applied=false로 보존한다.
+- 카카오 총시간에서 step 합을 뺀 미배치 대기·환승 시간은 한 번만 보존한다.
+  이 잔여시간 때문에 진입 가능한 시간대가 둘 이상이면 ENTRY_HOUR_UNCERTAIN으로 API fallback한다.
+- 나머지 구간은 API 시간을 사용한다. 총시간이 step 합보다 작으면 분해를 믿지 않고 API 총시간을 사용한다.
+- 계산 가능한 후보 중 통제로 제외되지 않은 최소 도착시각 한 건을 preview.fastest에 반환한다.
+  출발시각이 같으므로 최소 소요시간과 동일하다. 동률은 candidate key 순이다.
+  목표 도착에 모두 늦어도 최소시간 후보를 LATE_ESTIMATE로 반환한다. 모두 차단/계산 불가이면 null이다.
+- 모델의 참조 날짜 범위·요청 상관키·결과 키·예측 대상·수치·계산시각을 검증한다.
+  모델 mean_seconds는 0~86400초의 유한값만 받는다. 이는 비정상 응답 방어 상한이며 학습 정확도 기준이 아니다.
+- 한 비교 실행은 외부 요청 64회/20초 한도(진행 중 요청 timeout만큼 초과 가능), 동일 ID·날짜·시간대 캐시를 사용한다.
+  API가 배치 형식이어도 다음 edge의 진입시간이 앞 예측에 의존하여 현재는 edge당 한 건씩 순차 호출한다.
+  최대 1000개 배치 지원을 처리 성능 보장으로 해석하지 않는다. 신규 지각/통제로 후보를 갱신하면 한 번 더 비교할 수 있다.
 
-## 시간과 계산
+## 결과와 출처
 
-- 일정 생성/PATCH의 `plannedDepartAt`은 기존 일정 API와 같은 KST LocalDateTime이다.
-  예: `2026-09-11T08:30:00`. 생략/명시적 null은 기존 클라이언트 호환을 위해 허용한다.
-  도착시각보다 앞서야 한다. 응답에도 같은 필드를 반환한다.
-- 평가 내부/결과 Instant는 ISO 8601 절대시각이다. 화면은 KST로 변환한다. 기간 단위는 초다.
-- 등록/수정 후 첫 평가는 다음 감시기 실행에서 수행한다. 이후 기본은 출발 60~30분 전 10분,
-  30~10분 전 5분, 10분 이내 1분이다. 60분보다 많이 남으면 출발 60분 전까지 기다린다.
-  조기 출발 제안이 있으면 그 시각을 기준으로 다음 점검을 앞당긴다. 주기는 초기 실험 정책이다.
-- 감시기 목록 조회 주기 15초와 카카오 재요청 주기는 다르다. 카카오 후보는 기본 900초 캐시하며
-  입력 변경/만료/새 지각·통제 판정 때 갱신한다. 탐색하는 출발시각마다 API를 호출하지 않는다.
-- 총 예상시간에서 step 합을 뺀 잔여시간은 대기·환승 위치가 미확정인 시간이다. 한 번만 더하며,
-  각 step 진입 가능 시각 범위를 잔여시간만큼 넓혀 유효기간을 검사한다.
-- 확정된 canonical edge 전체의 `observedSeconds`, `observedAt`, `observationCount`,
-  `computedAt`, `validUntil`이 유효할 때 해당 이동 step 시간을 관측 합으로 교체한다.
-  `delaySeconds`를 다시 더하지 않는다. 관측 시각은 300초 이내이고 진입 범위 전체가 유효기간 안이어야 한다.
-- 부분 관측, 미매핑, Redis 장애, stale, 미래 이용은 API 시간 fallback과 `tentative=true`로 표시한다.
-  검증된 기준선/ML의 운영 연결은 아직 포함하지 않는다. `confidence=LOW`, `buffer_min=0`,
-  `percentile_used=null`이며 API 시간을 P50/P95나 도착 확률로 표시하지 않는다.
-- 조기 출발 탐색은 기본 60초 간격, 최대 3600초 전, 최대 2000회 평가다. 현재시각 이전은 제안하지 않는다.
-  각 시각에서 전체 타임라인을 다시 계산한다. 탐색 상한 도달은 `budgetExhausted=true`다.
-  배차 시간에 따른 결과는 단조롭지 않으므로 단순 지각분 차감/이분탐색을 사용하지 않는다.
-
-## 버스·사고·집회 경계
-
-순수 평가기는 검증된 차량 도착 범위와 대기 구간을 입력받아 놓친 차량/다음 차량/환승을 계산한다.
-그러나 현재 카카오 어댑터는 미래 출발 조회와 대기 분해를 제공하지 않는다. 따라서 실시간 버스 도착
-API를 이 흐름에 자동 결합하지 않으며, API fallback 제안은 잠정 예상이다. 실제 대기 연결에는
-승차 지점·방향·차량별 도착 범위·유효시간과 기존 API 대기 제거 계약이 먼저 필요하다.
-
-사고/집회 좌표를 여기서 임의로 매칭하지 않는다. 수집·전처리에서 canonical 구간으로 매핑한
-`segment.status`/Redis 상태를 사용한다. `blocked`가 실제 이용 시간과 겹칠 때 해당 후보를 제외한다.
-겹칠 가능성만 있으면 정보 부족으로 표시한다. 행사 존재만으로 몇 분 지연을 만들지 않는다.
-현재 위험은 후보별 `risks`로 제공한다. 대안은 카카오 후보 안에서만 찾는다.
-
-## API
-
-외부 경로는 모두 `/api/v1/schedules/{scheduleId}` 아래이며 인증·일정 소유권을 검사한다.
-
-| 메서드/경로 | 의미 |
-|---|---|
-| POST `/recommendations` | 즉시 최신 Redis로 평가. body 생략 가능. `forceRealtime`도 후보 TTL을 무시하지 않음 |
-| GET `/recommendations/latest` | `state`, 선택적으로 `result`, `nextCheckAt`, `lastError` 반환 |
-| POST `/recommendations/accept` | `{"evaluationId":"저장된 평가 ID"}`만 수락 |
-| POST `/departure` | 사용자 실제 출발 확인, 감시 종료 |
-
-최근 상태는 `DEPARTURE_REQUIRED`, `PENDING`, `READY`, `STALE`, `FAILED`, `STOPPED`다.
-`result`의 핵심 형태는 다음과 같다(설명용 축약이며 실제 응답에는 타임라인·근거가 추가된다).
+기존 POST `/api/v1/schedules/{scheduleId}/recommendations` 및 GET `/recommendations/latest`를 사용한다.
+인증과 일정 소유권을 검사하며 평가 결과는 schedule_evaluation.result_json에 저장한다.
 
 ```json
 {
-  "state": "READY",
-  "result": {
-    "evaluationId": "불변 평가 ID",
-    "plannedDepartAt": "2026-09-11T00:00:00Z",
-    "arriveBy": "2026-09-11T00:30:00Z",
-    "checkedAt": "2026-09-10T23:55:00Z",
-    "selectedKey": "candidate-0",
-    "selected": {"assessment": "LATE_ESTIMATE", "tentative": true},
-    "suggestion": {
-      "proposed": {"journeyKey": "candidate-1", "departureAt": "2026-09-11T00:00:00Z",
-        "estimatedArrivalAt": "2026-09-11T00:25:00Z", "tentative": true},
-      "budgetExhausted": false
-    }
+  "preview": {
+    "status": "PREVIEW",
+    "productionReady": false,
+    "fastest": {
+      "journeyKey": "candidate-1",
+      "departureAt": "2026-09-11T00:00:00Z",
+      "estimatedArrivalAt": "2026-09-11T00:10:00Z",
+      "assessment": "ON_TIME_ESTIMATE",
+      "tentative": true
+    },
+    "candidates": [],
+    "predictions": [],
+    "budgetExhausted": false
   }
 }
 ```
 
-수락 시 입력 버전, 소유권, 평가 ID, 이벤트 revision, 취소/출발 여부를 검사한다.
-60초보다 오래된 평가나 이미 지난 제안은 `STALE_RECOMMENDATION`으로 거절한다.
-다른 경로가 더 빠르더라도 현재 선택이 정시 예상이면 변경 제안을 자동으로 만들지 않는다.
+위는 핵심 필드만 보인 축약 예시다. 실제 candidates에는 각 Result, quality, mlSteps, apiSteps가 있다.
+quality는 ML_PREVIEW(전 요소 ML), MIXED_PREVIEW(ML+API), API_ONLY(ML 적용 없음)다.
+predictions에는 provider 입력, 실제 진입 예상시각, 모델 버전/계산시각/결측 수/표본 수,
+초 단위 결과, 실패 이유, applied가 저장된다. 모델 실패를 0초 또는 ML 성공으로 표시하지 않는다.
+ML_NOT_CONFIGURED, ML_TIMEOUT, ML_HTTP_UNAVAILABLE, ML_INVALID_RESPONSE,
+UNSEEN_PROVIDER_ID, REFERENCE_DATE_UNSUPPORTED 등을 구분한다.
 
-내부 트리거는 `POST /internal/recommendations/segment-changes`, body
-`{"segmentIds":["BUS:1:2:3"]}`이며 기존 `X-DDUBI-API-KEY` 인증을 사용한다. 최대 1000개다.
-Kafka 소비는 opt-in이며 같은 `segment.status`를 받아 영향받는 선택 경로 일정을 깨운다.
-역조회는 `route_segment_edge → route_segment → 선택 route → UPCOMING schedule`이다.
+selected는 기존 선택 경로의 평가이며 최단 후보와 다를 수 있다. 최종 검증 후보는 preview.fastest다.
+suggestion.proposed는 기존 응답 형태와의 호환을 위해 같은 최단 후보를 담는다.
+새 PREVIEW 평가에서는 recommendation 테이블에 운영 추천을 만들지 않고 알림도 생성하지 않는다.
+수락 API는 PREVIEW를 INVALID_STATE로 거절한다. 출발시각을 자동으로 바꾸지 않는다.
+클라이언트는 검증용 최소시간 후보와 구간별 ML/API 사용량을 표시하고 적용 버튼은 숨긴다.
 
-## 저장·실패·알림
+기존 상태 PENDING/READY/STALE/FAILED/STOPPED/DEPARTURE_REQUIRED를 유지한다.
+READY는 계산 완료이며 모델 운영 승인과 다르다. 카카오 전체 실패는 FAILED, ML 실패만 있으면
+API_ONLY 등 대체 결과를 반환한다. 버스 배차를 보장하지 않으며 조기 출발 탐색은 이번 검증 흐름에서 실행하지 않는다.
 
-V5 migration은 출발 입력, nullable percentile, `schedule_evaluation` 작업 상태를 추가한다.
-120초 lease와 입력 `updated_at`을 대조해 중복 실행/늦은 계산 덮어쓰기를 막는다.
-외부 I/O는 트랜잭션 밖, 후보·추천·알림 대기 저장은 하나의 트랜잭션이다.
-계산 중 새 이벤트는 다음 계산을 즉시 예약한다. 실패는 정제된 오류 코드와 60초 재시도 시각으로 남긴다.
-원본 URL/키는 저장하거나 노출하지 않는다.
+## 저장·재계산·이벤트
 
-알림은 기존 NotificationService의 사용자 설정·억제키·실패 상태를 사용한다. 입력 변경/취소/만료된
-결과의 대기 알림은 보내지 않는다. FCM exactly-once나 실패 푸시의 무한 재시도는 보장하지 않는다.
-추천은 매번 별도 행으로 보존하며 캐시 후보와 증거 스냅샷으로 순수 평가를 재현할 수 있다.
+V5의 planned_depart_at, nullable percentile_used, schedule_evaluation 구조를 그대로 사용한다. 추가 migration은 없다.
+사용자 시간은 기존 API와 같은 KST LocalDateTime, 결과/모델 계산시각은 ISO 8601 절대시각, 기간은 초다.
+120초 lease와 입력 updated_at 검증으로 늦은 결과 덮어쓰기를 막는다. 외부 호출은 DB 트랜잭션 밖이다.
+최초 평가 후 출발 60~30분 전 10분, 30~10분 전 5분, 10분 이내 1분 간격으로 평가한다.
+카카오 후보 캐시 기본은 900초, 목록 감시기는 15초다. 출발 입력 없는 기존/반복 일정은 입력 후 평가한다.
+출발 확인·취소·완료·목표 도착시간 경과 시 감시를 종료한다.
 
-## 실행과 검증
+이벤트는 이미 매핑된 구간 ID와 시간 교집합을 사용한다. blocked는 해당 이용시각에 겹치는 후보를 제외한다.
+집회/사고 원문에서 영향 도로·방향·canonical 구간 ID를 만드는 앞단은 여전히 후속 작업이다.
+행사 존재만으로 몇 분 지연을 만들지 않는다. 영향 일정 트리거는 기존 선택 route의 route_segment_edge로 조회한다.
+POST /internal/recommendations/segment-changes와 opt-in Kafka segment.status 소비 계약은 유지한다.
 
-실행 설정과 테스트 명령은 [백엔드 실행 메모](../../backend/SCHEDULE_EVALUATION.md)를 따른다.
-2026-09-10 계산·관측·경로 회귀 테스트 20개 통과. 이후 로컬 Docker 연결 후 JDBC 날짜 반환 타입 오류를 수정하여
-MySQL/Redis 통합 테스트 5개와 계산 테스트 14개를 함께 재실행해 모두 통과했다. V5 적용도 테스트 DB에서 확인했다.
-Flutter SDK 부재로 화면 빌드/실기기 검증은 미실행이다.
-실제 카카오·FCM·Kafka 연동과 운영 주기/호출량 검증도 배포 전에 필요하다.
+## 제한과 검증
+
+현재 v12는 production_ready=false, training_ids_verified=false다. 서버 마스터의 경로 인접성 검증과
+모델 학습 원천의 ID 조합 검증은 다르다. 모델 정확도와 실제 사용자 경로 매핑 검증은 별도로 필요하다.
+실시간 교통/날씨 특성을 모델에 연결한 상태가 아니다. 지원 날짜 밖은 새 참조 묶음을 만들어야 한다.
+
+실행 설정과 테스트는 [백엔드 실행 메모](../../backend/SCHEDULE_EVALUATION.md)를 따른다.
+실제 카카오 수집→실시간 이벤트→화면/FCM의 운영 전체 검증과 Flutter 빌드는 별도 미검증이다.

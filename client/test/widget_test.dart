@@ -690,6 +690,25 @@ void main() {
     expect(find.text('버스 우선'), findsNothing);
     expect(find.text('도보'), findsNothing);
     expect(find.text('택시'), findsNothing);
+
+    await tester.drag(
+      find.byKey(const Key('mobileSettingsLayout')),
+      const Offset(0, -1000),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('logoutCardButton')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('logoutConfirmationDialog')), findsOneWidget);
+    expect(find.byKey(const Key('logoutDialogCharacter')), findsOneWidget);
+    expect(find.text('로그아웃할까요?'), findsOneWidget);
+    expect(find.text('다시 로그인하면 일정과\n추천 경로를 확인할 수 있어요.'), findsOneWidget);
+    expect(find.byKey(const Key('logoutCancelButton')), findsOneWidget);
+    expect(find.byKey(const Key('logoutConfirmButton')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('logoutCancelButton')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('logoutConfirmationDialog')), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Mock 지도에서 현재 위치와 출발지·도착지 및 후보를 구분한다', (tester) async {

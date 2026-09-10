@@ -462,6 +462,7 @@ class AppPage extends StatelessWidget {
     this.fab,
     this.webTitle,
     this.webSubtitle,
+    this.mobileTitleStyle,
   });
   final String title;
   final Widget child;
@@ -471,6 +472,7 @@ class AppPage extends StatelessWidget {
   final Widget? fab;
   final String? webTitle;
   final String? webSubtitle;
+  final TextStyle? mobileTitleStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -509,7 +511,10 @@ class AppPage extends StatelessWidget {
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        title: Text(title, style: Theme.of(context).textTheme.titleMedium),
+        title: Text(
+          title,
+          style: mobileTitleStyle ?? Theme.of(context).textTheme.titleMedium,
+        ),
         centerTitle: false,
         actions: actions,
       ),

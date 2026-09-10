@@ -7,6 +7,7 @@ class ApiPaths {
       '/auth/email/verification/confirm';
   static const String oauthTokenLogin = '/auth/oauth/token';
   static const String oauthIdTokenLogin = '/auth/oauth/id-token';
+  static const String oauthLink = '/auth/oauth/link';
   static const String signUp = '/auth/local/signup';
   static const String refresh = '/auth/refresh';
   static const String logout = '/auth/logout';

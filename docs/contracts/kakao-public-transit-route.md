@@ -72,21 +72,15 @@ API/도메인 모델은 초와 m를 사용한다. 현재 DB의 `base_duration_mi
 이름 변경·동명이 정류장 때문에 파이프라인 키가 깨질 수 있다.
 
 1. `WALK`는 기존 계약대로 `segment_id=null`이며 서울 교통 마스터 매핑 대상이 아니다.
-2. `BUS`, `SUBWAY`는 이름과 통과 순서를 활성 서울 마스터 버전에 대조한다. BUS는 여기에
-   path 첫·끝과 공식 승·하차 정류장의 절대거리 및 승차→하차 방향 배정 검증까지 필수로 적용한다.
+2. `BUS`는 수도권 마스터, `SUBWAY`는 서울 지하철 마스터에 대조한다. 버스는 차량 대안별로 이름·순서·승하차 좌표·중간 정류장·공식 형상을 확인한다.
 3. 유일하게 확정된 `EXACT`만 승차~하차 사이의 공식 인접 정류장·역 구간을 반환한다.
 4. `PARTIAL`, `AMBIGUOUS`, `UNMAPPED`는 임의 후보를 고르지 않고 실패 이유를 보존한다.
 5. `EXACT`의 각 공식 인접 구간에는 `BUS:{routeId}:{fromStopId}:{toStopId}` 또는
    `SUB:{staticSubwayId}:{staticFromStationId}:{staticToStationId}` 형식의 ID를 만든다.
    지하철 실시간 `subwayId/statnId`는 canonical ID에 섞지 않고 별도 crosswalk로 제공한다.
-6. 실제 등장한 카카오 구간은 교통수단·이름·전체 통과 순서와 BUS path 양 끝 좌표의
-   SHA-256, 활성 마스터 버전, 좌표 허용 반경·별칭을 포함한 매핑 정책 fingerprint로
-   캐시한다. EXACT만 재사용하며 수동 `REJECTED`는 재계산하지 않고 차단한다.
-7. 별칭은 `transit_alias.verified=true`인 행만 적용하며, 문자열을 공식 이름으로 바꾸지 않고
-   `canonical_id` 후보 집합을 직접 제한한다. 환승역·동명 정류장처럼 같은 별칭이 여러
-   노선별 ID를 가리키면 현재 노선/호선 topology 안에서만 후보를 남긴다.
-8. BUS `vehicles[]`가 서로 다른 노선 대안을 뜻하면 단일 segment로 축소하지 않는다. 현재
-   MVP 응답 모델에서는 `AMBIGUOUS` 또는 마스터 일부 누락 시 `PARTIAL`로 남긴다.
+6. BUS 캐시는 전체 원문 차량명·정류장열·전체 경로 좌표와 마스터/정책/검토일을 전용 테이블에 저장한다. SUBWAY는 이름·역 순서·지하철 마스터/별칭 정책을 기존 캐시에 저장한다. EXACT만 재사용하고 수동 `REJECTED`는 차단한다.
+7. 지하철 별칭은 `transit_alias.verified=true`인 canonical ID 후보를 사용한다. 버스 수동 대응은 수도권 artifact의 검토일·전체 요청 해시·출처 경로 범위에 한정하며 과거 전역 BUS 별칭은 사용하지 않는다.
+8. BUS `vehicles[]`는 독립 `busAlternatives[]`로 보존한다. 여러 차량 또는 여러 출처 후보는 상위 PARTIAL로 남기고 선택한 VERIFIED 경로의 edge만 사용한다.
 
 지하철은 하나의 호선·방향에도 본선, 지선, 단축운행이 존재하므로 현재 운행시각표의 일반 열차
 역 순서를 `service_pattern_id`별로 보존한다. 서로 다른 패턴이 동일한 승차~하차 역 경로를
@@ -94,11 +88,10 @@ API/도메인 모델은 초와 m를 사용한다. 현재 DB의 `base_duration_mi
 이어 붙이지 않는다. 단, 시간표는 물리 topology의 최종 진실이 아니므로 공식 노선-역순서
 자료 또는 수동 정답 corpus로 검증하기 전에는 운영 정확도가 입증된 것으로 보지 않는다.
 
-개발 초기 마이그레이션 정책에 따라 `V1__init.sql`에 기존 ODSAY 호환성과 KAKAO 기본값,
-서울 교통 마스터 테이블을 함께 정의한다. 기존 V1 적용 DB는 초기화한 뒤 다시 생성해야 한다.
+기존 마스터 스키마는 V1~V3를 유지하고 수도권 버스 저장소·캐시는 새 V4로 추가한다. 기존 DB를 초기화하거나 과거 마이그레이션을 변경하지 않는다.
 
 현재 `POST /api/v1/routes/search`는 사용자 경로 자체를 저장하지 않지만, 대중교통 step의
-매핑 판정은 `provider_segment_mapping`에 캐시한다. 일정·후보 저장은 별도 Repository 책임이다.
+지하철 판정은 `provider_segment_mapping`, 버스 판정은 `metropolitan_bus_mapping_cache`에 캐시한다. 일정·후보 저장은 별도 Repository 책임이다.
 향후 저장 시 provider step은 `route_segment`, 그 안의 모든 공식 인접 구간은
 `route_segment_edge`에 1:N으로 저장한다. 여러 정거장을 지나는 정상 step의 edge를 JSON에만
 남기거나 상위 `segment_id=NULL`만 저장하면 영향 일정 역조회에서 누락되므로 허용하지 않는다.
@@ -117,6 +110,18 @@ API/도메인 모델은 초와 m를 사용한다. 현재 DB의 `base_duration_mi
 - 지하철 topology EXACT와 실시간 crosswalk `NONE/PARTIAL/FULL` 비율
 
 또한 `provider_segment_mapping`은 카카오 요청 판정 캐시이지 Collector/Spark용 공용
-crosswalk 레지스트리가 아니다. Collector/Spark가 같은 버전의 canonical topology와 실시간
-provider ID 대응표를 받는 인증 API·versioned artifact·compacted topic 중 하나가 별도 확정되어야
-end-to-end 실시간 보정이 성립한다.
+crosswalk 레지스트리가 아니다. Collector/Spark는 같은 버전과 SHA의 별도 crosswalk artifact를
+기동 시 읽고 BUS 관측을 독립 검증한다. 대응표 배포와 실시간 소요시간 연산의 운영 검증은 별개다.
+# 수도권 버스 매핑 확장 (2026-09-10)
+
+BUS 매핑은 기본적으로 수도권 마스터만 사용한다. 활성 마스터가 없으면 명시적으로 미구성 상태를 반환한다.
+기존 `mapping` 결과에 `busAlternatives[]`를 추가하여 차량별 ID 확인과 공간 검증 상태를
+분리한다. 공식 출처 ID를 공용 `segment_id`로 임의 변환하지 않으며 여러 차량 대안의
+edge를 합치지 않는다. 단일 검증 대안/출처는 서울·경기·인천 모두 canonical-adjacent-v2의
+EXACT/segments를 발급한다. 지하철과 도보의 기존 의미는 유지한다.
+
+필드·캐시·검토일 정책은 [수도권 버스 매핑 계약](metropolitan-bus-mapping.md),
+적재·활성화 방법은 [마스터 적용 안내](../../backend/transit-master/README.md)를 따른다.
+
+응답의 `busEvaluations`와 추가 BUS 품질 집계, ML fallback, 선택 경로 저장의 내부 호출 계약은
+[수도권 구간 연결 계약](metropolitan-segment-integration.md)을 따른다.

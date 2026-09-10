@@ -89,12 +89,15 @@ endpoints:
         노선 폐지처럼 구간이 실제로 줄어드는 정상 축소를 운영자가 미리 알고 한 번만 허용하는 용도.
         totalRows 대조는 그대로 한다. (2026-09-08 추가 — backend 질문 "정상적인 급감은 어떻게 하나"의 답)
       shrinkReason: >-
-        allowShrink=true 면 필수(비어 있으면 400). 서버는 로그와 pipeline_config(baseline_last_shrink_reason)에 남긴다.
+        allowShrink=true 면 필수(비어 있으면 400). **maxLength 100** — 저장 칸 pipeline_config.config_value 가 VARCHAR(100)이라
+        넘으면 서버가 400 으로 거절한다(조용히 잘리는 것을 막기 위해, 2026-09-09 backend 제안). 형식은 "짧은 사유 + 이슈 번호"
+        (예: "2026-09-08 노선 3개 폐지 (#63)"). 긴 근거·링크는 이슈에 두고 여기서는 가리키기만 한다.
+        서버는 로그와 pipeline_config(baseline_last_shrink_reason)에 남긴다. 이 기록은 나중에 "왜 축소를 허용했나"를 설명하기 위한 것.
         Spark 쪽은 환경변수 BASELINE_ALLOW_SHRINK=true / BASELINE_SHRINK_REASON 이 있을 때만 이 필드를 보내고, 실행 뒤 변수를 지운다.
     responses:
       "200": '{"activeVersion": "2026-09-01", "previousVersion": "2026-08-31", "rowCount": 252000, "activatedAt": "2026-09-01T03:12:44.123456", "purgedVersions": ["2026-08-30"]}'
          # 2026-09-08 정정: 계약 초안의 activated/previous/deletedVersions 를 구현 필드명으로 맞춤
-      "400": "allowShrink=true 인데 shrinkReason 이 비어 있음"
+      "400": "allowShrink=true 인데 shrinkReason 이 비어 있거나 100자를 넘음"
       "409": "행 수 불일치 또는 급감 감지(allowShrink 없을 때). 활성 버전은 바뀌지 않음"
       "401": "API 키 없음/불일치"
 

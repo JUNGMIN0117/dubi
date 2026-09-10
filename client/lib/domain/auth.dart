@@ -1,6 +1,7 @@
 enum AuthErrorCode {
   invalidCredentials,
   emailAlreadyExists,
+  accountLinkRequired,
   connectionFailed,
   registrationRequiresVerification,
   serverError,
@@ -11,6 +12,21 @@ class AuthException implements Exception {
 
   final AuthErrorCode code;
   final String? message;
+}
+
+class AccountLinkRequiredException extends AuthException {
+  const AccountLinkRequiredException({
+    required this.linkToken,
+    required this.provider,
+    required this.email,
+  }) : super(
+         AuthErrorCode.accountLinkRequired,
+         message: '기존 이메일 계정 확인이 필요합니다.',
+       );
+
+  final String linkToken;
+  final String provider;
+  final String email;
 }
 
 class AuthUser {
@@ -92,6 +108,10 @@ abstract interface class AuthRepository {
     required String provider,
     required String idToken,
   });
+  Future<void> linkOAuthAccount({
+    required String linkToken,
+    required String password,
+  });
   Future<void> requestEmailVerification(String email);
   Future<void> confirmEmailVerification({
     required String email,
@@ -128,6 +148,17 @@ class MockAuthRepository implements AuthRepository {
     required String idToken,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+
+  @override
+  Future<void> linkOAuthAccount({
+    required String linkToken,
+    required String password,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    if (linkToken.isEmpty || password != 'password123') {
+      throw const AuthException(AuthErrorCode.invalidCredentials);
+    }
   }
 
   @override

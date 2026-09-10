@@ -75,6 +75,21 @@ class AuthApi {
     );
   }
 
+  Future<Response<Map<String, dynamic>>> linkOAuthAccount({
+    required String linkToken,
+    required String password,
+    String? deviceId,
+  }) {
+    return _dio.post<Map<String, dynamic>>(
+      ApiPaths.oauthLink,
+      data: {
+        'linkToken': linkToken,
+        'password': password,
+        'deviceId': ?deviceId,
+      },
+    );
+  }
+
   Future<void> logout({
     required String refreshToken,
     required String deviceId,

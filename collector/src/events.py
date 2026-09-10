@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,12 +33,12 @@ class TransportEvent(BaseModel):
     eventId: str
     eventType: str = Field(min_length=1)
     source: str = Field(min_length=1)
-    region: str | None = None
+    region: Optional[str] = None
     occurredAt: datetime
     collectedAt: datetime
-    location: Location | None = None
-    segmentIds: list[str] | None = None
-    payload: dict[str, Any]
+    location: Optional[Location] = None
+    segmentIds: Optional[List[str]] = None
+    payload: Dict[str, Any]
 
 
 class CityEvent(BaseModel):
@@ -51,9 +51,9 @@ class CityEvent(BaseModel):
     source: str = Field(min_length=1)
     occurredAt: datetime
     collectedAt: datetime
-    location: Location | None = None
-    segmentIds: list[str] | None = None
-    payload: dict[str, Any]
+    location: Optional[Location] = None
+    segmentIds: Optional[List[str]] = None
+    payload: Dict[str, Any]
 
 
 SCHEMA_MODELS = {"transport": TransportEvent, "city": CityEvent}
@@ -65,7 +65,7 @@ def _to_kst(dt: datetime) -> datetime:
     return dt.astimezone(KST)
 
 
-def build_event(spec: SourceSpec, record: Record, collected_at: datetime) -> dict[str, Any]:
+def build_event(spec: SourceSpec, record: Record, collected_at: datetime) -> Dict[str, Any]:
     """Record 를 계약에 맞는 이벤트 dict 로 만든다 (JSON 직렬화 가능한 형태)."""
     location = Location(latitude=record.location[0], longitude=record.location[1]) if record.location else None
     segment_ids = sorted(set(record.segment_ids)) if record.segment_ids else None  # uniqueItems

@@ -58,6 +58,7 @@ public class InternalBaselineController {
     @Operation(summary = "기준선 버전 활성화",
             description = """
                     그 버전을 서빙 대상으로 전환한다. 행이 0건이면 400.
+                    allowShrink=true 면 급감 검사만 건너뛴다. 그때 shrinkReason 은 필수(없으면 400).
                     본문의 totalRows 와 저장된 행 수가 다르면 409 — 청크 유실을 잡는 체크섬이다.
                     직전 활성 버전의 절반 미만으로 줄어도 409.
                     직전 버전은 롤백용으로 보존하고, 48시간 지난 고아 버전은 함께 정리한다.
@@ -69,7 +70,13 @@ public class InternalBaselineController {
             @PathVariable String dataVersion,
             @Valid @RequestBody BaselineActivateRequest request) {
         requireSupportedType(baselineType);
-        return ApiResponse.success(baselineIngestService.activate(dataVersion, request.totalRows()));
+        if (request.isReasonMissing()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                    "allowShrink 를 켜려면 shrinkReason 이 필요합니다. 급감 검사를 끄는 것은 "
+                            + "사람이 책임지고 넘기는 행위라, 왜 넘겼는지 남아야 합니다.");
+        }
+        return ApiResponse.success(baselineIngestService.activate(
+                dataVersion, request.totalRows(), request.allowShrinkOrFalse(), request.shrinkReason()));
     }
 
     private void requireSupportedType(String baselineType) {

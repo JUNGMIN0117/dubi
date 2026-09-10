@@ -54,7 +54,8 @@ $DC1 --profile replay run --rm replay-producer python -m replay --source-topic c
 
 ## 예방·후속
 
-- **죽은 직후 10분의 읽기 실패**가 실제 약점이다. 원인은 네임노드의 사망 판정 지연(heartbeat.recheck 5분 × 2 + 30초)과, WebHDFS 클라이언트(fsspec)가 리다이렉트된 데이터노드 접속 실패 시 다른 복제본으로 재시도하지 않는 것. 조치 후보: ① hdfs-site.xml 의 `dfs.namenode.heartbeat.recheck-interval` 을 30000(→ 사망 판정 약 1분 30초)으로 ② replay·아카이버 읽기에 재시도 추가. ①은 xml 변경이라 네임노드 재생성 필요.
+- **죽은 직후의 읽기 실패**가 9/7 연습에서 드러난 약점이었다. 원인은 네임노드의 사망 판정 지연(heartbeat.recheck 5분 × 2 + 30초 = 10분 30초)과, WebHDFS 클라이언트(fsspec)가 리다이렉트된 데이터노드 접속 실패 시 다른 복제본으로 재시도하지 않는 것.
+- **2026-09-09 보완(적용)**: ① `dfs.namenode.heartbeat.recheck-interval` 30000 → 사망 판정 약 1분 30초 ② `dfs.namenode.avoid.read.stale.datanode` true → 심장박동 30초 끊긴 노드는 읽기 대상에서 뒤로 밀림(리다이렉트가 죽은 노드로 가는 창이 30초로 줄어듦) ③ 아카이버 쓰기·replay 읽기에 재시도 3회(2·4·8초) ④ 네임노드 헬스체크(세이프 모드 해제 = healthy). 따라서 위 증상 표의 "10분 30초" 는 "약 1분 30초(읽기 우회는 30초)" 로 읽는다. 다음 연습에서 재측정해 표를 고친다.
 - HDFS 에 파일을 쓰는 클라이언트마다 복제 계수를 2 로 맞춰야 한다. Spark 는 `spark-defaults.conf` 의 `spark.hadoop.dfs.replication 2`, 아카이버는 네임노드 기본값. 새 클라이언트가 생기면 확인한다.
 - 데이터노드 메모리 상한(1GiB)과 힙(512m)은 자바 8·cgroup v2 문제로 명시해 두었다. 이 값은 지우지 않는다.
 - HDFS 설정 xml 은 단일 파일 마운트라 고친 뒤 컨테이너를 재생성해야 반영된다 (`up -d --force-recreate`).

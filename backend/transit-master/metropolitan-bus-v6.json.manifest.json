@@ -1,0 +1,9 @@
+{
+  "version": "CSV-V5-34dc30aa763b-KAKAO-REVIEW-V6",
+  "routes": 1578,
+  "stops": 106650,
+  "reviewedScopes": 18,
+  "sha256": "e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64",
+  "sourceCsvSha256": "0721dc4d0d41345b0ee70a496a99845755fc00e5b5d515d1bb3fb89d192e4c1e",
+  "sourceMetadataSha256": "73a61de53f471ba80b6fbf6c24ba16c8ff4d9525b469658446090e4149a99694"
+}

@@ -28,12 +28,29 @@ class Settings:
     api_keys: dict[str, str] = field(default_factory=dict)
     extra: dict[str, str] = field(default_factory=dict)  # 소스별 추가 설정 (예: WEATHER_GRID_POINTS)
 
-    API_KEY_NAMES = ("KAKAO_REST_API_KEY", "SEOUL_API_KEY", "DATA_GO_KR_API_KEY", "KMA_API_KEY")
+    API_KEY_NAMES = (
+        "KAKAO_REST_API_KEY",
+        "SEOUL_API_KEY",
+        "DATA_GO_KR_API_KEY",
+        "KMA_API_KEY",
+        "BUS_ARRIVAL",
+        "BUS_LOCATION",
+        "SUBWAY_API_KEY",
+        "CITY_API_KEY",
+        "SUBWAY_ALERT_API_KEY",
+        "TOPIS_NOTICE_API_KEY",
+        "SEOUL_EMERGENCY_API_KEY",
+    )
     # 수집 범위는 코드에 박지 않는다. 운영 환경마다 대상 노선·역·도로 링크와 호출 한도가
     # 다르므로 쉼표 구분 환경변수로 주입하고, 비밀값은 위 API_KEY_NAMES에만 둔다.
     EXTRA_NAMES = (
+        "BUS_CROSSWALK_PATH",
+        "BUS_CROSSWALK_SHA256",
+        "API_BUDGET_PATH",
+        "API_DAILY_LIMIT",
         "WEATHER_GRID_POINTS",
         "BUS_ROUTE_IDS",
+        "BUS_ROUTE_LIMIT",
         "SUBWAY_LINES",
         "SUBWAY_STATIONS",
         "TRAFFIC_LINK_IDS",

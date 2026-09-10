@@ -16,11 +16,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final googleLoginService = ref.watch(googleLoginServiceProvider);
   final naverLoginService = ref.watch(naverLoginServiceProvider);
   final placeSearchService = ref.watch(placeApiProvider);
+  final savedPlaceApi = ref.watch(savedPlaceApiProvider);
   final homeApi = ref.watch(homeApiProvider);
   final repeatScheduleRepository = ref.watch(repeatScheduleRepositoryProvider);
   final notificationApi = ref.watch(notificationApiProvider);
   final userApi = ref.watch(userApiProvider);
   final recommendationApi = ref.watch(recommendationApiProvider);
+  final arrivalApi = ref.watch(arrivalApiProvider);
+  final reportApi = ref.watch(reportApiProvider);
 
   return GoRouter(
     initialLocation: '/intro',
@@ -67,6 +70,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 ),
               ),
               GoRoute(
+                path: 'repeats',
+                builder: (context, state) => RepeatSchedulesScreen(
+                  repository: repeatScheduleRepository,
+                  placeSearchService: placeSearchService,
+                ),
+              ),
+              GoRoute(
+                path: 'repeats/:id/edit',
+                builder: (context, state) => RepeatScheduleEditScreen(
+                  repository: repeatScheduleRepository,
+                  placeSearchService: placeSearchService,
+                  repeatId: state.pathParameters['id']!,
+                ),
+              ),
+              GoRoute(
                 path: ':id/edit',
                 builder: (context, state) => ScheduleEditScreen(
                   repository: scheduleRepository,
@@ -79,6 +97,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => ScheduleDetailScreen(
                   repository: scheduleRepository,
                   scheduleId: state.pathParameters['id']!,
+                  arrivalApi: arrivalApi,
                 ),
               ),
             ],
@@ -121,6 +140,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               userApi: userApi,
               authRepository: authRepository,
             ),
+            routes: [
+              GoRoute(
+                path: 'places',
+                builder: (context, state) => SavedPlacesScreen(
+                  api: savedPlaceApi,
+                  searchService: placeSearchService,
+                ),
+              ),
+              GoRoute(
+                path: 'records',
+                builder: (context, state) =>
+                    TravelRecordsScreen(api: reportApi),
+              ),
+            ],
           ),
         ],
       ),

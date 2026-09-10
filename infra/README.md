@@ -5,7 +5,7 @@
 ### 서버 1 — 데이터 처리
 
 - Kafka (KRaft) + Kafka UI
-- Collector ×5 (bus, subway, traffic, weather, event)
+- Collector: 버스 도착·위치, 지하철 도착·위치·알림, 도시데이터, 교통 돌발, TOPIS 공지, 날씨
 - Spark Master / Worker ×2 / 스트리밍 드라이버 / 배치 실행기
 - Archiver (Kafka → Parquet → HDFS)
 - HDFS NameNode / DataNode1
@@ -34,7 +34,7 @@
 | `core` | kafka, kafka-ui | 가장 먼저 띄운다 |
 | `data` | mysql, redis | |
 | `collect` | collector-weather | 배포 잡이 항상 켜는 기상 수집기 |
-| `collect-realtime` | collector-bus/subway/traffic/event | 구현 완료. API 키와 명시적 수집 범위를 준비한 뒤 별도 활성화 |
+| `collect-realtime` | 비기상 실시간 수집기 8개 | API 키와 호출 한도를 준비한 뒤 별도 활성화. 상세는 [수집 가이드](../docs/data-collection-guide.md) |
 | `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
 | `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
@@ -171,6 +171,7 @@ SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
 - **대시보드**: Grafana `DDUBI 파이프라인` 한 장. 위에서부터 서비스(서버2) / 데이터 파이프라인(서버1) / 서버 자원 행. 각 패널 설명(ⓘ)에 "정상 모양"과 이상 시 볼 절차서를 적어 두었습니다.
 - **알림 규칙**: `monitoring/grafana/alerting/rules.yaml` 11개(backend·MySQL·Redis 다운, Redis 메모리 90%, 수집 중단 30분, 아카이버 랙 252 초과, Spark 잡 부족, HDFS 데이터노드 1대·Missing 블록, 디스크 80%, 수집 대상 DOWN). Grafana → Alerting → Alert rules 에서 상태가 보입니다.
 - **알림 채널**: Mattermost 수신 웹훅(`alerting/contact-points.yaml`, Slack 호환 형식). 웹훅 URL 은 서버2 `.env` 의 `GRAFANA_ALERT_WEBHOOK_URL` → grafana 컨테이너 환경변수로 넘어갑니다. 같은 알림은 4시간마다 한 번만 다시 오고, 해결되면 "Resolved" 메시지가 옵니다. 채널을 바꾸려면 웹훅 URL 만 바꿔 grafana 를 재생성합니다.
+- **브리핑**: `scripts/daily-brief.py` 가 서버2 크론으로 매일 09:30·17:00(KST) 서버 상황(수집 대상·알림·서비스·데이터·HDFS·자원·컨테이너 재시작·백업)을 같은 Mattermost 채널에 한 메시지로 보냅니다. 판정하지 않고 숫자만 정리하며, 알림 문턱 아래에서 나빠지는 것을 사람이 보게 하는 용도입니다. `--dry-run` 으로 화면 확인.
 - **반영 시점**: Prometheus 설정은 배포 잡의 post-deploy 가 재적재하고, Grafana 대시보드·알림 파일은 10초마다 다시 읽습니다. Spark 지표 설정(`spark/conf/metrics.properties`)만 Spark 프로세스 재시작이 필요합니다.
 - 파일로 프로비저닝한 대시보드·알림은 화면에서 고쳐도 저장되지 않습니다. 저장소 파일을 고쳐 MR 로 올리는 것이 기준입니다.
 

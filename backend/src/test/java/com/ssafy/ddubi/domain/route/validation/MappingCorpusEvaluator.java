@@ -23,10 +23,11 @@ import java.util.*;
 public final class MappingCorpusEvaluator {
     private MappingCorpusEvaluator() { }
 
-    /** 파일 단위 입력. 공식 마스터 출처와 버전은 운영 데이터의 진실성 검수를 위한 근거다. */
+    /** 과거 schemaVersion=1 corpus의 입력 호환 형식이다. busMaxEndpointDistanceMeters는 읽기만 하며
+     * 수도권의 고정 50m 정책을 바꾸지 않는다. 버스 전역 별칭 역시 사용하지 않는다. */
     public record Corpus(int schemaVersion, String kind, String masterDataVersion,
                          String masterSource, double busMaxEndpointDistanceMeters,
-                         List<BusRouteMaster> busRoutes, List<SubwayLineMaster> subwayLines,
+                         List<LegacyBusRouteFixture> busRoutes, List<SubwayLineMaster> subwayLines,
                          TransitAliasSnapshot aliases, List<Capture> captures) { }
 
     /** 실제 응답 한 건. region은 지리 범위이며 운영기관 범위와 다르다. 수집시각 미상은 null이다. */
@@ -80,13 +81,13 @@ public final class MappingCorpusEvaluator {
         // 운영 Resolver의 버전·별칭 fingerprint를 그대로 사용하되 DB 캐시를 주입하지 않는다.
         SeoulTransitMasterDataProvider provider = new SeoulTransitMasterDataProvider() {
             public Optional<String> activeVersion() { return Optional.of(corpus.masterDataVersion()); }
-            public List<BusRouteMaster> loadBusRoutes(String version) { return corpus.busRoutes(); }
             public List<SubwayLineMaster> loadSubwayLines(String version) { return corpus.subwayLines(); }
             public TransitAliasSnapshot loadAliases(String version) { return corpus.aliases(); }
         };
         KakaoRouteMapper mapper = new KakaoRouteMapper(new MasterDataTransitMappingResolver(
                 provider, null, new ProviderSegmentSignatureFactory(), new CanonicalSegmentIdFactory(),
-                corpus.busMaxEndpointDistanceMeters()));
+                new MetropolitanBusCatalog(MetropolitanBusFixtures.fromLegacy(corpus.busRoutes(),corpus.masterDataVersion())),
+                null, java.time.Clock.fixed(Instant.EPOCH,java.time.ZoneId.of("Asia/Seoul"))));
 
         List<Row> rows = new ArrayList<>();
         Set<String> caseIds = new HashSet<>();

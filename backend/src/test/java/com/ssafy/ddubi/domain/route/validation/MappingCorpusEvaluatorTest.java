@@ -26,15 +26,15 @@ class MappingCorpusEvaluatorTest {
     }
 
     @Test
-    void user422ExcerptKeepsTwoNearbySameNameAlightingStopsAmbiguous() throws Exception {
-        // 공식 순번 25와 90의 '성남시청전면'이 endpoint 150m 안에 모두 남는다.
-        // 이 검사는 현재 보수적 동작의 회귀 근거이며 사람이 검수한 EXACT 정답이 아니다.
+    void user422EndpointExcerptNeverIssuesUnprovenCanonicalEdges() throws Exception {
+        // 과거 150m 정책용 발췌본도 새 50m/전체 순서 정책으로 재평가한다.
+        // 부분 자료만으로 EXACT를 만들지 않는 것이 회귀 기준이며 과거 상태명을 강제하지 않는다.
         var corpus = json.readValue(Path.of("src/test/resources/fixtures/mapping/user-422-endpoint-excerpt.json").toFile(),
                 MappingCorpusEvaluator.Corpus.class);
         var result = MappingCorpusEvaluator.evaluate(corpus);
         var bus = result.rows().stream().filter(row -> row.mode().name().equals("BUS")).findFirst().orElseThrow();
-        assertThat(bus.status().name()).isEqualTo("AMBIGUOUS");
-        assertThat(bus.failureReason()).isEqualTo("MULTIPLE_VERIFIED_PATHS");
+        assertThat(bus.status().name()).isEqualTo("PARTIAL");
+        assertThat(bus.failureReason()).isEqualTo("BUS_ALTERNATIVES_REQUIRE_SELECTION_OR_CANONICAL_CROSSWALK");
         assertThat(bus.actualSegmentIds()).isEmpty();
         assertThat(result.metrics().reviewedExactPrecision()).isNull();
         assertThat(result.missingCaptureTimestampCount()).isEqualTo(1);

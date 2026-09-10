@@ -44,7 +44,7 @@ public record BaselineRowsRequest(
     public record Row(
             @NotBlank(message = "segmentId 는 필수입니다.")
             @Size(max = 180, message = "segmentId 는 180자를 넘을 수 없습니다.")
-            @Pattern(regexp = "^(BUS|SUB):[A-Za-z0-9._-]+:[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$",
+            @Pattern(regexp = "^(BUS|SUB):[A-Za-z0-9._-]{1,50}:[A-Za-z0-9._-]{1,50}:[A-Za-z0-9._-]{1,50}$",
                     message = "segmentId 형식이 올바르지 않습니다. BUS:{routeId}:{fromId}:{toId} 또는 SUB:{...}")
             String segmentId,
 

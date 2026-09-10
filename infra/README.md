@@ -5,7 +5,7 @@
 ### 서버 1 — 데이터 처리
 
 - Kafka (KRaft) + Kafka UI
-- Collector: 버스 도착·위치, 지하철 도착·위치·알림, 도시데이터, 교통 돌발, TOPIS 공지, 날씨
+- Collector ×9 (collector-<소스명>): 날씨, 버스 도착·위치, 지하철 도착·위치·알림, 도시데이터, 교통 돌발, TOPIS 공지
 - Spark Master / Worker ×2 / 스트리밍 드라이버 / 배치 실행기
 - Archiver (Kafka → Parquet → HDFS)
 - HDFS NameNode / DataNode1
@@ -33,8 +33,7 @@
 |---|---|---|
 | `core` | kafka, kafka-ui | 가장 먼저 띄운다 |
 | `data` | mysql, redis | |
-| `collect` | collector-weather | 배포 잡이 항상 켜는 기상 수집기 |
-| `collect-realtime` | 비기상 실시간 수집기 8개 | API 키와 호출 한도를 준비한 뒤 별도 활성화. 상세는 [수집 가이드](../docs/data-collection-guide.md) |
+| `collect` | collector-weather, -bus-arrival, -bus-location, -subway-arrival, -subway-location, -subway-alert, -city-realtime, -traffic-incident, -topis-notice | 수집기 9개 전부. 배포 잡이 항상 켠다. 키가 비어 있는 수집기는 재시작을 반복하므로 서버 `.env` 의 "수집기 전용" 절을 먼저 채운다. 상세는 [수집 가이드](../docs/data-collection-guide.md) |
 | `hdfs` | hdfs-namenode, hdfs-datanode1 | archiver·spark가 HDFS를 쓰므로 함께 필요 |
 | `hdfs2` | hdfs-datanode2 | 서버2 전용. 로컬에서 복제 2를 채우려면 hdfs와 함께 켠다 |
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
@@ -85,14 +84,10 @@
    ```
    docker compose --profile core --profile collect up -d collector-weather   # 10분 주기
    ```
-   비기상 수집기는 `.env`에 필요한 API 키와 범위를 먼저 설정한 뒤 대상 서비스만 켭니다.
-   범위가 없는 서비스를 한꺼번에 시작하면 호출량이 커지거나 설정 오류로 재시작할 수 있으므로
-   운영 배포 잡에서는 자동 활성화하지 않습니다.
+   나머지 수집기 8개는 `.env` 의 "수집기 전용" 절에 해당 API 키를 넣은 뒤 이름을 지정해 켭니다. 키가 비어 있으면 그 수집기만 "키 없음" 으로 재시작을 반복합니다.
    ```
-   docker compose --profile core --profile collect-realtime up -d collector-bus
-   docker compose --profile core --profile collect-realtime up -d collector-subway
-   docker compose --profile core --profile collect-realtime up -d collector-traffic
-   docker compose --profile core --profile collect-realtime up -d collector-event
+   docker compose --profile core --profile collect up -d collector-subway-arrival collector-city-realtime   # 원하는 것만
+   docker compose --profile core --profile collect up -d                                                   # 9개 전부
    ```
 
    서버2의 대중교통 정적 마스터는 `infra/transit-master`에 공식 XLSX/CSV를 두고 `.env`의

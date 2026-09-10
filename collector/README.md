@@ -43,13 +43,13 @@ API별 요청·응답 필드와 데이터 의미는
 
 | 환경변수 | 사용 수집기 | 발급처 |
 |---|---|---|
-| `BUS_ARRIVAL` | 버스 도착 | 공공데이터포털 |
-| `BUS_LOCATION` | 버스 위치 | 공공데이터포털 |
+| `BUS_ARRIVAL_API_KEY` | 버스 도착 | 공공데이터포털 |
+| `BUS_LOCATION_API_KEY` | 버스 위치 | 공공데이터포털 |
 | `SUBWAY_API_KEY` | 지하철 도착·위치 | 서울 열린데이터광장 실시간 지하철 인증키 |
 | `SUBWAY_ALERT_API_KEY` | 지하철 알림 | 서울 열린데이터광장 일반인증키 |
-| `CITY_API_KEY` | 실시간 도시데이터 | 서울 열린데이터광장 일반인증키 |
+| `CITY_REALTIME_API_KEY` | 실시간 도시데이터 | 서울 열린데이터광장 일반인증키 |
 | `TOPIS_NOTICE_API_KEY` | TOPIS 공지 | 서울 열린데이터광장 일반인증키 |
-| `SEOUL_EMERGENCY_API_KEY` | 교통 돌발 | 서울 열린데이터광장 일반인증키 |
+| `TRAFFIC_INCIDENT_API_KEY` | 교통 돌발 | 서울 열린데이터광장 일반인증키 |
 | `KMA_API_KEY` | 날씨 | 기상청 API 허브 |
 | `DATA_GO_KR_API_KEY` | 날씨 대체 경로 | 공공데이터포털 |
 
@@ -104,28 +104,28 @@ Copy-Item infra/.env.example infra/.env
 
 ```powershell
 cd infra
-docker compose --profile core --profile collect-realtime up -d collector-bus
+docker compose --profile core --profile collect up -d collector-bus-arrival
 ```
 
 한 번만 실행해 API → Kafka 흐름을 확인하려면:
 
 ```powershell
-docker compose --profile core --profile collect-realtime run --rm `
-  -e COLLECTOR_RUN_ONCE=true collector-bus
+docker compose --profile core --profile collect run --rm `
+  -e COLLECTOR_RUN_ONCE=true collector-bus-arrival
 ```
 
 주요 서비스 이름은 다음과 같다.
 
 | Compose 서비스 | 수집기 |
 |---|---|
-| `collector-bus` | 버스 도착 |
+| `collector-bus-arrival` | 버스 도착 |
 | `collector-bus-location` | 버스 위치 |
-| `collector-subway` | 지하철 도착 |
+| `collector-subway-arrival` | 지하철 도착 |
 | `collector-subway-location` | 지하철 위치 |
 | `collector-subway-alert` | 지하철 알림 |
-| `collector-city` | 실시간 도시데이터 |
-| `collector-traffic` | 교통 돌발 |
-| `collector-event` | TOPIS 공지 |
+| `collector-city-realtime` | 실시간 도시데이터 |
+| `collector-traffic-incident` | 교통 돌발 |
+| `collector-topis-notice` | TOPIS 공지 |
 | `collector-weather` | 날씨 |
 
 컨테이너 로그에서 다음 항목을 확인한다.

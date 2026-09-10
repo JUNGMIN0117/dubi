@@ -277,13 +277,13 @@ API 최상위는 `msgHeader`와 `msgBody`이며, 실제 정류장별 데이터�
 ```bash
 cd infra
 docker compose -f docker-compose.yml -f docker-compose.server1.yml \
-  --profile core --profile collect --profile collect-realtime \
+  --profile core --profile collect \
   --profile archive --profile hdfs --profile spark up -d --build
 ```
 
 검증할 위치:
 
-1. 수집기 로그: `docker compose logs -f collector-bus collector-bus-location collector-subway collector-subway-location collector-subway-alert collector-city collector-traffic collector-event`
+1. 수집기 로그: `docker compose logs -f collector-bus-arrival collector-bus-location collector-subway-arrival collector-subway-location collector-subway-alert collector-city-realtime collector-traffic-incident collector-topis-notice`
 2. Kafka UI: `transport.raw`, `city.raw` 토픽의 메시지 증가 확인
 3. Spark 로그: `docker logs spark-streaming-realtime --tail 100`
 4. HDFS: `/ddubi/archive` 아래 Parquet 생성 확인

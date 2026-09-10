@@ -112,7 +112,7 @@ def grafana_firing(env):
 REMOTE_SCRIPT = r"""
 echo "@@restarts"; docker ps -a --filter label=com.docker.compose.project=ddubi --format '{{.Names}}' | xargs -r -I{} docker inspect {} --format '{{.Name}} {{.RestartCount}} {{.State.Status}}'
 echo "@@errors"; for c in archiver spark-streaming-weather spark-streaming-realtime; do printf "%s %s\n" "$c" "$(docker logs "$c" --since %(h)dh 2>&1 | grep -cE 'ERROR|Traceback')"; done
-printf "collector-failed %s\n" "$(docker logs collector-weather --since %(h)dh 2>&1 | grep -cE 'failed=[1-9]')"
+for c in $(docker ps --format '{{.Names}}' | grep '^collector-'); do printf "%s-failed %s\n" "$c" "$(docker logs "$c" --since %(h)dh 2>&1 | grep -cE 'failed=[1-9]|ERROR')"; done
 echo "@@archive_files"; docker logs archiver --since %(h)dh 2>&1 | grep -c " wrote "
 echo "@@archiver_started"; docker inspect archiver --format '{{.State.StartedAt}}'
 echo "@@kafka"; docker exec kafka du -s --block-size=1 /var/lib/kafka/data 2>/dev/null | cut -f1   # 실제 디스크 사용량(희소 인덱스 파일 제외)

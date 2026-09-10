@@ -80,23 +80,43 @@ void main() {
     expect(find.text('N'), findsOneWidget);
     expect(find.text('Apple'), findsNothing);
     expect(find.text('이메일을 입력해주세요'), findsOneWidget);
-    final loginFields = find.byType(TextField);
-    expect(loginFields, findsNWidgets(2));
-    await tester.enterText(loginFields.at(0), 'localadmin');
-    await tester.enterText(loginFields.at(1), 'local1234');
-    await tester.tap(find.widgetWithText(FilledButton, '로그인'));
+    expect(find.byKey(const Key('loginEmailField')), findsOneWidget);
+    expect(find.byKey(const Key('loginPasswordField')), findsOneWidget);
+    expect(find.text('이메일로 로그인'), findsNothing);
+    await tester.enterText(
+      find.byType(TextFormField).at(0),
+      'member@ddubi.app',
+    );
+    await tester.enterText(find.byType(TextFormField).at(1), 'password123');
+    await tester.tap(find.text('로그인'));
     await tester.pumpAndSettle(const Duration(seconds: 1));
     expect(find.text('다음 중요 일정'), findsOneWidget);
     expect(find.text('추천 출발 시간'), findsOneWidget);
   });
 
+  testWidgets('첫 로그인 화면에서 이메일과 비밀번호를 바로 입력한다', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
+    await _skipIntro(tester);
+    expect(find.byType(TextFormField), findsNWidgets(2));
+    await tester.enterText(
+      find.byKey(const Key('loginEmailField')),
+      'member@ddubi.app',
+    );
+    await tester.enterText(
+      find.byKey(const Key('loginPasswordField')),
+      'password123',
+    );
+    expect(find.text('이메일로 로그인'), findsNothing);
+  });
+
   testWidgets('이메일 로그인은 잘못된 입력을 한국어로 안내한다', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DdubiApp()));
     await _skipIntro(tester);
-    await tester.enterText(find.byType(TextField).first, 'abc@');
-    await tester.tap(find.widgetWithText(FilledButton, '로그인'));
+    await tester.enterText(find.byType(TextFormField).first, 'abc@');
+    await tester.tap(find.text('로그인'));
     await tester.pump();
     expect(find.text('올바른 이메일 형식으로 입력해주세요.'), findsOneWidget);
+    expect(find.text('비밀번호를 입력해주세요.'), findsOneWidget);
   });
 
   testWidgets('카카오 로그인은 공급자 인증 화면으로 이동한다', (tester) async {

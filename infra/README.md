@@ -40,8 +40,8 @@
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
 | `batch` | spark-batch | 일회성 실행기. `run --rm`으로만 쓴다 |
 | `archive` | archiver | |
-| `monitoring` | prometheus, grafana, node-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
-| `exporters` | node-exporter, kafka-exporter | 서버1 몫 (kafka-exporter 는 Kafka 옆에 있어야 함) |
+| `monitoring` | prometheus, grafana, node-exporter, redis-exporter·mysqld-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
+| `exporters` | node-exporter, kafka-exporter, hdfs-exporter | 서버1 몫 (kafka-exporter 는 Kafka 옆에 있어야 함) |
 
 ## 새 PC에서 처음 시작하기 (로컬 개발)
 
@@ -123,18 +123,21 @@ docker run --rm -v "$(pwd)/sparkjobs:/jobs:ro" -w /jobs ddubi/spark:0.1.0 sh -c 
 
 Windows Git Bash에서는 `-v` 경로 변환 문제로 앞에 `MSYS_NO_PATHCONV=1`을 붙이고 경로를 `c:/Users/...` 형식으로 씁니다.
 
-## HDFS 되돌리기 (kill switch)
+## 장애 시 로컬 볼륨 임시 전환
 
-HDFS가 불안정하면 `.env`에서 두 값만 바꾸고 archiver·spark를 다시 띄우면 로컬 볼륨으로 돌아갑니다.
+HDFS 는 확정된 저장 계층입니다(2026-09-04). 아래는 HDFS 장애로 쓰기가 오래 막힐 때만 쓰는 **임시 조치**입니다.
+`.env`에서 두 값만 바꾸고 archiver·spark를 다시 띄우면 서버 로컬 볼륨에 씁니다.
 
 ```
 ARCHIVE_URI=file:///opt/ddubi/archive
 SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
 ```
 
+전환 중에 쓰인 아카이브는 HDFS 에 없습니다. HDFS 가 복구되면 값을 되돌린 뒤, 그 기간의 로컬 파일을 HDFS 로 옮겨야 원본이 빠지지 않습니다.
+
 ## 알려진 제약
 
-- Spark 워커 메모리(1536m)를 스트리밍 실행기(1g)와 배치 실행기(480m)가 나눠 씁니다. 배치가 자원을 못 받으면 마스터 UI(http://localhost:8080)에서 WAITING으로 보입니다. 워커 메모리를 늘리면 `BATCH_EXECUTOR_MEMORY`도 함께 올립니다.
+- Spark 워커 메모리(2560m, 컨테이너 상한 3g)를 스트리밍 두 잡(각 768m·코어 1)과 배치 실행기(480m·코어 2)가 나눠 씁니다. 잡이 자원을 못 받으면 마스터 UI(http://localhost:8080)에서 WAITING으로 보이고 드라이버 로그에 "Initial job has not accepted any resources"가 반복됩니다. 잡을 추가하면 executor 메모리 합계가 워커 메모리 안에 드는지 먼저 계산합니다.
 - Spark 이미지의 파이썬은 3.8입니다. sparkjobs 코드는 3.8 문법을 지켜야 합니다.
 - **설정 파일 마운트와 반영 시점**: 디렉터리로 마운트한 설정(`infra/spark/conf/`, `infra/monitoring/prometheus/`, nginx templates, grafana provisioning)은 배포(git pull) 뒤 컨테이너를 **재시작**하면 새 내용이 보입니다.
   파일 하나를 마운트한 HDFS 설정(`infra/hdfs/*.xml`)은 git 이 파일을 교체하면 컨테이너가 옛 파일을 계속 보므로, 고친 뒤에는 **재생성**이 필요합니다: `docker compose ... up -d --force-recreate hdfs-namenode hdfs-datanode1` (서버2는 `hdfs-datanode2`).
@@ -161,6 +164,15 @@ SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
   ssh -i <pem> -L 3000:localhost:3000 ubuntu@j15e202.p.ssafy.io   # 켜둔 채 브라우저에서 localhost:3000
   ```
 - **GitLab 러너는 서버2의 단독 컨테이너**(gitlab-runner, docker executor, privileged)로 돌고 있습니다. compose 소속이 아니며, `docker compose down` 의 영향을 받지 않습니다.
+
+## 모니터링·알림 (2026-09-08 확장)
+
+- **수집**: Prometheus(서버2)가 15초마다 읽습니다. 대상 12개 — prometheus, node-exporter 2대, kafka-exporter, backend(actuator), Spark(master·드라이버 2·executor 2), HDFS(json_exporter 가 네임노드 /jmx 변환), Redis(redis-exporter), MySQL(mysqld-exporter, 전용 최소 권한 계정 `exporter`).
+- **대시보드**: Grafana `DDUBI 파이프라인` 한 장. 위에서부터 서비스(서버2) / 데이터 파이프라인(서버1) / 서버 자원 행. 각 패널 설명(ⓘ)에 "정상 모양"과 이상 시 볼 절차서를 적어 두었습니다.
+- **알림 규칙**: `monitoring/grafana/alerting/rules.yaml` 11개(backend·MySQL·Redis 다운, Redis 메모리 90%, 수집 중단 30분, 아카이버 랙 252 초과, Spark 잡 부족, HDFS 데이터노드 1대·Missing 블록, 디스크 80%, 수집 대상 DOWN). Grafana → Alerting → Alert rules 에서 상태가 보입니다.
+- **알림 채널**: Mattermost 수신 웹훅(`alerting/contact-points.yaml`, Slack 호환 형식). 웹훅 URL 은 서버2 `.env` 의 `GRAFANA_ALERT_WEBHOOK_URL` → grafana 컨테이너 환경변수로 넘어갑니다. 같은 알림은 4시간마다 한 번만 다시 오고, 해결되면 "Resolved" 메시지가 옵니다. 채널을 바꾸려면 웹훅 URL 만 바꿔 grafana 를 재생성합니다.
+- **반영 시점**: Prometheus 설정은 배포 잡의 post-deploy 가 재적재하고, Grafana 대시보드·알림 파일은 10초마다 다시 읽습니다. Spark 지표 설정(`spark/conf/metrics.properties`)만 Spark 프로세스 재시작이 필요합니다.
+- 파일로 프로비저닝한 대시보드·알림은 화면에서 고쳐도 저장되지 않습니다. 저장소 파일을 고쳐 MR 로 올리는 것이 기준입니다.
 
 ## HTTPS (Let's Encrypt)
 

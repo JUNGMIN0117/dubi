@@ -1,0 +1,18 @@
+modules:
+  hdfs:
+    metrics:
+      - name: hdfs_namenode
+        type: object
+        help: 네임노드 FSNamesystem JMX
+        path: '{ .beans[?(@.name=="Hadoop:service=NameNode,name=FSNamesystem")] }'
+        values:
+          live_datanodes: '{ .NumLiveDataNodes }'
+          dead_datanodes: '{ .NumDeadDataNodes }'
+          under_replicated_blocks: '{ .UnderReplicatedBlocks }'
+          missing_blocks: '{ .MissingBlocks }'
+          corrupt_blocks: '{ .CorruptBlocks }'
+          blocks_total: '{ .BlocksTotal }'
+          files_total: '{ .FilesTotal }'
+          capacity_total_bytes: '{ .CapacityTotal }'
+          capacity_used_bytes: '{ .CapacityUsed }'
+          capacity_remaining_bytes: '{ .CapacityRemaining }'

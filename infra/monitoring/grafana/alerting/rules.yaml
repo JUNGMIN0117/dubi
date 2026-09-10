@@ -1,0 +1,229 @@
+# Grafana 통합 알림 규칙 (파일 프로비저닝). 화면에서 고친 내용은 저장되지 않는다 — 이 파일이 기준.
+#
+# 규칙마다 두 단계: A = Prometheus 순간 질의, C = 수식(참이면 1). C 가 0 이 아닌 상태가 `for` 시간 지속되면 발동.
+# 알림을 어디로 보낼지는 contact-points 로 정한다 (팀 결정 전까지는 Grafana 화면 Alerting 메뉴에서만 보인다).
+# 각 규칙의 runbook 주석은 docs/runbooks/ 의 절차서를 가리킨다.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: ddubi-service
+    folder: DDUBI 알림
+    interval: 1m
+    rules:
+      - uid: ddubi-backend-down
+        title: backend 다운
+        condition: C
+        for: 1m
+        labels: { severity: critical, layer: service }
+        annotations:
+          summary: backend 가 1분 이상 지표를 내지 않는다 (up=0). 사용자 API 전체 불가
+          runbook: docs/runbooks/backend-down-and-nginx-502.md
+        noDataState: Alerting
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: 'up{job="backend"}' }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 1" }
+
+      - uid: ddubi-mysql-down
+        title: MySQL 다운
+        condition: C
+        for: 2m
+        labels: { severity: critical, layer: service }
+        annotations:
+          summary: mysqld-exporter 가 MySQL 에 접속하지 못한다. backend 도 곧 실패한다
+          runbook: docs/runbooks/backend-down-and-nginx-502.md (A-2 DB 절)
+        noDataState: Alerting
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: mysql_up }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 1" }
+
+      - uid: ddubi-redis-down
+        title: Redis 다운
+        condition: C
+        for: 2m
+        labels: { severity: critical, layer: service }
+        annotations:
+          summary: redis-exporter 가 Redis 에 접속하지 못한다. 실시간 조회와 Spark 쓰기가 실패한다
+        noDataState: Alerting
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: redis_up }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 1" }
+
+      - uid: ddubi-redis-memory-high
+        title: Redis 메모리 90% 초과
+        condition: C
+        for: 5m
+        labels: { severity: warning, layer: service }
+        annotations:
+          summary: used/maxmemory(384m) 가 90% 를 넘었다. volatile-ttl 이라 TTL 없는 키가 쌓인 것 → redis-keys.yaml 대조
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: "redis_memory_used_bytes / redis_memory_max_bytes * 100" }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A > 90" }
+
+  - orgId: 1
+    name: ddubi-data
+    folder: DDUBI 알림
+    interval: 1m
+    rules:
+      - uid: ddubi-collect-stalled
+        title: 수집 중단 (city.raw 30분 무유입)
+        condition: C
+        for: 5m
+        labels: { severity: warning, layer: data }
+        annotations:
+          summary: weather 수집기는 10분마다 14건을 넣어야 하는데 30분 동안 오프셋이 늘지 않았다. 수집기 로그·API 키 확인
+          runbook: docs/runbooks/kafka-restart.md (수집기 동작 절)
+        noDataState: Alerting
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 1800, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: 'sum(increase(kafka_topic_partition_current_offset{topic="city.raw"}[30m]))' }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 1" }
+
+      - uid: ddubi-archiver-lag-high
+        title: 아카이버 랙 상한 초과
+        condition: C
+        for: 10m
+        labels: { severity: warning, layer: data }
+        annotations:
+          summary: 컨슈머 랙이 252(정상 최고점 84 의 3배) 를 10분 넘게 유지. 아카이버가 HDFS 에 못 쓰고 있을 가능성
+          runbook: docs/runbooks/hdfs-datanode-down.md, reprocess-from-archive.md
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: "sum(kafka_consumergroup_lag)" }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A > 252" }
+
+      - uid: ddubi-spark-app-missing
+        title: Spark 스트리밍 잡 부족
+        condition: C
+        for: 5m
+        labels: { severity: critical, layer: data }
+        annotations:
+          summary: master 가 보는 실행 중 앱이 2 미만. weather_latest 또는 realtime_latest 가 죽어 재시작 반복 중일 수 있다
+          runbook: docs/runbooks/spark-streaming-crash.md
+        noDataState: Alerting
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: 'metrics_master_apps_Value{type="gauges"}' }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 2" }
+
+      - uid: ddubi-hdfs-datanode-down
+        title: HDFS 데이터노드 1대
+        condition: C
+        for: 5m
+        labels: { severity: warning, layer: data }
+        annotations:
+          summary: Live 데이터노드가 2 미만. 복제 2 라 데이터는 남아 있지만 한 대 더 죽으면 유실. 죽은 노드를 살린다
+          runbook: docs/runbooks/hdfs-datanode-down.md
+        noDataState: Alerting
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: hdfs_namenode_live_datanodes }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 2" }
+
+      - uid: ddubi-hdfs-missing-blocks
+        title: HDFS Missing 블록
+        condition: C
+        for: 1m
+        labels: { severity: critical, layer: data }
+        annotations:
+          summary: 복사본이 하나도 없는 블록이 있다. 데이터 유실 위험. 죽은 노드 복구가 최우선
+          runbook: docs/runbooks/hdfs-datanode-down.md
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: hdfs_namenode_missing_blocks }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A > 0" }
+
+  - orgId: 1
+    name: ddubi-host
+    folder: DDUBI 알림
+    interval: 1m
+    rules:
+      - uid: ddubi-disk-high
+        title: 디스크 80% 초과
+        condition: C
+        for: 10m
+        labels: { severity: warning, layer: host }
+        annotations:
+          summary: 루트 디스크 사용률 80% 초과. Kafka 보존 단축, docker system prune, 아카이브 정리 검토
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: '(1 - node_filesystem_avail_bytes{mountpoint="/",fstype="ext4"} / node_filesystem_size_bytes{mountpoint="/",fstype="ext4"}) * 100'
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A > 80" }
+
+      - uid: ddubi-scrape-target-down
+        title: 수집 대상 DOWN
+        condition: C
+        for: 3m
+        labels: { severity: warning, layer: host }
+        annotations:
+          summary: Prometheus 가 읽는 대상 중 응답하지 않는 것이 있다. Status → Targets 에서 어느 것인지 확인
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: 'up{job!~"backend|mysql|redis"}' }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 1" }

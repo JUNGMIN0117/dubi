@@ -167,7 +167,7 @@ SPARK_CHECKPOINT_DIR=/opt/ddubi/checkpoints
 - **알림 규칙**: `monitoring/grafana/alerting/rules.yaml` 11개(backend·MySQL·Redis 다운, Redis 메모리 90%, 수집 중단 30분, 아카이버 랙 252 초과, Spark 잡 부족, HDFS 데이터노드 1대·Missing 블록, 디스크 80%, 수집 대상 DOWN). Grafana → Alerting → Alert rules 에서 상태가 보입니다.
 - **알림 채널**: Mattermost 수신 웹훅(`alerting/contact-points.yaml`, Slack 호환 형식). 웹훅 URL 은 서버2 `.env` 의 `GRAFANA_ALERT_WEBHOOK_URL` → grafana 컨테이너 환경변수로 넘어갑니다. 같은 알림은 4시간마다 한 번만 다시 오고, 해결되면 "Resolved" 메시지가 옵니다. 채널을 바꾸려면 웹훅 URL 만 바꿔 grafana 를 재생성합니다.
 - **브리핑**: `scripts/daily-brief.py` 가 서버2 크론으로 매일 09:30·17:00(KST) 서버 상황(수집 대상·알림·서비스·데이터·HDFS·자원·컨테이너 재시작·백업)을 같은 Mattermost 채널에 한 메시지로 보냅니다. 판정하지 않고 숫자만 정리하며, 알림 문턱 아래에서 나빠지는 것을 사람이 보게 하는 용도입니다. `--dry-run` 으로 화면 확인.
-- **반영 시점**: Prometheus 설정은 배포 잡의 post-deploy 가 재적재하고, Grafana 대시보드·알림 파일은 10초마다 다시 읽습니다. Spark 지표 설정(`spark/conf/metrics.properties`)만 Spark 프로세스 재시작이 필요합니다.
+- **반영 시점**: Prometheus 설정과 Grafana 알림 규칙·수신처는 배포 잡의 post-deploy 가 재적재합니다(알림 파일은 Grafana 가 기동 때만 읽으므로 관리자 API 로 다시 읽게 함, 2026-09-10). Grafana 대시보드 파일은 10초마다 자동으로 다시 읽습니다. Spark 지표 설정(`spark/conf/metrics.properties`)만 Spark 프로세스 재시작이 필요합니다.
 - 파일로 프로비저닝한 대시보드·알림은 화면에서 고쳐도 저장되지 않습니다. 저장소 파일을 고쳐 MR 로 올리는 것이 기준입니다.
 
 ## HTTPS (Let's Encrypt)

@@ -428,22 +428,27 @@ def main() -> int:
                 latest.unpersist()
             normalized.unpersist()
 
-    events = read_events_stream(spark, settings, TOPICS)
-    query = (
-        events.writeStream.foreachBatch(process_batch)
-        .option("checkpointLocation", settings.checkpoint_for(JOB_NAME))
-        .trigger(processingTime=TRIGGER)
-        .queryName(JOB_NAME)
-        .start()
-    )
-    log.info(
-        "started topics=%s checkpoint=%s redis=%s:%s",
-        TOPICS,
-        settings.checkpoint_for(JOB_NAME),
-        settings.redis_host,
-        settings.redis_port,
-    )
-    query.awaitTermination()
+    try:
+        events = read_events_stream(spark, settings, TOPICS)
+        query = (
+            events.writeStream.foreachBatch(process_batch)
+            .option("checkpointLocation", settings.checkpoint_for(JOB_NAME))
+            .trigger(processingTime=TRIGGER)
+            .queryName(JOB_NAME)
+            .start()
+        )
+        log.info(
+            "started topics=%s checkpoint=%s redis=%s:%s",
+            TOPICS,
+            settings.checkpoint_for(JOB_NAME),
+            settings.redis_host,
+            settings.redis_port,
+        )
+        query.awaitTermination()
+    finally:
+        # 정적 인덱스는 배치 종료마다 해제하지 않는다. 전체 query가 끝난 뒤에만 반환한다.
+        if crosswalk is not None:
+            crosswalk[0].unpersist()
     return 0
 
 

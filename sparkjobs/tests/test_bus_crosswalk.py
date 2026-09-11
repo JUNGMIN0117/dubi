@@ -65,12 +65,33 @@ def test_corrupt_crosswalk_fails_before_streaming(spark,tmp_path):
     with pytest.raises(ValueError,match='SHA'):load_crosswalk(spark,path,'0'*64)
 
 
-def test_full_serving_artifact_builds_jvm_index_without_losing_canonical_ids(spark):
-    # 작은 fixture만 통과하고 실배포 크기의 정적 인덱스가 기동에 실패하는 문제를 검출한다.
+@pytest.fixture(autouse=True)
+def release_static_indexes(spark):
+    # 테스트별 정적 캐시를 해제해 반복 실행 자체가 메모리 누적으로 이어지지 않게 한다.
+    yield
+    spark.catalog.clearCache()
+
+
+def test_full_serving_artifact_reuses_materialized_index_without_json_literal(spark):
+    # 실배포 105,070 edge → 210,140 조회 행으로 검증한다. 원본 ID 보존뿐 아니라
+    # 반복 배치의 실행 계획이 JSON 리터럴을 재파싱하지 않고 캐시를 읽는지도 검사한다.
     path=Path(__file__).resolve().parents[2]/'backend/transit-master/metropolitan-bus-v6.crosswalk.json.gz'
     raw=path.read_bytes();data=json.loads(gzip.decompress(raw))
     index,version,sha=load_crosswalk(spark,path,hashlib.sha256(raw).hexdigest())
     from pyspark.sql import functions as F
+    assert index.is_cached and index.storageLevel.useMemory and index.storageLevel.useDisk
+    cached=spark.sparkContext._jsc.sc().getRDDStorageInfo()
+    assert any(rdd.numCachedPartitions()==rdd.numPartitions() and rdd.numPartitions()>0 for rdd in cached)
     count=index.select(F.explode('canonicalCandidates').alias('segmentId')).distinct().count()
     assert count==len({e['segmentId'] for e in data['edges']})
     assert version==data['masterVersion'] and len(sha)==64
+    edge=data['edges'][0]
+    condition=(F.col('lookupType')=='bus.position') & (F.col('namespace')==edge['namespace']) \
+        & (F.col('routeId')==edge['routeId']) & (F.col('fromStopId')==edge['fromStopId']) \
+        & (F.col('toStopId')==edge['toStopId'])
+    for _ in range(3):
+        batch=index.filter(condition)
+        assert batch.collect()[0].canonicalCandidates==[edge['segmentId']]
+        plan=batch._jdf.queryExecution().executedPlan().toString()
+        assert 'InMemoryTableScan' in plan
+        assert 'from_json' not in plan.lower()

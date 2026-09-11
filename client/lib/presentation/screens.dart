@@ -11,7 +11,6 @@ import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
 import '../core/constants/layout_constants.dart';
 import '../core/maps/kakao_map_config.dart';
 import '../core/theme.dart';
-import '../data/mock_repository.dart';
 import '../domain/auth.dart';
 import '../domain/models.dart';
 import '../services/kakao_login_service.dart';
@@ -4097,7 +4096,7 @@ class _DelayAlertScreenState extends ConsumerState<DelayAlertScreen> {
             for (final schedule in schedules) ...[
               const SizedBox(height: 16),
               Text(schedule.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              ScheduleEvaluationCard(key: ValueKey(schedule.id), repository: repository, scheduleId: schedule.id),
+              ScheduleEvaluationCard(key: ValueKey(schedule.id), repository: repository as ScheduleEvaluationRepository, scheduleId: schedule.id),
             ],
           ]);
         },

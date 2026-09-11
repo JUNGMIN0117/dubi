@@ -14,8 +14,8 @@ BUS는 버전 고정 대응표로 검증하고 Collector와 버전이 다르면 
 각 이벤트는 발생시각, 수집시각, Kafka offset 순으로 최신 한 건을 선택한다. 같은 배치가
 checkpoint 복구로 재실행되어도 동일한 Redis 키를 덮어써 멱등적이다. 필수 provider ID가 없거나
 ``unknown``인 행은 키 충돌을 피하려고 Redis에서 제외하되 Kafka/HDFS 원문에는 남고, 제외 건수는
-배치 로그에 기록한다. TTL은 자료 갱신주기의 3~10배로 계약화해 수집 중단 시 오래된 값이 현재값처럼
-남지 않게 한다.
+배치 로그에 기록한다. TTL은 보관 기간이고 validUntil은 관측의 신선도 한계다.
+예산상 긴 수집 주기 때문에 보관 기간을 늘려도 오래된 관측이 현재값으로 바뀌지는 않는다.
 """
 
 from __future__ import annotations
@@ -46,20 +46,19 @@ TOPICS = os.environ.get("SPARK_JOB_TOPICS", "transport.raw,city.raw")
 TRIGGER = "10 seconds"
 
 # 키 접두사와 TTL은 docs/contracts/redis-keys.yaml의 spark 소유 계약과 일치해야 한다.
-# TTL은 정상 수집 간격보다 충분히 길지만 장애 데이터가 무기한 남지는 않도록 정했다.
+# 수집 주기의 세 배를 보관한다. 신선도는 아래 별도 정책을 사용한다.
 EVENT_POLICY = {
-    "bus.position": ("transit:latest:bus-position", 120),
-    "bus.arrival": ("transit:latest:bus-arrival", 120),
-    "subway.position": ("transit:latest:subway-position", 120),
-    "subway.arrival": ("transit:latest:subway-arrival", 120),
+    "bus.position": ("transit:latest:bus-position", 86400),
+    "bus.arrival": ("transit:latest:bus-arrival", 86400),
+    "subway.position": ("transit:latest:subway-position", 10800),
+    "subway.arrival": ("transit:latest:subway-arrival", 1080),
     "traffic.flow": ("traffic:latest:flow", 900),
-    "traffic.incident": ("traffic:latest:incident", 600),
-    "city.realtime": ("city:latest:area", 900),
+    "traffic.incident": ("traffic:latest:incident", 2700),
+    "city.realtime": ("city:latest:area", 64800),
     "sdot.population": ("city:latest:sdot-population", 1800),
-    "subway.alert": ("transit:latest:subway-alert", 600),
-    "topis.notice": ("traffic:latest:topis-notice", 1800),
+    "subway.alert": ("transit:latest:subway-alert", 2700),
+    "topis.notice": ("traffic:latest:topis-notice", 2700),
 }
-
 # 관측을 "현재"로 사용할 수 있는 기존 상한을 보존한다. 긴 TTL과 혼동하지 않는다.
 # 보관 중이어도 이 시간 이후 Backend/후속 연산은 unknown 또는 기준선 fallback을 사용한다.
 FRESHNESS_SECONDS = {
@@ -163,7 +162,19 @@ def transform(events: DataFrame, crosswalk=None) -> DataFrame:
 
     # 2. API별 raw 명칭 차이를 흡수해 계산에서 바로 단위 확인 가능한 대표 관측값으로 만든다.
     #    필드가 없는 소스는 null이며 Spark JSON 직렬화 시 생략된다.
+    # 지역별 공식 단위를 명시적으로 구분한다. provider 필드명이 같은 숫자라도 서울 basis를 붙이지 않는다.
+    def arrival_seconds(index):
+        return (F.when(namespace == "GBIS", F.coalesce(_json("$.raw.predictTimeSec"+str(index)).cast("int"),
+                        _json("$.raw.predictTime"+str(index)).cast("int")*60))
+                .when((namespace == "INCHEON_API") & F.lit(index == 1), _json("$.raw.ARRIVALESTIMATETIME").cast("int"))
+                .when(namespace == "SEOUL_BUS", _first("$.raw.exps"+str(index),"$.raw.EXPS"+str(index)).cast("int")))
+    basis=(F.when(namespace == "GBIS", "GBIS_PREDICT_SECONDS_V1")
+           .when(namespace == "INCHEON_API", "INCHEON_ESTIMATE_SECONDS_V1")
+           .when(namespace == "SEOUL_BUS", "SEOUL_EXPS_SECONDS_V1"))
     observation = F.struct(
+        _for("bus.position", _first("$.raw.stationSeq", "$.raw.LATEST_STOPSEQ").cast("int")).alias("providerStopOrder"),
+        _for("bus.position", _first("$.raw.stateCd", "$.raw.DIRCD")).alias("providerStateCode"),
+        _for("bus.arrival", _first("$.raw.locationNo1", "$.raw.REST_STOP_COUNT").cast("int")).alias("firstRemainingStops"),
         _for("bus.position", _first("$.raw.sectOrd", "$.raw.SECT_ORD").cast("int")).alias("sectionOrder"),
         _for("bus.position", _first("$.raw.sectDist", "$.raw.SECT_DIST").cast("double")).alias("sectionDistanceMeters"),
         _for("bus.position", _first("$.raw.fullSectDist", "$.raw.FULL_SECT_DIST").cast("double")).alias("fullSectionDistanceMeters"),
@@ -172,12 +183,12 @@ def transform(events: DataFrame, crosswalk=None) -> DataFrame:
 
         # 공식 traTime1/2는 여행시간(분)이다. 도착 대기는 지수평활 도착예측 exps1/2(초)를 사용한다.
         # basis를 함께 기록해 예전 버전의 같은 이름 필드를 Backend가 초로 오독하지 못하게 한다.
-        _for("bus.arrival", _first("$.raw.exps1", "$.raw.EXPS1").cast("int")).alias("firstArrivalSeconds"),
-        _for("bus.arrival", _first("$.raw.exps2", "$.raw.EXPS2").cast("int")).alias("secondArrivalSeconds"),
-        _for("bus.arrival", F.lit("SEOUL_EXPS_SECONDS_V1")).alias("arrivalTimeBasis"),
+        _for("bus.arrival", arrival_seconds(1)).alias("firstArrivalSeconds"),
+        _for("bus.arrival", arrival_seconds(2)).alias("secondArrivalSeconds"),
+        _for("bus.arrival", basis).alias("arrivalTimeBasis"),
         _for("bus.arrival", _first("$.raw.traTime1", "$.raw.TRA_TIME1").cast("double")).alias("firstTravelTimeMinutes"),
         _for("bus.arrival", _first("$.raw.traTime2", "$.raw.TRA_TIME2").cast("double")).alias("secondTravelTimeMinutes"),
-        _for("bus.arrival", _first("$.raw.staOrd", "$.raw.STA_ORD").cast("int")).alias("stopOrder"),
+        _for("bus.arrival", _first("$.raw.staOrd", "$.raw.STA_ORD", "$.raw.staOrder").cast("int")).alias("stopOrder"),
         _for("bus.arrival", _first("$.raw.deTourAt", "$.raw.DE_TOUR_AT")).alias("detourCode"),
         _for("bus.arrival", _first("$.raw.isArrive1", "$.raw.IS_ARRIVE1")).alias("firstTerminalArrivalCode"),
         _for("bus.arrival", _first("$.raw.isArrive2", "$.raw.IS_ARRIVE2")).alias("secondTerminalArrivalCode"),
@@ -277,7 +288,10 @@ def transform(events: DataFrame, crosswalk=None) -> DataFrame:
     is_bus=F.col("eventType").isin("bus.position","bus.arrival")
     provider_key=F.when(is_bus,
         F.when(namespace=="SEOUL_BUS",provider_key)
-         .when(namespace.isin("GBIS","INCHEON_PUBLIC_CSV") & provider_key.isNotNull(),F.concat_ws(":",namespace,provider_key)))        .otherwise(provider_key)
+         .when(namespace.isin("GBIS","INCHEON_PUBLIC_CSV","INCHEON_API") & provider_key.isNotNull(),F.concat_ws(":",namespace,provider_key)))        .otherwise(provider_key)
+    # 인천은 차량별 도착 행이다. 노선·정류소만 키로 쓰면 다른 차량의 예측이 사라진다.
+    provider_key=F.when((namespace=="INCHEON_API") & (F.col("eventType")=="bus.arrival"),
+        F.when(_usable_id(vehicle_id) & provider_key.isNotNull(),F.concat_ws(":",provider_key,vehicle_id))).otherwise(provider_key)
     normalized = supported.select(
         "eventId", "eventType", "source", "occurredAt", "collectedAt", "latitude", "longitude",
         "segmentIds", "kafkaPartition", "kafkaOffset",

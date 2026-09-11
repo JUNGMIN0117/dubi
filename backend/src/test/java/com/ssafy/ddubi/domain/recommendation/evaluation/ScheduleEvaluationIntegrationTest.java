@@ -138,4 +138,40 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         assertThat(jdbc.queryForObject("SELECT last_error FROM schedule_evaluation WHERE schedule_id=?",String.class,scheduleId))
                 .isEqualTo("EVALUATION_FAILED");
     }
+    @Test void concurrentClaimsHaveExactlyOneLeaseOwner() throws Exception {
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            java.util.concurrent.Callable<Boolean> claim = () -> {
+                ready.countDown();
+                if (!start.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("start timeout");
+                try { store.claim(scheduleId, owner, now); return true; }
+                catch (BusinessException busy) { return false; }
+            };
+            var first = pool.submit(claim); var second = pool.submit(claim);
+            assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue(); start.countDown();
+            assertThat(List.of(first.get(10, java.util.concurrent.TimeUnit.SECONDS), second.get(10, java.util.concurrent.TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(true, false);
+        } finally { start.countDown(); pool.shutdownNow(); }
+    }
+
+    @Test void eventDuringCalculationSurvivesCompletionAndStop() throws Exception {
+        workflow.evaluate(scheduleId, owner, TriggerType.INITIAL, now);
+        var job = store.claim(scheduleId, owner, now.plusSeconds(10));
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            // 다른 스레드에서 이벤트를 갱신해 계산 시작 때의 revision보다 최신이 되게 한다.
+            pool.submit(() -> store.wakeSegments(List.of("BUS:1:2:3"), now.plusSeconds(11)))
+                    .get(10, java.util.concurrent.TimeUnit.SECONDS);
+            var previous = store.read(job.previousJson(), ScheduleEvaluationWorkflow.Outcome.class);
+            store.complete(job, job.cache().search(), false, previous, now.plusSeconds(600), null, null, now.plusSeconds(12));
+            assertThat(store.due(now.plusSeconds(12))).contains(scheduleId);
+            var stop = pool.submit(() -> store.stop(scheduleId, owner));
+            var event = pool.submit(() -> store.wakeSegments(List.of("BUS:1:2:3"), now.plusSeconds(13)));
+            stop.get(10, java.util.concurrent.TimeUnit.SECONDS); event.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(store.due(now.plusSeconds(14))).doesNotContain(scheduleId);
+            assertThat(jdbc.queryForObject("SELECT stopped FROM schedule_evaluation WHERE schedule_id=?", Boolean.class, scheduleId)).isTrue();
+        } finally { pool.shutdownNow(); }
+    }
 }

@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/app_providers.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:go_router/go_router.dart';
@@ -4051,94 +4053,57 @@ class _MapPainter extends CustomPainter {
       oldDelegate.selectedKind != selectedKind;
 }
 
-class DelayAlertScreen extends StatelessWidget {
+/// 저장된 일정과 서버 재평가 결과를 조회한다. 교통 데이터가 없을 때 가상의 지연·대안을 만들지 않는다.
+class DelayAlertScreen extends ConsumerStatefulWidget {
   const DelayAlertScreen({super.key, required this.repository});
+  // 기존 라우트 호출과의 호환 인자다. 실제 조회는 scheduleRepositoryProvider를 사용한다.
   final DdubiRepository repository;
   @override
-  Widget build(BuildContext c) => AppPage(
-    title: '상황 변경 알림',
-    child: ListView(
-      padding: _pad,
-      children: [
-        const InfoCard(
-          color: Color(0xFFFFF5ED),
-          child: Row(
-            children: [
-              Icon(
-                Icons.warning_amber_rounded,
-                color: DdubiColors.orange,
-                size: 30,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '버스 지연이 커졌어요',
-                      style: TextStyle(
-                        color: DdubiColors.orange,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text('현재 경로로는 늦어질 수 있어요.'),
-                  ],
-                ),
-              ),
+  ConsumerState<DelayAlertScreen> createState() => _DelayAlertScreenState();
+}
+
+class _DelayAlertScreenState extends ConsumerState<DelayAlertScreen> {
+  late Future<List<Schedule>> _schedules;
+  @override
+  void initState() {
+    super.initState();
+    _schedules = ref.read(scheduleRepositoryProvider).schedules();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final repository = ref.watch(scheduleRepositoryProvider);
+    return AppPage(
+      title: '일정별 교통 상황',
+      child: FutureBuilder<List<Schedule>>(
+        future: _schedules,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: TextButton(
+              onPressed: () => setState(() => _schedules = repository.schedules()),
+              child: const Text('일정을 불러오지 못했습니다. 다시 시도'),
+            ));
+          }
+          if (repository is! ScheduleEvaluationRepository) {
+            return const Center(child: Text('실제 교통 상황은 일정 API 연결 후 확인할 수 있습니다.'));
+          }
+          final schedules = snapshot.data ?? <Schedule>[];
+          if (schedules.isEmpty) return const Center(child: Text('등록된 일정이 없습니다.'));
+          return ListView(padding: _pad, children: [
+            const Text('각 일정의 최신 평가와 데이터 부족 사유를 확인하세요.'),
+            for (final schedule in schedules) ...[
+              const SizedBox(height: 16),
+              Text(schedule.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+              ScheduleEvaluationCard(key: ValueKey(schedule.id), repository: repository, scheduleId: schedule.id),
             ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        const InfoCard(
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('기존 경로 (버스)'),
-            subtitle: Text('강남역 → 여의도역\n예상 도착  오전 9:47'),
-            trailing: StatusBadge(
-              '+8분 지연',
-              tone: DdubiColors.orange,
-              icon: Icons.warning_amber,
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const InfoCard(
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(
-              '새로운 경로 (지하철)',
-              style: TextStyle(color: DdubiColors.blue),
-            ),
-            subtitle: Text('강남역 → 여의도역\n예상 도착  오전 9:39'),
-            trailing: StatusBadge('제시간 도착'),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const InfoCard(
-          color: Color(0xFFF4F8FF),
-          child: Text('✓ 지하철로 변경 시 약 8분을 절약할 수 있어요.'),
-        ),
-        const SpacerBox(),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(c),
-                child: const Text('기존 경로 유지'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: FilledButton(
-                onPressed: () => _open(c, MovingScreen(repository: repository)),
-                child: const Text('경로 변경'),
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
+          ]);
+        },
+      ),
+    );
+  }
 }
 
 class SpacerBox extends StatelessWidget {
@@ -5665,7 +5630,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '최근 교통 정보 업데이트가 지연됐어요.',
+                      '일정별 최신 교통 상황을 확인하세요.',
                       style: TextStyle(
                         color: Color(0xFFFF5A2A),
                         fontSize: 13,
@@ -5677,7 +5642,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 7),
               const Text(
-                '최신 교통정보가 부족하면 Mock 경로로 화면을 확인할 수 있어요.',
+                '등록한 일정의 평가 결과와 정보 갱신 시각을 확인할 수 있어요.',
                 style: TextStyle(
                   color: Color(0xFF64708B),
                   fontSize: 12,
@@ -5688,7 +5653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               OutlinedButton.icon(
                 onPressed: () => _open(
                   context,
-                  DelayAlertScreen(repository: MockDdubiRepository()),
+                  DelayAlertScreen(repository: widget.repository),
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF0FAE9F),
@@ -5897,19 +5862,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SectionHeader('서비스 상태'),
         const SizedBox(height: 10),
         const StatusBadge(
-          '최근 교통 정보 업데이트가 지연됐어요.',
+          '일정별 최신 교통 상황을 확인하세요.',
           tone: DdubiColors.orange,
           icon: Icons.cloud_off_outlined,
         ),
         const SizedBox(height: 6),
-        const Text('최신 교통정보가 부족하면 Mock 경로로 화면을 확인할 수 있어요.'),
+        const Text('등록한 일정의 평가 결과와 정보 갱신 시각을 확인할 수 있어요.'),
         const SizedBox(height: 12),
         Align(
           alignment: Alignment.centerRight,
           child: OutlinedButton(
             onPressed: () => _open(
               context,
-              DelayAlertScreen(repository: MockDdubiRepository()),
+              DelayAlertScreen(repository: widget.repository),
             ),
             child: const Text('상세 확인'),
           ),

@@ -23,7 +23,7 @@ public class SegmentStatusListener {
     private final ScheduleEvaluationStore store;
     public SegmentStatusListener(ObjectMapper json, ScheduleEvaluationStore store) { this.json = json; this.store = store; }
 
-    @KafkaListener(topics="segment.status", groupId="ddubi-schedule-evaluation-v1")
+    @KafkaListener(topics={"segment.status", "road.impact"}, groupId="ddubi-schedule-evaluation-v1")
     public void receive(String payload) {
         String id;
         Instant now = Instant.now();

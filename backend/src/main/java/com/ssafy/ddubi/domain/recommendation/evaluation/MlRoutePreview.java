@@ -47,6 +47,18 @@ public class MlRoutePreview {
     public record Comparison(String status, boolean productionReady, Result fastest, List<Candidate> candidates,
                              List<Prediction> predictions, boolean budgetExhausted, List<SubwayPrediction> subwayPredictions,
                              List<WaitPrediction> waitPredictions) {
+        /** 도로 증거가 모든 버스 구간에서 유효하고 기록된 영향이 없는 후보를 별도로 제시한다.
+         * fastest의 최소 ETA 의미는 유지한다. 사건 피드가 모든 사고를 포괄하거나 안전함을 보장하지 않는다.
+         * 마스터/관측 부족 또는 해제 미확인도 제외하며 사용자가 실제 경로 선택을 결정한다. */
+        @com.fasterxml.jackson.annotation.JsonProperty(value="roadAlternative", access=com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+        public Result roadAlternative() {
+            if (fastest == null || fastest.reasons().stream().noneMatch(r -> r.startsWith("ROAD_POTENTIAL_IMPACT:"))) return null;
+            return candidates.stream().map(Candidate::result)
+                    .filter(r -> !r.journeyKey().equals(fastest.journeyKey()) && r.estimatedArrivalAt() != null)
+                    .filter(r -> r.assessment() == Assessment.ON_TIME_ESTIMATE || r.assessment() == Assessment.LATE_ESTIMATE)
+                    .filter(r -> r.reasons().stream().noneMatch(reason -> reason.startsWith("ROAD_")))
+                    .min(Comparator.comparing(Result::estimatedArrivalAt).thenComparing(Result::journeyKey)).orElse(null);
+        }
         public Comparison { candidates = List.copyOf(candidates); predictions = List.copyOf(predictions);
             subwayPredictions = subwayPredictions == null ? List.of() : List.copyOf(subwayPredictions);
             waitPredictions = waitPredictions == null ? List.of() : List.copyOf(waitPredictions); }
@@ -71,7 +83,7 @@ public class MlRoutePreview {
             Journey original = evidence.assemble(route, snapshot, asOf);
             var legs = new ArrayList<Leg>();
             Instant cursor = departure;
-            int mlSteps = 0, apiSteps = 0, subwaySteps = 0, busWaitSteps = 0;
+            int mlSteps = 0, apiSteps = 0, subwaySteps = 0, busWaitSteps = 0, roadSteps = 0;
             var reasons = new ArrayList<String>();
             for (Leg leg : original.legs()) {
                 RouteSegment segment = route.segments().stream().filter(s -> ("step-" + s.sequence()).equals(leg.key())).findFirst().orElse(null);
@@ -173,9 +185,15 @@ public class MlRoutePreview {
                         }
                     }
                 }
+                if (segment!=null && segment.mode()==TransportMode.BUS && !snapshot.roads().isEmpty()) {
+                    roadSteps++;
+                    reasons.addAll(RoadImpactEvidence.reasons(segment,snapshot.roads(),cursor,
+                            cursor.plusSeconds(chosen.fallbackSeconds()+leg.entryUncertaintySeconds())));
+                }
                 if (chosen == leg) apiSteps++;
                 legs.add(chosen); cursor = cursor.plusSeconds(chosen.fallbackSeconds());
             }
+            if (!snapshot.roads().isEmpty() && roadSteps < route.segments().stream().filter(s -> s.mode()==TransportMode.BUS).count()) reasons.add("ROAD_IMPACT_UNKNOWN");
             Result raw = evaluator.evaluate(new Journey(original.key(), legs), asOf, departure, arriveBy, evidence.closures(snapshot));
             reasons.addAll(raw.reasons()); reasons.add("VALIDATION_ONLY");
             Result result = new Result(raw.journeyKey(), raw.departureAt(), raw.estimatedArrivalAt(), raw.assessment(), true,

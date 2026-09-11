@@ -109,3 +109,7 @@ Backend 매핑 대응표, 오류 JSON, 동시 호출/timeout과 기존 포트의
 
 정상 예시는 독립적인 두 검증 edge이며 연속된 사용자 경로를 의미하지 않는다.
 기존 `BusPredictionPort`의 운영 승인 조건을 충족한 응답으로 해석하지 않는다.
+
+## 별도 환경 특성 전처리·학습·예측
+
+날씨·도로·사건의 point-in-time 전처리와 별도 모델 경계는 [환경 ML 계약](../docs/contracts/environment-ml.md)에 있다. `environment:prepare`와 `environment:predict`는 같은 전처리를 사용하며 v12 모델을 교체하지 않는다. 새 모델 미등록은 503이다.

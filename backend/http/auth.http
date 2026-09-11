@@ -586,3 +586,36 @@ Content-Type: application/json
   "accessToken": "카카오_SDK_액세스토큰",
   "deviceId": "dev-link2"
 }
+
+### ⑻ 마이페이지 소셜 연결 — 로그인 상태에서, 비밀번호 없이
+# ⑺ 에서 409 ACCOUNT_LINK_UNAVAILABLE 을 받은 사용자가 오는 곳.
+# 기존에 쓰던 소셜(GOOGLE)로 로그인해 토큰을 받은 뒤 새 소셜(KAKAO)을 붙인다.
+#
+# 응답: {"providers": ["GOOGLE", "KAKAO"]}  ← 연결 후 전체 로그인 수단
+@meToken = 기존_소셜로_로그인해서_받은_accessToken
+POST {{host}}/api/v1/auth/social-links
+Authorization: Bearer {{meToken}}
+Content-Type: application/json
+
+{ "provider": "KAKAO", "accessToken": "카카오_SDK_액세스토큰" }
+
+### ⑼ 같은 소셜을 또 연결 — 200, 멱등
+POST {{host}}/api/v1/auth/social-links
+Authorization: Bearer {{meToken}}
+Content-Type: application/json
+
+{ "provider": "KAKAO", "accessToken": "카카오_SDK_액세스토큰" }
+
+### ⑽ 같은 제공자의 다른 계정 — 409 DUPLICATE_RESOURCE
+# 조용히 갈아치우면 원래 그 계정으로 로그인하던 사람이 못 들어온다.
+POST {{host}}/api/v1/auth/social-links
+Authorization: Bearer {{meToken}}
+Content-Type: application/json
+
+{ "provider": "KAKAO", "accessToken": "다른_카카오계정_액세스토큰" }
+
+### ⑾ 로그인 없이 — 401
+POST {{host}}/api/v1/auth/social-links
+Content-Type: application/json
+
+{ "provider": "KAKAO", "accessToken": "카카오_SDK_액세스토큰" }

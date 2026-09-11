@@ -9,6 +9,8 @@ import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLinkRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.SocialLinkRequest;
+import com.ssafy.ddubi.domain.auth.dto.response.SocialLinkResponse;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.dto.response.OAuthLoginResponse;
@@ -281,6 +283,61 @@ public class AuthService {
     }
 
     // ------------------------------------------------------------------
+    // AUTH-003c 마이페이지 소셜 연결
+    // ------------------------------------------------------------------
+
+    /**
+     * 로그인한 사용자가 소셜 계정을 <b>추가로</b> 연결한다.
+     *
+     * <h3>비밀번호를 묻지 않는다</h3>
+     * 로그인 전 연동은 "이 계정이 정말 당신 것인가" 를 물어야 해서 비밀번호가 필요했다.
+     * 여기서는 이미 그 계정으로 인증된 상태다. 다시 물으면 <b>소셜로만 가입한 사용자</b>는
+     * 비밀번호 자체가 없어 영영 연결하지 못하는데, 그 사람들이 바로 이 화면으로 안내받는
+     * 대상이다({@link ErrorCode#ACCOUNT_LINK_UNAVAILABLE}).
+     *
+     * @return 연결 후 이 계정의 전체 로그인 수단
+     */
+    @Transactional
+    public SocialLinkResponse linkSocialToCurrentUser(Long userId, SocialLinkRequest request) {
+        if (request.hasNoCredential()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                    "accessToken 또는 idToken 중 하나는 필요합니다.");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        OAuthClient client = clientFor(request.provider());
+        OAuthUserInfo info = request.usesIdToken()
+                ? client.fetchUserInfoFromIdToken(request.idToken())
+                : client.fetchUserInfoFromAccessToken(request.accessToken());
+
+        Optional<UserAuth> linked = userAuthRepository
+                .findByProviderAndProviderUserId(request.provider(), info.providerUserId());
+
+        if (linked.isPresent()) {
+            if (!linked.get().getUser().getId().equals(userId)) {
+                throw new BusinessException(ErrorCode.SOCIAL_ALREADY_LINKED);
+            }
+            // 같은 소셜을 또 눌렀다. 이미 원하는 상태이므로 오류로 만들지 않는다.
+            log.debug("이미 연결된 소셜 — userId={} provider={}", userId, request.provider());
+        } else {
+            // UK_UAUTH_USER_PROVIDER (user_id, provider) — 한 사용자에게 제공자당 한 행뿐이다.
+            // 다른 카카오 계정이 이미 붙어 있으면 조용히 갈아치우지 않는다. 갈아치우면
+            // 원래 그 계정으로 로그인하던 사람이 어느 날 못 들어온다.
+            if (userAuthRepository.existsByUserIdAndProvider(userId, request.provider())) {
+                throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE, String.format(
+                        "이미 다른 %s 계정이 연결되어 있습니다. 먼저 해제한 뒤 연결해 주세요.",
+                        request.provider()));
+            }
+            userAuthRepository.save(
+                    UserAuth.ofSocial(user, request.provider(), info.providerUserId()));
+            log.info("마이페이지 소셜 연결 — userId={} provider={}", userId, request.provider());
+        }
+
+        return SocialLinkResponse.of(userAuthRepository.findProvidersByUserId(userId));
+    }
+
+    // ------------------------------------------------------------------
     // AUTH-003b 계정 연동 확정
     // ------------------------------------------------------------------
 
@@ -302,7 +359,9 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_LINK_UNAVAILABLE));
 
         if (!passwordEncoder.matches(request.password(), local.getPasswordHash())) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED, "비밀번호가 일치하지 않습니다.");
+            // 티켓은 위에서 이미 소비됐다. 프론트가 입력창만 비우고 재시도시키면 안 되므로
+            // 일반 로그인 실패와 다른 코드로 준다.
+            throw new BusinessException(ErrorCode.LINK_PASSWORD_MISMATCH);
         }
 
         // 티켓을 받아 든 사이에 그 소셜이 다른 사용자에게 붙었을 수 있다.

@@ -9,6 +9,8 @@ import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLinkRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.SocialLinkRequest;
+import com.ssafy.ddubi.domain.auth.dto.response.SocialLinkResponse;
 import com.ssafy.ddubi.domain.auth.dto.request.TokenRefreshRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.dto.response.OAuthLoginResponse;
@@ -128,17 +130,50 @@ public class AuthController {
                     틀렸다고 살려 두면 이 화면이 비밀번호 대입 창구가 된다 — 다시 하려면
                     소셜 로그인부터 거쳐야 한다.
 
-                    | 상황 | 응답 |
-                    | --- | --- |
-                    | 비밀번호 불일치 | 401 `UNAUTHORIZED` |
-                    | 티켓 만료·재사용 | 401 `LINK_TOKEN_INVALID` |
-                    | 그 소셜이 다른 사용자에게 연결됨 | 409 `SOCIAL_ALREADY_LINKED` |
-                    | 기존 계정에 비밀번호가 없음 | 409 `ACCOUNT_LINK_UNAVAILABLE` |
+                    **로그인 전에 부르는 API 다.** 이 시점에는 아직 토큰이 없다.
+
+                    | 상황 | 응답 | 화면 |
+                    | --- | --- | --- |
+                    | 비밀번호 불일치 | 401 `LINK_PASSWORD_MISMATCH` | **소셜 로그인부터 다시** |
+                    | 티켓 만료·재사용 | 401 `LINK_TOKEN_INVALID` | **소셜 로그인부터 다시** |
+                    | 그 소셜이 다른 사용자에게 연결됨 | 409 `SOCIAL_ALREADY_LINKED` | |
+                    | 기존 계정에 비밀번호가 없음 | 409 `ACCOUNT_LINK_UNAVAILABLE` | |
+
+                    ⚠️ 비밀번호가 틀려도 **티켓은 이미 소비**됐다. 입력창만 비우고 재시도시키면
+                    안 된다 — 그 티켓으로는 무엇을 넣어도 통하지 않는다. 그래서 일반 로그인
+                    실패(`UNAUTHORIZED`)와 코드를 나눴다.
                     """)
     @PostMapping("/oauth/link")
     public ApiResponse<AuthTokenResponse> linkOAuthAccount(
             @Valid @RequestBody OAuthLinkRequest request) {
         return ApiResponse.success(authService.linkOAuthAccount(request));
+    }
+
+    @Operation(summary = "마이페이지 소셜 연결",
+            description = """
+                    **로그인한 상태에서** 소셜 계정을 추가로 연결한다. 소셜로만 가입해
+                    `ACCOUNT_LINK_UNAVAILABLE` 안내를 받은 사용자가 오는 곳이다.
+
+                    비밀번호를 묻지 않는다. 이미 그 계정으로 인증된 상태이고, 되물으면
+                    **비밀번호가 없는 사용자**는 영영 연결하지 못한다 — 그들이 바로 이 화면의
+                    대상이다.
+
+                    KAKAO·NAVER 는 `accessToken`, GOOGLE 은 `idToken` 을 보낸다.
+                    응답은 연결 후 그 계정의 **전체** 로그인 수단이다.
+
+                    | 상황 | 응답 |
+                    | --- | --- |
+                    | 자격증명 없음 | 400 `INVALID_REQUEST` |
+                    | 그 소셜이 다른 사용자에게 연결됨 | 409 `SOCIAL_ALREADY_LINKED` |
+                    | 같은 제공자의 **다른** 계정이 이미 연결됨 | 409 `DUPLICATE_RESOURCE` |
+
+                    이미 내게 연결된 소셜을 다시 보내면 오류가 아니라 200 이다(멱등).
+                    """)
+    @PostMapping("/social-links")
+    public ApiResponse<SocialLinkResponse> linkSocial(
+            @LoginUserId Long userId,
+            @Valid @RequestBody SocialLinkRequest request) {
+        return ApiResponse.success(authService.linkSocialToCurrentUser(userId, request));
     }
 
     /** 신규 가입만 201. 연동 요구는 실패가 아니므로 200 이다. */

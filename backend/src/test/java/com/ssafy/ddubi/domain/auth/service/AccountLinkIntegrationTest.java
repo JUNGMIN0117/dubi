@@ -9,6 +9,7 @@ import com.ssafy.ddubi.domain.auth.dto.request.OAuthAccessTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthIdTokenLoginRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLinkRequest;
 import com.ssafy.ddubi.domain.auth.dto.request.OAuthLoginRequest;
+import com.ssafy.ddubi.domain.auth.dto.request.SocialLinkRequest;
 import com.ssafy.ddubi.domain.auth.dto.response.AuthTokenResponse;
 import com.ssafy.ddubi.domain.auth.dto.response.OAuthLoginResponse;
 import com.ssafy.ddubi.domain.auth.entity.AuthProvider;
@@ -168,7 +169,7 @@ class AccountLinkIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("비밀번호가 틀리면 401 이고 연동되지 않는다")
+    @DisplayName("비밀번호가 틀리면 전용 코드로 401 — 화면이 \"소셜부터 다시\" 로 가야 한다")
     void rejectsWrongPassword() {
         signupLocal(EMAIL, "기존닉네임");
         Long existingId = userRepository.findByEmail(EMAIL).orElseThrow().getId();
@@ -178,7 +179,7 @@ class AccountLinkIntegrationTest extends IntegrationTestSupport {
                 new OAuthLinkRequest(linkToken, "wrong-password", "dev-1")))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).errorCode())
-                .isEqualTo(ErrorCode.UNAUTHORIZED);
+                .isEqualTo(ErrorCode.LINK_PASSWORD_MISMATCH);
 
         assertThat(userAuthRepository.findProvidersByUserId(existingId))
                 .containsExactly(AuthProvider.LOCAL);
@@ -362,5 +363,97 @@ class AccountLinkIntegrationTest extends IntegrationTestSupport {
     private AuthTokenResponse authenticated(OAuthLoginResponse response) {
         assertThat(response.status()).isEqualTo(OAuthLoginResponse.Status.AUTHENTICATED);
         return response.tokens();
+    }
+
+    // ------------------------------------------------------------------
+    // 마이페이지 소셜 연결 (로그인 상태)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("로그인한 사용자는 비밀번호 없이 소셜을 추가로 연결한다")
+    void linksSocialFromMyPage() {
+        Long userId = givenGoogleOnlyUser();
+        given(naverOAuthClient.provider()).willReturn(AuthProvider.NAVER);
+        given(naverOAuthClient.fetchUserInfoFromAccessToken(any()))
+                .willReturn(new OAuthUserInfo("naver-9", EMAIL, true, "네이버"));
+
+        var response = authService.linkSocialToCurrentUser(userId,
+                new SocialLinkRequest(AuthProvider.NAVER, "naver-token", null));
+
+        assertThat(response.providers())
+                .as("비밀번호가 없는 계정도 연결할 수 있어야 한다 — 이 화면의 대상이 그들이다")
+                .containsExactlyInAnyOrder(AuthProvider.GOOGLE, AuthProvider.NAVER);
+    }
+
+    @Test
+    @DisplayName("같은 소셜을 다시 연결해도 오류가 아니다 — 이미 원하는 상태다")
+    void relinkingSameSocialIsIdempotent() {
+        Long userId = givenGoogleOnlyUser();
+        given(naverOAuthClient.provider()).willReturn(AuthProvider.NAVER);
+        given(naverOAuthClient.fetchUserInfoFromAccessToken(any()))
+                .willReturn(new OAuthUserInfo("naver-9", EMAIL, true, "네이버"));
+        authService.linkSocialToCurrentUser(userId,
+                new SocialLinkRequest(AuthProvider.NAVER, "naver-token", null));
+
+        var again = authService.linkSocialToCurrentUser(userId,
+                new SocialLinkRequest(AuthProvider.NAVER, "naver-token", null));
+
+        assertThat(again.providers()).hasSize(2);
+        assertThat(userAuthRepository.count()).as("행이 늘지 않는다").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("다른 사용자에게 붙은 소셜은 연결할 수 없다 — 409")
+    void cannotStealSocialLinkedToAnotherUser() {
+        Long userId = givenGoogleOnlyUser();
+        // 다른 사람이 그 카카오로 이미 가입해 있다.
+        givenKakao(KAKAO_ID, "someone-else@ddubi.com", true, "남");
+        authService.loginOAuth(kakaoLogin());
+
+        given(kakaoOAuthClient.fetchUserInfoFromAccessToken(any()))
+                .willReturn(new OAuthUserInfo(KAKAO_ID, "someone-else@ddubi.com", true, "남"));
+
+        assertThatThrownBy(() -> authService.linkSocialToCurrentUser(userId,
+                new SocialLinkRequest(AuthProvider.KAKAO, "kakao-token", null)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.SOCIAL_ALREADY_LINKED);
+    }
+
+    @Test
+    @DisplayName("같은 제공자의 다른 계정이 이미 붙어 있으면 409 — 조용히 갈아치우지 않는다")
+    void refusesSecondAccountOfSameProvider() {
+        Long userId = givenGoogleOnlyUser();
+        given(googleOAuthClient.fetchUserInfoFromIdToken(any()))
+                .willReturn(new OAuthUserInfo("google-OTHER", EMAIL, true, "다른구글"));
+
+        assertThatThrownBy(() -> authService.linkSocialToCurrentUser(userId,
+                new SocialLinkRequest(AuthProvider.GOOGLE, null, "other-id-token")))
+                .as("갈아치우면 원래 그 계정으로 로그인하던 사람이 못 들어온다")
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.DUPLICATE_RESOURCE);
+    }
+
+    @Test
+    @DisplayName("자격증명이 없으면 400")
+    void requiresCredential() {
+        Long userId = givenGoogleOnlyUser();
+
+        assertThatThrownBy(() -> authService.linkSocialToCurrentUser(userId,
+                new SocialLinkRequest(AuthProvider.KAKAO, null, null)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).errorCode())
+                .isEqualTo(ErrorCode.INVALID_REQUEST);
+    }
+
+    /** 구글로만 가입한 계정 — 비밀번호가 없다. ACCOUNT_LINK_UNAVAILABLE 안내를 받는 대상. */
+    private Long givenGoogleOnlyUser() {
+        given(googleOAuthClient.provider()).willReturn(AuthProvider.GOOGLE);
+        given(googleOAuthClient.fetchUserInfoFromIdToken(any()))
+                .willReturn(new OAuthUserInfo("google-1", EMAIL, true, "구글사용자"));
+        authService.loginOAuthIdToken(
+                new OAuthIdTokenLoginRequest(AuthProvider.GOOGLE, "google-id-token", "dev-mobile"));
+        return userRepository.findByEmail(EMAIL).orElseThrow().getId();
     }
 }

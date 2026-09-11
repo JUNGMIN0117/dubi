@@ -55,7 +55,10 @@ public class SubwayTimetable {
             try {
                 Path file = Path.of(path);
                 if (Files.size(file) > 32L * 1024 * 1024) throw new IllegalArgumentException();
-                loaded = validate(json.readValue(Files.readString(file), Data.class));
+                // JSON 전체 문자열을 별도로 만들지 않고 파싱한다. 실패하더라도 파일 핸들은 반환한다.
+                try (var input = Files.newInputStream(file)) {
+                    loaded = validate(json.readValue(input, Data.class));
+                }
                 reason = null;
             } catch (Exception invalid) { loaded = null; reason = "SUBWAY_TIMETABLE_INVALID"; }
         }

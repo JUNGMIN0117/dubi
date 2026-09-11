@@ -52,10 +52,12 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         var first = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
         assertThat(first.selected().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.LATE_ESTIMATE);
         assertThat(first.suggestion().proposed().journeyKey()).isEqualTo("candidate-1");
-        // JDBC 저장 버전이 JPA의 DATETIME과 같은 벽시각이어야 한다. UTC CI에서
-        // Timestamp 시간대 변환으로 9시간 밀리면 결과가 있어도 PENDING으로 숨겨진다.
-        assertThat(jdbc.queryForObject("SELECT e.input_updated_at=s.updated_at FROM schedule_evaluation e "
-                + "JOIN schedule s ON s.id=e.schedule_id WHERE s.id=?", Boolean.class, scheduleId)).isTrue();
+        // 비교 계약은 JPA가 반환한 버전과 JDBC 저장/조회 버전의 일치다.
+        // Hibernate의 Timestamp 변환이 개입하는 원본 DB 컬럼끼리 직접 비교하지 않는다.
+        LocalDateTime persistedVersion = jdbc.queryForObject(
+                "SELECT input_updated_at FROM schedule_evaluation WHERE schedule_id=?",
+                (rs, rowNum) -> rs.getObject(1, LocalDateTime.class), scheduleId);
+        assertThat(persistedVersion).isEqualTo(schedules.findById(scheduleId).orElseThrow().getUpdatedAt());
         assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("READY");
         workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(30));
         verify(routeClient,times(1)).search(any());

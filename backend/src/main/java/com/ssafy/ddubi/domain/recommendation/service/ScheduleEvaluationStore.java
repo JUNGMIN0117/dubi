@@ -129,7 +129,7 @@ public class ScheduleEvaluationStore {
         if (((Number) state.get("event_revision")).longValue() != job.eventRevision()) nextAt = now;
         jdbc.update("UPDATE schedule_evaluation SET input_updated_at=?,candidates_json=?,result_json=?,next_check_at=?,"
                         + "lease_token=NULL,lease_until=NULL,last_error=NULL,notification_json=?,notification_key=? WHERE schedule_id=?",
-                Timestamp.valueOf(job.version()), write(cache), write(saved), ts(nextAt), notificationJson, notificationKey, job.scheduleId());
+                job.version(), write(cache), write(saved), ts(nextAt), notificationJson, notificationKey, job.scheduleId());
         return saved;
     }
 
@@ -217,7 +217,7 @@ public class ScheduleEvaluationStore {
                 .filter(c -> RouteEvidenceAssembler.key(c).equals(proposed.journeyKey())).findFirst().orElseThrow();
         jdbc.update("UPDATE schedule_evaluation SET candidates_json=?,input_updated_at=?,result_json=NULL,next_check_at=?,lease_token=NULL,lease_until=NULL,notification_json=NULL WHERE schedule_id=?",
                 write(new Cache(cache.search(), cache.routeIds(), proposed.journeyKey(), selectedCandidate)),
-                Timestamp.valueOf(s.getUpdatedAt()), ts(now), scheduleId);
+                s.getUpdatedAt(), ts(now), scheduleId);
     }
 
     Schedule owned(long id, Long userId) {
@@ -242,5 +242,10 @@ public class ScheduleEvaluationStore {
     }
     static Instant instant(LocalDateTime value) { return value.atZone(KST).toInstant(); }
     static LocalDateTime local(Instant value) { return LocalDateTime.ofInstant(value, KST); }
-    static Timestamp ts(Instant value) { return Timestamp.valueOf(local(value)); }
+    /**
+     * DATETIME은 순간이 아닌 KST 업무시각이므로 JDBC 4.2 LocalDateTime으로 바인딩한다.
+     * Timestamp를 거치면 JVM이 UTC인 CI에서 Connector/J의 연결 시간대(+09:00) 변환이
+     * 다시 적용되어 입력 버전과 다음 평가시각이 밀린다. 나노초를 임의로 잘라 비교를 완화하지 않는다.
+     */
+    static LocalDateTime ts(Instant value) { return local(value); }
 }

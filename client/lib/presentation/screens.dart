@@ -6262,7 +6262,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SectionHeader('서비스 상태'),
+              const SectionHeader('서비스 연결 안내'),
               const SizedBox(height: 10),
               const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -6520,7 +6520,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader('서비스 상태'),
+        const SectionHeader('서비스 연결 안내'),
         const SizedBox(height: 10),
         const StatusBadge(
           '일정별 최신 교통 상황을 확인하세요.',

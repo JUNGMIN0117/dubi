@@ -385,6 +385,50 @@ def to_redis_rows(df: DataFrame) -> DataFrame:
     )
 
 
+def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crosswalk=None) -> None:
+    """운영과 반복 부하 검증이 공유하는 한 배치 처리다.
+
+    정적 crosswalk는 호출자가 전체 query 수명 동안 소유한다. 이 함수는 배치별 캐시만
+    소유하고 Redis 쓰기 실패를 상위로 전파해 checkpoint가 실패 배치를 건너뛰지 않게 한다.
+    """
+    normalized = transform(batch_df,crosswalk).cache()
+    latest = None
+    rows = None
+    try:
+        supported_count = normalized.count()
+        valid_count = normalized.filter(F.col("providerKey").isNotNull()).count()
+        valid_timestamp_count = normalized.filter(
+            F.col("occurredAt").isNotNull() & F.col("collectedAt").isNotNull()
+        ).count()
+        latest = latest_per_provider(normalized).cache()
+        rows = to_redis_rows(latest).cache()
+        output_count = rows.count()
+        if output_count:
+            write_latest_with_row_ttl(
+                rows,
+                settings.redis_host,
+                settings.redis_port,
+                settings.redis_password,
+            )
+        log.info(
+            "batch=%d supported=%d validIdentity=%d invalidIdentity=%d "
+            "validTimestamp=%d invalidTimestamp=%d redisKeys=%d",
+            batch_id,
+            supported_count,
+            valid_count,
+            supported_count - valid_count,
+            valid_timestamp_count,
+            supported_count - valid_timestamp_count,
+            output_count,
+        )
+    finally:
+        if rows is not None:
+            rows.unpersist()
+        if latest is not None:
+            latest.unpersist()
+        normalized.unpersist()
+
+
 def main() -> int:
     """두 원본 토픽을 지속 소비하고 배치별 최신 상태를 Redis에 멱등 저장한다."""
 
@@ -404,48 +448,11 @@ def main() -> int:
     crosswalk_path=os.environ.get("BUS_CROSSWALK_PATH")
     crosswalk=load_crosswalk(spark,crosswalk_path,os.environ.get("BUS_CROSSWALK_SHA256")) if crosswalk_path else None
 
-    def process_batch(batch_df: DataFrame, batch_id: int) -> None:
-        normalized = transform(batch_df,crosswalk).cache()
-        latest = None
-        rows = None
-        try:
-            supported_count = normalized.count()
-            valid_count = normalized.filter(F.col("providerKey").isNotNull()).count()
-            valid_timestamp_count = normalized.filter(
-                F.col("occurredAt").isNotNull() & F.col("collectedAt").isNotNull()
-            ).count()
-            latest = latest_per_provider(normalized).cache()
-            rows = to_redis_rows(latest).cache()
-            output_count = rows.count()
-            if output_count:
-                write_latest_with_row_ttl(
-                    rows,
-                    settings.redis_host,
-                    settings.redis_port,
-                    settings.redis_password,
-                )
-            log.info(
-                "batch=%d supported=%d validIdentity=%d invalidIdentity=%d "
-                "validTimestamp=%d invalidTimestamp=%d redisKeys=%d",
-                batch_id,
-                supported_count,
-                valid_count,
-                supported_count - valid_count,
-                valid_timestamp_count,
-                supported_count - valid_timestamp_count,
-                output_count,
-            )
-        finally:
-            if rows is not None:
-                rows.unpersist()
-            if latest is not None:
-                latest.unpersist()
-            normalized.unpersist()
 
     try:
         events = read_events_stream(spark, settings, TOPICS)
         query = (
-            events.writeStream.foreachBatch(process_batch)
+            events.writeStream.foreachBatch(lambda frame, batch_id: process_batch(frame, batch_id, settings, crosswalk))
             .option("checkpointLocation", settings.checkpoint_for(JOB_NAME))
             .trigger(processingTime=TRIGGER)
             .queryName(JOB_NAME)

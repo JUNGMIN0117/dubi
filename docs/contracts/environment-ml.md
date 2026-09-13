@@ -85,6 +85,7 @@ samples.jsonl 한 행은 위 request와 별도 label을 가진다. label은 예�
   "label": {
     "eventId": "fixture-trip-1", "source": "fixture", "verified": true,
     "kind": "ACTUAL_TRAVERSAL", "seconds": 95.0,
+    "startedAt": "2026-09-11T09:10:00+09:00",
     "completedAt": "2026-09-11T09:11:35+09:00", "availableAt": "2026-09-11T09:11:40+09:00"
   }
 }
@@ -94,7 +95,7 @@ samples.jsonl 한 행은 위 request와 별도 label을 가진다. label은 예�
    --observations observations.jsonl --output prepared`를 실행한다. 공통 prepare의 결과에 label만 붙인다.
    날짜 경계 후보 중 행 수70%에 가장 가까운 경계를 선택한다. 테스트 시작까지 알려지지 않은
    학습 정답은 withheld로 분리하며 실제 train/test/withheld 행 수를 manifest에 남긴다.
-   같은 label ID 중복, 목표 혼합, 예측값 정답 사용, 시간대 누락은 실패다. 입력별 최대100,000행의
+   같은 `(source, eventId)` 정답 중복, 목표 혼합, 예측값 정답 사용, 시간대 누락은 실패다. 입력별 최대100,000행의
    검증 도구이며 기존 1억 행 전체 학습 파이프라인의 대체물은 아니다.
 2. `python ml-serving/tools/train_environment_model.py --prepared prepared --output new-bundle
    --version <new-version>`은 GPU device0, CPU최대16으로 LightGBM 별도 모델을 학습한다.
@@ -105,3 +106,17 @@ samples.jsonl 한 행은 위 request와 별도 label을 가진다. label은 예�
    차이만으로 정확도를 주장하지 않는다. 관측/피드 품질 및 기존 모델/경로 API와 같은 표본 비교도 필요하다.
 
 현재 서버 자료의 누락과 운영 적용 조건은 [통합 보강 기록](transit-service-integration.md)에 정리했다.
+
+## 2026-09-13 정답 검증 보강
+
+준비 manifest의 `labelVersion`은 `environment-label-v2`다. 이전 준비 파일은 새 도구로 다시
+전처리해야 하며, 학습 도구가 버전/SHA와 정답을 다시 검증한다. 기존 v12 모델 파일에는 적용하지 않는다.
+`ACTUAL_TRAVERSAL`은 실제 `startedAt`과 `completedAt`이 필요하고 두 시각 차이가 `seconds`와
+일치해야 한다. `asOf <= startedAt < completedAt <= availableAt`을 만족해야 한다. 미래 통과 예상값인
+`passageAt`을 실제 진입시각으로 대신하지 않는다. 시간대 평균 목표는 별도로 유지한다.
+
+관측 `source`/`eventId`가 비어 있으면 HTTP뿐 아니라 파일 전처리에서도 제외한다.
+관측은 `(masterVersion, segmentId)`로 먼저 묶은 뒤 동일 prepare를 적용한다.
+manifest의 `quality`는 train/test/withheld별 행 수, 환경 전체 결측 행 수, 열별 결측,
+충돌·제외 관측 참조 수, 구간 수, 정답 출처별 수, 실제 시간순 asOf 범위를 기록한다.
+이 보고서에 수치가 있다는 사실만으로 운영 모델을 승인하지 않는다.

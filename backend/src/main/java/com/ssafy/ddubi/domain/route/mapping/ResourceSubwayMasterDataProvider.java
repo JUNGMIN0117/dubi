@@ -91,7 +91,7 @@ public class ResourceSubwayMasterDataProvider implements SeoulTransitMasterDataP
      */
     private static void validate(Snapshot value) {
         if (value == null || value.schemaVersion() != 1 || value.dataVersion() == null
-                || !value.dataVersion().matches("[A-Za-z0-9._-]{1,64}")
+                || !value.dataVersion().matches("[A-Za-z0-9._-]{1,50}")
                 || value.lines() == null || value.lines().isEmpty() || value.aliases() == null) {
             throw new IllegalArgumentException("지하철 마스터 스키마/버전/행 누락");
         }

@@ -77,6 +77,7 @@ def test_training_uses_serving_features_and_holds_late_labels():
                     source="fixture",
                     eventId=str(day),
                     seconds=100,
+                    startedAt=f"2026-09-{day:02d}T09:09:20+09:00",
                     completedAt=f"2026-09-{day:02d}T09:11:00+09:00",
                     availableAt=f"2026-09-{day:02d}T09:12:00+09:00",
                 ),
@@ -139,6 +140,7 @@ def test_training_checks_reject_date_overlap_and_missing_histories():
         source="fixture",
         eventId="1",
         seconds=100,
+        startedAt="2026-09-10T09:09:20+09:00",
         completedAt="2026-09-10T09:11:00+09:00",
         availableAt="2026-09-10T09:12:00+09:00",
     )
@@ -163,6 +165,7 @@ def test_preparation_cli_writes_verifiable_splits(tmp_path, monkeypatch):
                     source="fixture",
                     eventId=str(day),
                     seconds=100,
+                    startedAt=f"2026-09-{day:02d}T09:09:20+09:00",
                     completedAt=f"2026-09-{day:02d}T09:11:00+09:00",
                     availableAt=f"2026-09-{day:02d}T09:12:00+09:00",
                 ),
@@ -204,3 +207,46 @@ def test_preparation_cli_writes_verifiable_splits(tmp_path, monkeypatch):
         assert manifest["sha256"][name] == hashlib.sha256(raw).hexdigest()
         splits[name] = [json.loads(line) for line in raw.decode().splitlines()]
     assert check(splits["train"], splits["test"]) == "ACTUAL_TRAVERSAL"
+
+
+def test_missing_observation_provenance_cannot_enter_training_features():
+    for field in ("source", "eventId"):
+        bad = obs(**{field: ""})
+        result = prepare(request(), [bad])
+        assert result["features"]["temperatureC"] is None
+        assert result["rejectedObservations"] == 1
+
+
+def test_actual_label_requires_measured_start_and_consistent_duration():
+    from environment_labels import validate_label
+
+    label = dict(
+        kind="ACTUAL_TRAVERSAL",
+        verified=True,
+        source="fixture",
+        eventId="trip",
+        seconds=100,
+        startedAt="2026-09-10T09:10:00+09:00",
+        completedAt="2026-09-10T09:11:40+09:00",
+        availableAt="2026-09-10T09:12:00+09:00",
+    )
+    assert validate_label(request(), label) == "ACTUAL_TRAVERSAL"
+    with pytest.raises(ValueError, match="duration differs"):
+        validate_label(request(), dict(label, seconds=60))
+    missing = dict(label)
+    missing.pop("startedAt")
+    with pytest.raises(ValueError, match="startedAt required"):
+        validate_label(request(), missing)
+    with pytest.raises(ValueError, match="interval invalid"):
+        validate_label(request(), dict(label, startedAt="2026-09-10T08:59:00+09:00"))
+
+
+def test_quality_report_exposes_missing_environment_instead_of_success():
+    from environment_labels import quality_report
+
+    row = prepare(request(), [])
+    row["label"] = dict(source="fixture")
+    report = quality_report({"train": [row], "test": []})
+    assert report["train"]["allEnvironmentMissingRows"] == 1
+    assert report["train"]["missingByFeature"]["accidentCount"] == 1
+    assert report["test"]["asOfMin"] is None

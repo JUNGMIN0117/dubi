@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from environment_features import VERSION, instant
+from environment_labels import validate_label, quality_report, LABEL_VERSION
 from environment_model import FEATURES, vector
 
 
@@ -29,6 +30,7 @@ def check(train, test):
     targets = set()
     for r in train + test:
         label = r["label"]
+        validate_label(r, label)
         targets.add(label["kind"])
         for provenance in r.get("provenance", {}).values():
             if any(
@@ -38,9 +40,10 @@ def check(train, test):
                 raise ValueError("future feature leakage")
         if r["featureVersion"] != VERSION or label.get("verified") is not True:
             raise ValueError("unverified row")
-        if label["eventId"] in ids:
+        identity = (label["source"], label["eventId"])
+        if identity in ids:
             raise ValueError("duplicate label")
-        ids.add(label["eventId"])
+        ids.add(identity)
         seconds = label["seconds"]
         if (
             isinstance(seconds, bool)
@@ -89,6 +92,8 @@ def main():
             (Path(a.prepared) / (name + ".jsonl")).read_bytes()
         ).hexdigest() != manifest.get("sha256", {}).get(name):
             raise ValueError("prepared SHA mismatch")
+    if manifest.get("labelVersion") != LABEL_VERSION:
+        raise ValueError("prepared label version mismatch; prepare again")
     train, test = read("train"), read("test")
     target = check(train, test)
     import numpy as np
@@ -130,6 +135,9 @@ def main():
     encoded = model.model_to_string().encode("utf-8")
     manifest = dict(
         featureVersion=VERSION,
+        labelVersion=LABEL_VERSION,
+        preparedSha256=manifest["sha256"],
+        quality=quality_report(dict(train=train, test=test)),
         features=FEATURES,
         modelVersion=a.version,
         target=target,

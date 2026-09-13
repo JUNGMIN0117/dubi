@@ -35,3 +35,22 @@ Windows Python 3.12 로컬 worker가 종료되어 별도 Python 3.11 테스트 �
 수정 배포 후 동일 v6 파일·SHA로 Spark만 재활성화할 때 기동 캐시 생성 완료,
 후속 배치 처리시간, driver heap, 컨테이너 restart count, 미매핑 사유를 확인한다.
 Collector 쪽 기존 대응표와 버전은 그대로 유지한다.
+
+## 2026-09-13 실제 Kafka/Redis를 포함한 격리 검증
+
+`tools/verify_realtime_pipeline.py`는 Collector의 Publisher/BusCrosswalk와 운영 `process_batch`를
+사용한다. 위치 관측은 명시적 검증 fixture이며 실제 운행 표본이 아니다. `process_batch`를
+모듈 함수로 분리해 main과 이 도구가 동일한 배치 수명/Redis 쓰기 로직을 실행한다.
+
+- Linux Docker, Spark 3.5.3, Python 3.8, local[2], driver heap 2 GiB, 컨테이너 한도 4 GiB.
+- v6 전체 인덱스 208,329행. 정상 30배치 + 늦은 데이터 + 버전 불일치 = 32배치/3,200메시지 ACK.
+- 첫 배치 13.51초, 이후 1.91~3.40초. 배치 종료 시 측정 힙 364,315,800~762,938,496 bytes.
+- InMemoryTableScan 유지, Redis 최신값/동일 SHA 유지, 역순 이벤트 덮어쓰기 방지,
+  query 정상 종료 후 같은 체크포인트로 재개, 버전 불일치 시 canonical ID 거절 통과.
+- 해당 컨테이너 exit=0, OOMKilled=false, RestartCount=0.
+- 재실행 시 토픽/차량/eventId를 출력 디렉터리별로 분리한 최종 도구도 500메시지로 재확인했다.
+
+측정 힙은 전체 실행 중 peak 또는 컨테이너 RSS가 아니다. 이 시험은 운영 부하·장시간 누수·강제 종료
+복구를 입증하지 않으며 운영 Spark의 임시 crosswalk OFF 설정을 해제하지 않았다.
+재실행 방법은 [검증 도구 설명](../../sparkjobs/tools/README.md), 범위별 결과는
+[데이터 담당 보강 결과](data-role-hardening-20260913.md)를 따른다.

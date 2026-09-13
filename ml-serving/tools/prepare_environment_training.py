@@ -8,12 +8,12 @@
 import argparse
 import json
 import hashlib
-import math
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from environment_features import prepare, instant
+from environment_labels import validate_label, quality_report, LABEL_VERSION
 
 
 def build(samples, observations):
@@ -23,34 +23,24 @@ def build(samples, observations):
     rows = []
     kinds = set()
     identities = set()
+    # 전체 이력을 매 정답마다 순회하지 않도록 마스터/구간으로 먼저 좁힌다.
+    observation_index = {}
+    for item in observations:
+        observation_index.setdefault(
+            (item.get("masterVersion"), item.get("segmentId")), []
+        ).append(item)
     for sample in samples:
         request, label = sample["request"], sample["label"]
-        kind = label["kind"]
+        kind = validate_label(request, label)
         kinds.add(kind)
-        if kind not in ("ACTUAL_TRAVERSAL", "HOURLY_MEAN_BUS_SEGMENT"):
-            raise ValueError("prediction is not label")
-        if (
-            label.get("verified") is not True
-            or not label.get("source")
-            or not label.get("eventId")
-        ):
-            raise ValueError("label provenance required")
-        if label["eventId"] in identities:
+        identity = (label["source"], label["eventId"])
+        if identity in identities:
             raise ValueError("duplicate label")
-        identities.add(label["eventId"])
-        if instant(label["completedAt"]) <= instant(request["asOf"]):
-            raise ValueError("label precedes prediction")
-        if instant(label["availableAt"]) < instant(label["completedAt"]):
-            raise ValueError("invalid label availability")
-        duration = label["seconds"]
-        if (
-            isinstance(duration, bool)
-            or not isinstance(duration, (int, float))
-            or not math.isfinite(duration)
-            or duration <= 0
-        ):
-            raise ValueError("positive finite seconds required")
-        row = prepare(request, observations)
+        identities.add(identity)
+        row = prepare(
+            request,
+            observation_index.get((request["masterVersion"], request["segmentId"]), []),
+        )
         if row["conflictingKinds"]:
             raise ValueError("conflicting feature evidence")
         row["label"] = label
@@ -120,6 +110,8 @@ def main():
         json.dumps(
             dict(
                 featureVersion="environment-asof-v1",
+                labelVersion=LABEL_VERSION,
+                quality=quality_report(result),
                 rows={k: len(v) for k, v in result.items()},
                 sha256={
                     k: hashlib.sha256((out / (k + ".jsonl")).read_bytes()).hexdigest()

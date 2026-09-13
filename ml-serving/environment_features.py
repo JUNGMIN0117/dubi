@@ -52,6 +52,11 @@ def prepare(request, observations):
         if any(item.get(k) != request[k] for k in required):
             continue
         try:
+            if any(
+                not isinstance(item.get(k), str) or not item[k].strip()
+                for k in ("source", "eventId")
+            ):
+                raise ValueError("observation provenance required")
             kind = item["kind"]
             if kind not in ("weather", "road", "events"):
                 raise ValueError("unknown kind")

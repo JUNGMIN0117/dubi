@@ -96,3 +96,15 @@ Backend 설정: `ddubi.road-impact.path`, `ddubi.road-impact.sha256`,
 Spark 운영 컨테이너의 임시 crosswalk OFF 해제와 OOM/lag 검증은 아직 하지 않았다.
 기존 cache/count 수정은 유지하며 운영 Spark 호스트/배포 경로는 열린 ML Jupyter 서버와 구별해야 한다.
 기존 문서 `bus-crosswalk-cache-validation.md`의 로컬 결과를 운영 성능으로 보고하지 않는다.
+
+## 2026-09-13 후속 검증
+
+파일 지하철 마스터의 검증된 버전/SHA를 STAGING 부모 행으로 등록한 뒤 매핑 캐시를 같은
+트랜잭션에서 저장한다. 기존 DB 활성 포인터와 수동 상태를 보존하고 동일 버전의 다른 원본은
+거절한다. 파일 버전 길이는 기존 DB의 50자 한도에 맞춘다. 실제 MySQL 동시 저장·충돌·EXACT 재조회와
+저장된 카카오 응답 20개 재생에서 FK 오류 없이 캐시 저장을 확인했다.
+
+실제 Kafka/Redis와 fixture로 반복 배치, 기준선 계산, Spring 내부 API 업로드/MySQL 활성화까지
+확인했다. 도로 자료 재다운로드 감사와 ML 서버 데이터 재확인 결과는
+[데이터 담당 보강 결과](data-role-hardening-20260913.md)에 구분했다.
+현재는 환경 모델 재학습/운영 도로 매핑/운영 Spark 부하 검증까지 완료한 상태가 아니다.

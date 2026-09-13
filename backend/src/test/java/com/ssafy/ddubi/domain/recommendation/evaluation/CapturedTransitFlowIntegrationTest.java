@@ -88,6 +88,8 @@ class CapturedTransitFlowIntegrationTest extends IntegrationTestSupport {
                     "subwaySteps",comparison.subwayPredictions().size(),"fastest",comparison.fastest().journeyKey(),
                     "subwayReasons",comparison.subwayPredictions().stream().flatMap(p -> p.estimate().reasons().stream()).distinct().sorted().toList()));
         }
+        // Matcher 반환만으로 성공 처리하지 않는다. 파일 버전 등록과 실제 캐시 저장도 확인한다.
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM provider_segment_mapping WHERE mapping_status='EXACT'",Integer.class)).isPositive();
         assertThat(candidates).isEqualTo(288);
         assertThat(subwaySteps).isEqualTo(248);
         assertThat(timedSteps).isPositive();

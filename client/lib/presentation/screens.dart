@@ -5770,6 +5770,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
 
+  // ignore: unused_element
   Future<void> _openAccountManagement(
     BuildContext context,
     UserProfile user,
@@ -6312,6 +6313,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
+  // ignore: unused_element
   Future<void> _showStampBoardGuide(BuildContext context) =>
       showModalBottomSheet<void>(
         context: context,
@@ -6321,6 +6323,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (_) => const StampBoardGuideSheet(),
       );
 
+  // ignore: unused_element
   Future<void> _showStampBoardDetails(BuildContext context) =>
       showModalBottomSheet<void>(
         context: context,
@@ -7078,6 +7081,7 @@ class _MoreMenuRow extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _SettingsAccountAction extends StatelessWidget {
   const _SettingsAccountAction({
     required this.icon,

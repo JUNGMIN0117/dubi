@@ -182,18 +182,19 @@ public class TravelTimeEstimator {
 
     /** 기준선도 마찬가지로 전부 있을 때만 쓴다. 일부만 채우면 나머지를 나눌 근거가 없다. */
     private long[] allBaselines(StepEstimateInput step, Instant enteredAt, BaselineSnapshot baselines) {
-        ZonedDateTime entry = enteredAt.atZone(ZONE);
-        byte dow = (byte) entry.getDayOfWeek().getValue();
-        byte hourSlot = (byte) entry.getHour();
-
+        Instant cursor = enteredAt;
         long[] values = new long[step.edges().size()];
         for (int i = 0; i < step.edges().size(); i++) {
+            ZonedDateTime entry = cursor.atZone(ZONE);
+            byte dow = (byte) entry.getDayOfWeek().getValue();
+            byte hourSlot = (byte) entry.getHour();
             String segmentId = step.edges().get(i).segmentId();
             Long p50 = segmentId == null ? null : baselines.p50(segmentId, dow, hourSlot);
             if (p50 == null) {
                 return null;
             }
             values[i] = p50;
+            cursor = cursor.plusSeconds(p50);
         }
         return values;
     }
@@ -298,6 +299,13 @@ public class TravelTimeEstimator {
         Set<String> segmentIds = new LinkedHashSet<>();
         Set<Byte> dows = new LinkedHashSet<>();
         Set<Byte> hours = new LinkedHashSet<>();
+
+        for (byte dow = 1; dow <= 7; dow++) {
+            dows.add(dow);
+        }
+        for (byte hour = 0; hour < 24; hour++) {
+            hours.add(hour);
+        }
 
         Instant cursor = departAt;
         for (StepEstimateInput step : steps) {

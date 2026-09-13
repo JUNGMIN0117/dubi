@@ -78,6 +78,8 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
     final preview = _map(result['preview']);
     final isPreview = preview.isNotEmpty;
     final selected = isPreview ? _map(preview['fastest']) : _map(result['selected']);
+    final roadAlternative = _map(preview['roadAlternative']);
+    final roadReasons = (selected['reasons'] as List? ?? const []).map((r) => r.toString());
     final suggestion = _map(result['suggestion']);
     final proposed = _map(suggestion['proposed']);
     final hasChange = proposed.isNotEmpty && (proposed['journeyKey'] != result['selectedKey'] ||
@@ -113,6 +115,12 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
           Text('계산: ${_time(result['checkedAt'])}'),
           const Text('배차와 실제 도착은 달라질 수 있습니다.'),
           if (selected['tentative'] == true) const Text('잠정 예측입니다. 배차와 모델 정확도 검증이 필요합니다.'),
+          if (roadReasons.any((r) => r.startsWith('ROAD_POTENTIAL_IMPACT:')))
+            const Text('예상 통과 구간에 사고·통제 영향이 있을 수 있습니다.'),
+          if (roadReasons.any((r) => r.startsWith('ROAD_') && !r.startsWith('ROAD_POTENTIAL_IMPACT:')))
+            const Text('일부 도로의 영향 여부는 확인되지 않았습니다.'),
+          if (roadAlternative.isNotEmpty)
+            Text('도로 영향 검토용 대체 후보 · 예상 도착 ${_time(roadAlternative['estimatedArrivalAt'])}'),
           if (isPreview) ...[
             for (final candidate in (preview['candidates'] as List? ?? const []))
               Text('${_map(_map(candidate)['result'])['journeyKey']}: 버스 ML ${_map(candidate)['mlSteps']}개, 지하철 시간표·실시간 ${_map(candidate)['subwaySteps'] ?? 0}개, API ${_map(candidate)['apiSteps']}개'),

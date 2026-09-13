@@ -32,12 +32,13 @@ public class ScheduleEvaluationStore {
     private final SavedRouteRepository routes;
     private final RecommendationRepository recommendations;
     private final RouteCandidateAssembler assembler;
+    private final ScheduleEvaluationWakeup wakeup;
 
     public ScheduleEvaluationStore(JdbcTemplate jdbc, ObjectMapper json, ScheduleRepository schedules,
             RouteRequestRepository requests, SavedRouteRepository routes, RecommendationRepository recommendations,
-            RouteCandidateAssembler assembler) {
+            RouteCandidateAssembler assembler, ScheduleEvaluationWakeup wakeup) {
         this.jdbc = jdbc; this.json = json; this.schedules = schedules; this.requests = requests;
-        this.routes = routes; this.recommendations = recommendations; this.assembler = assembler;
+        this.routes = routes; this.recommendations = recommendations; this.assembler = assembler; this.wakeup = wakeup;
     }
 
     /** 캐시는 후보 생성 시각과 DB 경로 ID를 함께 보존한다. 분 단위 DB 값으로 재계산하지 않는다. */
@@ -172,13 +173,18 @@ public class ScheduleEvaluationStore {
                 + "ORDER BY COALESCE(e.next_check_at,s.created_at),s.id LIMIT 20", Long.class, ts(now), ts(now), ts(now));
     }
 
-    /** 영향 이벤트는 기존 edge→경로→일정 경로로만 연결한다. 전체 일정을 재계산하지 않는다. */
+    /**
+     * 영향 구간의 대상만 검색하고 일정마다 별도 트랜잭션으로 깨운다. 여기에는 바깥 트랜잭션을
+     * 열지 않는다. 부분 성공 후 재전송은 허용하며 입력 버전/lease 검증은 complete에서 유지한다.
+     */
     public void wakeSegments(List<String> ids, Instant now) {
-        for (String id : new LinkedHashSet<>(ids)) {
-            jdbc.update("UPDATE schedule_evaluation e JOIN schedule s ON s.id=e.schedule_id SET e.next_check_at=?,e.event_revision=e.event_revision+1 "
-                    + "WHERE s.status='UPCOMING' AND e.stopped=false AND s.arrive_by>? AND EXISTS "
-                    + "(SELECT 1 FROM route r JOIN route_segment rs ON rs.route_id=r.id JOIN route_segment_edge edge ON edge.route_segment_id=rs.id "
-                    + "WHERE r.schedule_id=s.id AND r.is_selected=true AND edge.segment_id=?)", ts(now), ts(now), id);
+        for (String id : new TreeSet<>(ids)) {
+            var targets = jdbc.queryForList("SELECT DISTINCT e.schedule_id FROM schedule_evaluation e "
+                    + "JOIN schedule s ON s.id=e.schedule_id JOIN route r ON r.schedule_id=s.id "
+                    + "JOIN route_segment rs ON rs.route_id=r.id JOIN route_segment_edge edge ON edge.route_segment_id=rs.id "
+                    + "WHERE s.status='UPCOMING' AND e.stopped=false AND s.arrive_by>? "
+                    + "AND r.is_selected=true AND edge.segment_id=? ORDER BY e.schedule_id", Long.class, ts(now), id);
+            for (long scheduleId : targets) wakeup.wake(scheduleId, id, now);
         }
     }
 

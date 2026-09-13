@@ -14,6 +14,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from predictor import BundleError, Predictor
+from environment_features import prepare
+from environment_schema import EnvironmentRequest
+from environment_model import EnvironmentModel
 from schemas import BatchRequest, BatchResponse, InvalidRequest, ServiceUnavailable
 from serving_runtime import InferenceQueue, QueueBusy, RuntimeSettings
 
@@ -31,6 +34,11 @@ def create_app(predictor=None, settings=None):
     async def lifespan(application):
         policy = settings if settings is not None else RuntimeSettings.from_env(os.environ)
         application.state.inference_queue = InferenceQueue(policy)
+        application.state.environment_model = None
+        environment_path = os.environ.get('ML_ENVIRONMENT_BUNDLE_DIR')
+        if environment_path:
+            try: application.state.environment_model = EnvironmentModel(environment_path)
+            except Exception as error: LOGGER.error('ENVIRONMENT_MODEL_LOAD_FAILED type=%s', type(error).__name__)
         application.state.predictor = predictor
         if predictor is None:
             try:
@@ -85,6 +93,26 @@ def create_app(predictor=None, settings=None):
         except Exception as error:
             LOGGER.error('PREDICTION_FAILED type=%s', type(error).__name__)
             raise HTTPException(status_code=503, detail='MODEL_UNAVAILABLE') from None
+
+    @application.post('/v1/bus/environment:prepare', responses={422: {'model': InvalidRequest}})
+    async def prepare_environment(request: EnvironmentRequest):
+        """학습과 같은 point-in-time 선택을 수행한다. 정답/현재 날씨의 과거 소급 입력은 허용하지 않는다."""
+        data=request.model_dump(mode='json')
+        try: return prepare(data['request'],data['observations'])
+        except (ValueError,KeyError,TypeError):
+            raise HTTPException(status_code=422,detail='INVALID_ENVIRONMENT_POINT') from None
+
+    @application.post('/v1/bus/environment:predict', responses={503: {'model': ServiceUnavailable}})
+    async def predict_environment(request: EnvironmentRequest):
+        """명시 등록한 별도 모델만 사용한다. v12 모델로 신규 환경 특성을 계산했다고 표시하지 않는다."""
+        prepared=await prepare_environment(request)
+        model=application.state.environment_model
+        if model is None: raise HTTPException(status_code=503,detail='MODEL_NOT_READY')
+        try:
+            prediction=await application.state.inference_queue.run(model.predict,prepared)
+            return dict(prepared=prepared,prediction=prediction)
+        except QueueBusy: raise HTTPException(status_code=503,detail='MODEL_BUSY') from None
+        except Exception: raise HTTPException(status_code=503,detail='MODEL_UNAVAILABLE') from None
 
     return application
 

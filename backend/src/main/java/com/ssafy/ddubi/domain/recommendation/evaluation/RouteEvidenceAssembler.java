@@ -20,15 +20,18 @@ public class RouteEvidenceAssembler {
     private static final String PREFIX = "segment:status:";
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
+    private final RoadImpactEvidence road;
 
-    public RouteEvidenceAssembler(StringRedisTemplate redis, ObjectMapper json) {
-        this.redis = redis;
-        this.json = json;
+    public RouteEvidenceAssembler(StringRedisTemplate redis, ObjectMapper json) { this(redis,json,null); }
+    @org.springframework.beans.factory.annotation.Autowired
+    public RouteEvidenceAssembler(StringRedisTemplate redis, ObjectMapper json, RoadImpactEvidence road) {
+        this.redis=redis; this.json=json; this.road=road;
     }
 
     /** 외부 원본을 노출하지 않는 고정 스냅샷. 검증된 상태 JSON과 오류 이유로 Replay할 수 있다. */
-    public record Snapshot(Map<String, JsonNode> states, List<String> reasons) {
-        public Snapshot { states = Map.copyOf(states); reasons = List.copyOf(reasons); }
+    public record Snapshot(Map<String, JsonNode> states, List<String> reasons, Map<String, JsonNode> roads) {
+        public Snapshot(Map<String, JsonNode> states, List<String> reasons) { this(states,reasons,Map.of()); }
+        public Snapshot { states = Map.copyOf(states); reasons = List.copyOf(reasons); roads = roads==null?Map.of():Map.copyOf(roads); }
     }
 
     /** 서버 매핑 결과에서 하나로 확정된 canonical 경로만 반환한다. 여러 버스 대안을 임의로 고르지 않는다. */
@@ -71,7 +74,7 @@ public class RouteEvidenceAssembler {
                 states.put(id, node);
             } catch (Exception invalid) { reasons.add(id + ":INVALID_PAYLOAD"); }
         }
-        return new Snapshot(states, reasons);
+        return new Snapshot(states, reasons, road==null?Map.of():road.read(candidates,asOf));
     }
 
     /**

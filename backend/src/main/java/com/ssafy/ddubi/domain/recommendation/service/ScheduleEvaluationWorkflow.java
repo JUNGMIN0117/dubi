@@ -71,9 +71,11 @@ public class ScheduleEvaluationWorkflow {
             // 유효한 후보가 없거나 현재 선택이 지각/통제이면 TTL과 별도로 새 경로를 한 번만 요청한다.
             // 이전 결과도 같은 문제면 매분 재요청하지 않고 후보 TTL까지 기존 후보를 다시 평가한다.
             Outcome previous = store.read(job.previousJson(), Outcome.class);
-            boolean newlyAtRisk = selected.assessment() == Assessment.BLOCKED || selected.assessment() == Assessment.LATE_ESTIMATE;
+            boolean newlyAtRisk = selected.assessment() == Assessment.BLOCKED || selected.assessment() == Assessment.LATE_ESTIMATE
+                    || selected.reasons().stream().anyMatch(r -> r.startsWith("ROAD_POTENTIAL_IMPACT:"));
             boolean previousAtRisk = previous != null && (previous.selected().assessment() == Assessment.BLOCKED
-                    || previous.selected().assessment() == Assessment.LATE_ESTIMATE);
+                    || previous.selected().assessment() == Assessment.LATE_ESTIMATE
+                    || previous.selected().reasons().stream().anyMatch(r -> r.startsWith("ROAD_POTENTIAL_IMPACT:")));
             if (!refresh && newlyAtRisk && !previousAtRisk) {
                 search = routes.search(new RouteSearchQuery(job.origin(), job.destination()));
                 if (search.candidates().isEmpty()) throw new BusinessException(ErrorCode.ROUTE_NOT_AVAILABLE);

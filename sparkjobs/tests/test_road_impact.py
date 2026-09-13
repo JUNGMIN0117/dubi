@@ -90,3 +90,22 @@ class RoadImpactTest(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+def test_promotion_requires_reviewed_direction_and_sha(tmp_path):
+    import runpy
+    promote=runpy.run_path(str(Path(__file__).resolve().parents[2]/'backend/tools/road-impact/promote.py'))['promote']
+    fixture=RoadImpactTest();fixture.setUp()
+    try:
+        reviewed=tmp_path/'reviewed.jsonl';reviewed.write_text(json.dumps(fixture.path)+'\n',encoding='utf-8')
+        digest=hashlib.sha256(reviewed.read_bytes()).hexdigest();output=tmp_path/'road.json'
+        report=promote(fixture.root/'bus.gz',fixture.bus_sha,reviewed,digest,'pilot',output)
+        assert report['mappingCount']==1 and hashlib.sha256(output.read_bytes()).hexdigest()==report['sha256']
+        import pytest
+        with pytest.raises(FileExistsError): promote(fixture.root/'bus.gz',fixture.bus_sha,reviewed,digest,'pilot',output)
+        broken=dict(fixture.path,directionVerified=False)
+        reviewed.write_text(json.dumps(broken)+'\n',encoding='utf-8')
+        with pytest.raises(ValueError,match='complete directional'):
+            promote(fixture.root/'bus.gz',fixture.bus_sha,reviewed,hashlib.sha256(reviewed.read_bytes()).hexdigest(),'bad',tmp_path/'bad.json')
+        assert not (tmp_path/'bad.json').exists()
+    finally: fixture.doCleanups()

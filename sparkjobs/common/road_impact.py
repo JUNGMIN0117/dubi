@@ -6,6 +6,7 @@
 주입해야 한다. 공지 문자열/정류장 직선으로 통제 구간을 추정하지 않는다.
 """
 import gzip
+import re
 import hashlib
 import json
 from datetime import datetime, timedelta
@@ -47,6 +48,8 @@ class RoadImpactIndex:
             raise ValueError('unsupported policy/schema')
         if road.get('busCrosswalkSha256') != bus_sha or road.get('masterVersion') != bus.get('masterVersion'):
             raise ValueError('bus master mismatch')
+        if not isinstance(road.get('version'),str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',road['version']):
+            raise ValueError('invalid road version')
         self.version = road['version']
         self.sha = road_sha
         self.bus_sha = bus_sha
@@ -69,7 +72,7 @@ class RoadImpactIndex:
             if start >= end or not row['roadLinks']:
                 raise ValueError('invalid path validity')
             links = row['roadLinks']
-            if any(not link.get('namespace') or not link.get('linkId') for link in links):
+            if any(not isinstance(link.get(k),str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,50}',link[k]) for link in links for k in ('namespace','linkId')):
                 raise ValueError('namespaced road IDs required')
             for old in self.paths.get(key, []):
                 if start < time_value(old['validUntil']) and time_value(old['validFrom']) < end:

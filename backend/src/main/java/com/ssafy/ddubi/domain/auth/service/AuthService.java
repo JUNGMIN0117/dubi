@@ -311,11 +311,13 @@ public class AuthService {
                     "비밀번호 로그인은 이 API 로 해제할 수 없습니다.");
         }
 
-        UserAuth target = userAuthRepository.findByUserIdAndProvider(userId, provider)
+        List<UserAuth> current = userAuthRepository.findAllByUserIdForUpdate(userId);
+        UserAuth target = current.stream()
+                .filter(userAuth -> userAuth.getProvider() == provider)
+                .findFirst()
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND,
                         provider + " 계정이 연결되어 있지 않습니다."));
 
-        List<AuthProvider> current = userAuthRepository.findProvidersByUserId(userId);
         if (current.size() <= 1) {
             throw new BusinessException(ErrorCode.LAST_LOGIN_METHOD);
         }

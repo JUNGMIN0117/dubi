@@ -702,53 +702,24 @@ void main() {
     expect(find.text('택시'), findsNothing);
     expect(find.text('더보기'), findsWidgets);
     expect(find.byKey(const Key('weeklyStampBoardCard')), findsOneWidget);
-    expect(find.byKey(const Key('stampMissionPreviewRow')), findsOneWidget);
+    expect(find.byKey(const Key('stampBoardPreparing')), findsOneWidget);
+    expect(find.byKey(const Key('stampMissionPreviewRow')), findsNothing);
     expect(find.byKey(const Key('stampMissionGrid')), findsNothing);
     expect(find.byKey(const Key('stampBoardProgress')), findsNothing);
-    expect(find.text('5/10개 달성했어요!'), findsOneWidget);
+    expect(find.text('5/10개 달성했어요!'), findsNothing);
     expect(find.text('서비스 상태'), findsNothing);
     expect(find.text('회원 탈퇴'), findsNothing);
-    expect(find.text('계정 관리 화면 열기'), findsOneWidget);
+    expect(find.byKey(const Key('accountManagementPreparing')), findsOneWidget);
     expect(find.byKey(const Key('savedPlacesMenuButton')), findsOneWidget);
     expect(find.byKey(const Key('travelRecordsMenuButton')), findsOneWidget);
     expect(find.byKey(const Key('helpInquiryButton')), findsOneWidget);
-
-    await tester.ensureVisible(find.byKey(const Key('stampBoardInfoButton')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('stampBoardInfoButton')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('stampBoardGuideSheet')), findsOneWidget);
-    expect(find.byKey(const Key('stampBoardGuideMissionGrid')), findsOneWidget);
-    expect(find.text('이번 주 미션 10가지'), findsOneWidget);
-    Navigator.of(tester.element(find.byKey(const Key('stampBoardGuideSheet'))))
-        .pop();
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('stampBoardGuideSheet')), findsNothing);
-
-    await tester.tap(find.byKey(const Key('stampBoardViewAllButton')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('stampBoardDetailSheet')), findsOneWidget);
-    expect(find.byKey(const Key('stampMissionGrid')), findsOneWidget);
-    expect(find.byKey(const Key('stampBoardProgress')), findsOneWidget);
-    expect(find.text('이번 주 미션 10가지'), findsOneWidget);
-    Navigator.of(tester.element(find.byKey(const Key('stampBoardDetailSheet'))))
-        .pop();
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('stampBoardDetailSheet')), findsNothing);
 
     await tester.drag(
       find.byKey(const Key('mobileSettingsLayout')),
       const Offset(0, 600),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('계정 관리 화면 열기'));
-    await tester.tap(find.text('계정 관리 화면 열기'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('accountPasswordDialog')), findsOneWidget);
-    expect(find.byKey(const Key('accountEmailField')), findsNothing);
-    expect(find.byKey(const Key('accountPasswordField')), findsOneWidget);
-    await tester.tap(find.text('취소'));
-    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('accountPasswordDialog')), findsNothing);
 
     await tester.drag(
       find.byKey(const Key('mobileSettingsLayout')),

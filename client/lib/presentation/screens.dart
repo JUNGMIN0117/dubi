@@ -5758,10 +5758,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 13),
-            _SettingsAccountAction(
-              icon: Icons.manage_accounts_outlined,
-              label: '계정 관리 화면 열기',
-              onTap: () => _openAccountManagement(context, user),
+            const Padding(
+              padding: EdgeInsets.only(left: 32),
+              child: Text(
+                '계정 연결 API 연동 후 제공될 예정이에요.',
+                key: Key('accountManagementPreparing'),
+                style: TextStyle(color: Color(0xFF64708B), fontSize: 13),
+              ),
             ),
           ],
         ),
@@ -6289,9 +6292,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _notificationAllowed = allowed);
   }
 
-  Widget _weeklyStampBoardCard(BuildContext context) => WeeklyStampBoardCard(
-    onInfo: () => _showStampBoardGuide(context),
-    onViewAll: () => _showStampBoardDetails(context),
+  Widget _weeklyStampBoardCard(BuildContext context) => const Card(
+    key: Key('weeklyStampBoardCard'),
+    child: Padding(
+      padding: EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Icon(Icons.workspace_premium_outlined, color: Color(0xFF10B8A5)),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '도장판은 실제 미션 데이터 연동 후 제공될 예정이에요.',
+              key: Key('stampBoardPreparing'),
+              style: TextStyle(color: Color(0xFF64708B), fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    ),
   );
 
   Future<void> _showStampBoardGuide(BuildContext context) =>
@@ -6316,6 +6334,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     color: const Color(0xFFFFF3F5),
     borderRadius: BorderRadius.circular(19),
     child: InkWell(
+      key: const Key('logoutCardButton'),
       onTap: () => _showLogoutDialog(context),
       borderRadius: BorderRadius.circular(19),
       child: const Padding(
@@ -6500,30 +6519,157 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showLogoutDialog(BuildContext context) => showDialog<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('로그아웃할까요?'),
-      content: const Text('다시 로그인하면 일정과 추천 경로를 확인할 수 있어요.'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('취소'),
+    barrierColor: Colors.black.withValues(alpha: .45),
+    builder: (dialogContext) => _LogoutConfirmationDialog(
+      onCancel: () => Navigator.pop(dialogContext),
+      onLogout: () async {
+        Navigator.pop(dialogContext);
+        try {
+          await widget.authRepository.logout();
+          if (context.mounted) context.go('/login');
+        } on AuthException catch (error) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message ?? '로그아웃하지 못했어요.')),
+          );
+        }
+      },
+    ),
+  );
+}
+
+class _LogoutConfirmationDialog extends StatelessWidget {
+  const _LogoutConfirmationDialog({
+    required this.onCancel,
+    required this.onLogout,
+  });
+
+  final VoidCallback onCancel;
+  final Future<void> Function() onLogout;
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    key: const Key('logoutConfirmationDialog'),
+    backgroundColor: Colors.transparent,
+    elevation: 0,
+    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 410),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 26),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: const Color(0xFFE1F2EF)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33001F2B),
+              blurRadius: 30,
+              offset: Offset(0, 14),
+            ),
+          ],
         ),
-        FilledButton(
-          onPressed: () async {
-            Navigator.pop(dialogContext);
-            try {
-              await widget.authRepository.logout();
-              if (context.mounted) context.go('/login');
-            } on AuthException catch (error) {
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(error.message ?? '로그아웃하지 못했어요.')),
-              );
-            }
-          },
-          child: const Text('로그아웃'),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 196,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: 174,
+                      height: 174,
+                      decoration: BoxDecoration(
+                        gradient: const RadialGradient(
+                          colors: [Color(0xFFE4FBF7), Color(0xFFF4FCFB)],
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    Image.asset(
+                      'assets/images/ttubee/logout-sad.png',
+                      key: const Key('logoutDialogCharacter'),
+                      width: 206,
+                      height: 196,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                      semanticLabel: '로그아웃을 아쉬워하는 뚜비',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '로그아웃할까요?',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: DdubiColors.navy,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '다시 로그인하면 일정과\n추천 경로를 이어서 확인할 수 있어요.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: const Color(0xFF748096), height: 1.55),
+              ),
+              const SizedBox(height: 26),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 52,
+                      child: OutlinedButton(
+                        key: const Key('logoutCancelButton'),
+                        onPressed: onCancel,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF009D91),
+                          backgroundColor: const Color(0xFFF8FDFC),
+                          side: const BorderSide(
+                            color: Color(0xFF77D8CF),
+                            width: 1.5,
+                          ),
+                          shape: const StadiumBorder(),
+                          textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        child: const Text('취소'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SizedBox(
+                      height: 52,
+                      child: FilledButton(
+                        key: const Key('logoutConfirmButton'),
+                        onPressed: onLogout,
+                        style: FilledButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: const Color(0xFF08AA9D),
+                          shape: const StadiumBorder(),
+                          textStyle: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                          elevation: 1,
+                          shadowColor: const Color(0x55008D82),
+                        ),
+                        child: const Text('로그아웃'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     ),
   );
 }

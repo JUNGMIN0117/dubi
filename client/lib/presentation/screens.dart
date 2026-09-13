@@ -6068,25 +6068,25 @@ class _LogoutConfirmationDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(
-                height: 190,
+                height: 196,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
                     Container(
-                      width: 220,
-                      height: 164,
+                      width: 174,
+                      height: 174,
                       decoration: BoxDecoration(
                         gradient: const RadialGradient(
                           colors: [Color(0xFFE4FBF7), Color(0xFFF4FCFB)],
                         ),
-                        borderRadius: BorderRadius.circular(100),
+                        shape: BoxShape.circle,
                       ),
                     ),
                     Image.asset(
                       'assets/images/ttubee/logout-sad.png',
                       key: const Key('logoutDialogCharacter'),
-                      width: 215,
-                      height: 190,
+                      width: 206,
+                      height: 196,
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
                       semanticLabel: '로그아웃을 아쉬워하는 뚜비',
@@ -6105,7 +6105,7 @@ class _LogoutConfirmationDialog extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                '다시 로그인하면 일정과\n추천 경로를 확인할 수 있어요.',
+                '다시 로그인하면 일정과\n추천 경로를 이어서 확인할 수 있어요.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium
                     ?.copyWith(color: const Color(0xFF748096), height: 1.55),

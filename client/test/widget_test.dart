@@ -705,7 +705,7 @@ void main() {
     expect(find.byKey(const Key('logoutConfirmationDialog')), findsOneWidget);
     expect(find.byKey(const Key('logoutDialogCharacter')), findsOneWidget);
     expect(find.text('로그아웃할까요?'), findsOneWidget);
-    expect(find.text('다시 로그인하면 일정과\n추천 경로를 확인할 수 있어요.'), findsOneWidget);
+    expect(find.text('다시 로그인하면 일정과\n추천 경로를 이어서 확인할 수 있어요.'), findsOneWidget);
     expect(find.byKey(const Key('logoutCancelButton')), findsOneWidget);
     expect(find.byKey(const Key('logoutConfirmButton')), findsOneWidget);
 

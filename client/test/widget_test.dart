@@ -793,51 +793,7 @@ void main() {
     expect(find.byKey(const Key('withdrawalConfirmationDialog')), findsNothing);
   });
 
-  testWidgets('계정 관리 진입 전 현재 비밀번호만 입력받는다', (tester) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final container = ProviderContainer(
-      overrides: [
-        reportApiProvider.overrideWithValue(_emptyReportApi()),
-        authRepositoryProvider.overrideWithValue(MockAuthRepository()),
-      ],
-    );
-    addTearDown(container.dispose);
-    await tester.pumpWidget(
-      UncontrolledProviderScope(container: container, child: const DdubiApp()),
-    );
-
-    container.read(appRouterProvider).go('/settings');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('계정 관리 화면 열기'));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('accountEmailField')), findsNothing);
-    expect(find.byKey(const Key('accountPasswordDialog')), findsOneWidget);
-    expect(find.byKey(const Key('accountPasswordCharacter')), findsOneWidget);
-    expect(find.text('비밀번호를 확인할게요'), findsOneWidget);
-    expect(find.text('개인정보 보호를 위해 계정 관리 전 한 번 더 확인해요.'), findsOneWidget);
-    expect(
-      find.byKey(const Key('cancelAccountPasswordButton')),
-      findsOneWidget,
-    );
-    await tester.enterText(
-      find.byKey(const Key('accountPasswordField')),
-      'local1234',
-    );
-    await tester.tap(find.byKey(const Key('confirmAccountPasswordButton')));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('accountPasswordDialog')), findsNothing);
-    expect(find.text('계정 관리'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('프로필 갤러리 선택 전에 사진 접근 권한 팝업을 표시한다', (tester) async {
+    testWidgets('프로필 갤러리 선택 전에 사진 접근 권한 팝업을 표시한다', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

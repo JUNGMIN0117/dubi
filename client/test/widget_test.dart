@@ -358,12 +358,18 @@ void main() {
     final router = container.read(appRouterProvider);
     router.go('/schedules');
     await tester.pumpAndSettle();
-    final navigation = router.push<bool>('/schedules/new');
+    bool? navigationResult;
+    final navigation = router.push<bool>('/schedules/new').then((result) {
+      navigationResult = result;
+      return result;
+    });
     await tester.pumpAndSettle();
 
     final fields = find.byType(TextFormField);
     await tester.enterText(fields.at(0), '병원 예약');
     await tester.enterText(fields.at(1), '14:30');
+    // 출발 예정시간도 필수 입력이다. 누락하면 저장하지 않으므로 navigation Future가 끝나지 않는다.
+    await tester.enterText(fields.at(2), '13:30');
     await tester.tap(find.byKey(const Key('destinationPlaceField')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('placeSearchQuery')), '서울 병원');
@@ -382,12 +388,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('저장하기'));
     await tester.pumpAndSettle();
+    expect(find.text('필수 입력 항목입니다.'), findsNothing);
+    // 저장 실패 시 미완료 Future를 기다려 CI가 장시간 멈추지 않도록 먼저 검사한다.
+    expect(navigationResult, isTrue);
     expect(await navigation, isTrue);
 
     final saved = await repository.schedules();
     expect(saved.any((schedule) => schedule.title == '병원 예약'), isTrue);
     expect(saved.any((schedule) => schedule.place == '서울병원'), isTrue);
     expect(saved.any((schedule) => schedule.time == '14:30'), isTrue);
+    final created = saved.singleWhere((schedule) => schedule.title == '병원 예약');
+    expect(created.plannedDepartAt?.hour, 13);
+    expect(created.plannedDepartAt?.minute, 30);
     expect(
       saved.any(
         (schedule) =>
@@ -445,6 +457,8 @@ void main() {
 
     expect(find.text('일정 수정'), findsWidgets);
     await tester.enterText(find.byType(TextFormField).first, '수정된 팀 회의');
+    // 이전 Mock 일정에는 출발시각이 없다. 기존 일정 수정에서도 사용자가 입력해야 저장된다.
+    await tester.enterText(find.byType(TextFormField).at(2), '08:00');
     await tester.fling(
       find.byType(ListView).last,
       const Offset(0, -1400),
@@ -458,6 +472,7 @@ void main() {
     final updated = await repository.scheduleById('schedule-meeting');
     expect(updated?.title, '수정된 팀 회의');
     expect(updated?.updatedAt, isNotNull);
+    expect(updated?.plannedDepartAt?.hour, 8);
   });
 
   testWidgets('낮은 데스크톱 Web 로그인 화면은 하단 영역만 스크롤한다', (tester) async {

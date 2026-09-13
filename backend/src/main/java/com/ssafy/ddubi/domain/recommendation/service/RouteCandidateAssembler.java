@@ -24,13 +24,23 @@ import java.util.List;
  * 나중에 그 추천을 열어 봐도 <b>저장된 경로로는 같은 숫자가 나오지 않는다.</b>
  * 따로 만들면 언젠가 한쪽만 고쳐진다.
  *
- * <h3>EXACT 만 edge 로 전개한다</h3>
+ * <h3>확정된 단일 canonical 경로만 edge로 전개한다</h3>
  * 매핑이 PARTIAL·AMBIGUOUS 면 어떤 인접구간을 지나는지 확신할 수 없다. 확신 없는 ID 로
  * 기준선·실시간 상태를 끌어오면 <b>다른 구간의 지연을 이 경로에 얹게 된다.</b>
  * 그런 step 은 edge 없이 두고 경로 API 시간을 그대로 쓴다.
  */
 @Component
 public class RouteCandidateAssembler {
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
+
+    public RouteCandidateAssembler(com.fasterxml.jackson.databind.ObjectMapper json) { this.json = json; }
+
+    private String geometry(RouteSegment segment) {
+        try { return json.writeValueAsString(segment.geometry()); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+            throw new IllegalStateException("경로 좌표 직렬화 실패");
+        }
+    }
 
     /** 후보 하나를 전개한 결과. 엔티티와 산정 입력이 같은 순서로 짝을 이룬다. */
     public record Assembled(SavedRoute route, List<StepEstimateInput> steps) {
@@ -59,6 +69,7 @@ public class RouteCandidateAssembler {
                     .providerRouteKey(segment.providerRouteKey())
                     .fromName(segment.fromName())
                     .toName(segment.toName())
+                    .geometry(geometry(segment))
                     .baseDurationMin(toMinutes(segment.durationSeconds()))
                     .build();
             route.addSegment(saved);
@@ -82,7 +93,7 @@ public class RouteCandidateAssembler {
         }
 
         List<EdgeEstimateInput> edges = new ArrayList<>(mapping.segments().size());
-        for (MappedTransitSegment mapped : mapping.segments()) {
+        for (MappedTransitSegment mapped : com.ssafy.ddubi.domain.recommendation.evaluation.RouteEvidenceAssembler.edges(segment)) {
             saved.addEdge(SavedRouteSegmentEdge.builder()
                     .edgeSeq(mapped.sequence())
                     .segmentId(mapped.segmentId())

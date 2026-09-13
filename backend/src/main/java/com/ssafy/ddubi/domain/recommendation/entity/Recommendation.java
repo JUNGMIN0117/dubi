@@ -69,18 +69,18 @@ public class Recommendation extends BaseTimeEntity {
     @Column(name = "duration_min", nullable = false)
     private Integer durationMin;
 
-    /** 중요도와 무관한 공통 안전 여유(분). 규약 4장 규칙 7 참고. */
+    /** 기존 DB 호환 필드(분). sched-v1은 별도 여유시간을 더하지 않아 항상 0이다. */
     @Column(name = "buffer_min", nullable = false)
     private Integer bufferMin;
 
-    @Column(name = "percentile_used", nullable = false)
+    @Column(name = "percentile_used")
     private Byte percentileUsed;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "confidence", nullable = false)
     private Confidence confidence;
 
-    /** [{factor, min}, ...] + 2·3순위 후보 비교 요약. */
+    /** sched-v1의 입력·후보별 타임라인·잠정 여부·제안이 포함된 Outcome JSON. */
     @Lob
     @Column(name = "reasons", columnDefinition = "json")
     private String reasons;

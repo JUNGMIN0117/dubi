@@ -574,10 +574,12 @@ services:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      # 수집기와 같은 버스 대응표·지문. Spark 는 .env 를 자동으로 읽지 않으니 여기서 직접 전달한다.
-      # 지문이 틀리면 잡이 기동 실패한다. 수집기와 반드시 같은 값(같은 커밋)이어야 한다
-      BUS_CROSSWALK_PATH: ${BUS_CROSSWALK_PATH:-/opt/ddubi/transit-master/metropolitan-bus-v6.crosswalk.json.gz}
-      BUS_CROSSWALK_SHA256: ${BUS_CROSSWALK_SHA256:-e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd}
+      # Spark 쪽 버스 대응표는 9/11 임시 OFF (기본값 빈 문자열 → 코드가 대응표 없이 동작).
+      # 이유: load_crosswalk 가 21만 행을 F.lit 리터럴로 계획에 넣고 캐시하지 않아 배치마다 재파싱 → 배치 40초, 드라이버 힙 소진, 컨테이너 OOM 재시작.
+      # dt 가 index 를 cache/broadcast 로 고정하면 .env 에 SPARK_BUS_CROSSWALK_PATH·SHA256 을 채워 켠다(수집기와 같은 파일·지문).
+      # 수집기 쪽 대응표(x-collector-env)는 켜져 있어 Kafka 이벤트의 segmentIds 는 계속 채워진다.
+      BUS_CROSSWALK_PATH: ${SPARK_BUS_CROSSWALK_PATH:-}
+      BUS_CROSSWALK_SHA256: ${SPARK_BUS_CROSSWALK_SHA256:-}
     volumes:
       - ./spark/conf:/opt/spark/conf:ro
       - ../backend/transit-master:/opt/ddubi/transit-master:ro   # 버스 대응표 (driver 가 기동 시 한 번 읽음)

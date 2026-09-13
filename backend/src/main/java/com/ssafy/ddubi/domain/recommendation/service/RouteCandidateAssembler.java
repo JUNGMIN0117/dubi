@@ -88,7 +88,7 @@ public class RouteCandidateAssembler {
      */
     private List<EdgeEstimateInput> expand(RouteSegment segment, SavedRouteSegment saved) {
         TransitMappingResult mapping = segment.mapping();
-        if (mapping == null) {
+        if (mapping == null || mapping.status() != TransitMappingStatus.EXACT) {
             return List.of();
         }
 

@@ -57,7 +57,7 @@ final googleLoginServiceProvider = Provider<GoogleLoginService>((ref) {
 });
 
 final naverLoginServiceProvider = Provider<NaverLoginService>((ref) {
-  return const NaverSdkLoginService();
+  return const NaverWebLoginService();
 });
 
 final authApiProvider = Provider<AuthApi>((ref) {

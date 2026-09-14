@@ -362,7 +362,11 @@ void main() {
     final router = container.read(appRouterProvider);
     router.go('/schedules');
     await tester.pumpAndSettle();
-    final navigation = router.push<bool>('/schedules/new');
+    bool? navigationResult;
+    final navigation = router.push<bool>('/schedules/new').then((result) {
+      navigationResult = result;
+      return result;
+    });
     await tester.pumpAndSettle();
 
     final fields = find.byType(TextFormField);
@@ -401,12 +405,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('저장하기'));
     await tester.pumpAndSettle();
+    expect(find.text('필수 입력 항목입니다.'), findsNothing);
+    // 저장 실패 시 미완료 Future를 기다려 CI가 장시간 멈추지 않도록 먼저 검사한다.
+    expect(navigationResult, isTrue);
     expect(await navigation, isTrue);
 
     final saved = await repository.schedules();
     expect(saved.any((schedule) => schedule.title == '병원 예약'), isTrue);
     expect(saved.any((schedule) => schedule.place == '서울병원'), isTrue);
     expect(saved.any((schedule) => schedule.time == '19:30'), isTrue);
+    expect(
+      saved.any(
+        (schedule) =>
+            schedule.plannedDepartAt?.hour == 18 &&
+            schedule.plannedDepartAt?.minute == 30,
+      ),
+      isTrue,
+    );
     expect(
       saved.any(
         (schedule) =>
@@ -529,6 +544,7 @@ void main() {
 
     expect(find.text('일정 수정'), findsWidgets);
     await tester.enterText(find.byType(TextFormField).first, '수정된 팀 회의');
+    // 이전 Mock 일정에는 출발시각이 없어 도착 희망 시간 1시간 전으로 초기화된다.
     await tester.fling(
       find.byType(ListView).last,
       const Offset(0, -1400),
@@ -542,6 +558,7 @@ void main() {
     final updated = await repository.scheduleById('schedule-meeting');
     expect(updated?.title, '수정된 팀 회의');
     expect(updated?.updatedAt, isNotNull);
+    expect(updated?.plannedDepartAt?.hour, 8);
   });
 
   testWidgets('낮은 데스크톱 Web 로그인 화면은 하단 영역만 스크롤한다', (tester) async {
@@ -1017,7 +1034,12 @@ class _FakeNaverLoginService implements NaverLoginService {
   const _FakeNaverLoginService();
 
   @override
-  Future<String> login(BuildContext context) async => 'test-naver-access-token';
+  Future<NaverAuthorizationResult> login(BuildContext context) async =>
+      const NaverAuthorizationResult(
+        authorizationCode: 'test-naver-authorization-code',
+        state: 'test-state',
+        redirectUri: naverRedirectUri,
+      );
 }
 
 class _FakePlaceSearchService implements PlaceSearchService {

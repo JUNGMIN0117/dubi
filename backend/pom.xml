@@ -71,6 +71,12 @@
         </dependency>
 
         <!-- FCM 푸시 발송. 자격증명이 없으면 로그 발송기로 대체된다(PushConfig) -->
+        <!-- segment.status 수신은 명시적 설정 시 활성화한다. 데이터 파이프라인과 같은 토픽 계약을 사용한다. -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>com.google.firebase</groupId>
             <artifactId>firebase-admin</artifactId>
@@ -159,6 +165,16 @@
     </dependencies>
 
     <build>
+        <!-- 공통 마스터 원본을 기존 classpath:transit/ 경로에 포함한다.
+             Backend 내부 transit-master/subway를 빌드 작업 공간에 제공해야 한다. -->
+        <resources>
+            <resource><directory>src/main/resources</directory></resource>
+            <resource>
+                <directory>${project.basedir}/transit-master/subway</directory>
+                <targetPath>transit</targetPath>
+                <filtering>false</filtering>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

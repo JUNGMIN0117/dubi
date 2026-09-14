@@ -31,7 +31,7 @@ x-collector: &collector
   volumes:
     - collector-budget:/app/data
     # 수도권 버스 대응표(정류장 ID → 인접 구간 segment_id). 저장소 파일을 읽기 전용으로 붙인다.
-    # 버스 수집기 2개만 읽고 나머지는 무시한다. 파일·SHA 는 backend/transit-master/*.manifest.json 이 진실
+    # 버스 수집기 2개만 읽고 나머지는 무시한다. 파일·SHA 는 backend/transit-master/bus/*.manifest.json 이 진실
     - ../backend/transit-master:/opt/ddubi/transit-master:ro
   depends_on:
     kafka:
@@ -65,8 +65,8 @@ x-collector-env: &collector-env
   CITY_AREA_REGISTRY_PATH: ${CITY_AREA_REGISTRY_PATH:-}
   # 버스 대응표 위치와 파일 지문(SHA-256). 지문이 틀리면 버스 수집기는 기동을 거부한다(재시작 반복).
   # 기본값을 여기(compose)에 두는 이유: 파일이 저장소에 있으니 지문도 같은 커밋에서 함께 바뀌어야 한다.
-  # 파일을 새로 만들면 backend/transit-master/metropolitan-bus-v6.crosswalk.json.manifest.json 의 sha256 으로 갱신
-  BUS_CROSSWALK_PATH: ${BUS_CROSSWALK_PATH:-/opt/ddubi/transit-master/metropolitan-bus-v6.crosswalk.json.gz}
+  # 파일을 새로 만들면 backend/transit-master/bus/metropolitan-bus-v6.crosswalk.json.manifest.json 의 sha256 으로 갱신
+  BUS_CROSSWALK_PATH: ${BUS_CROSSWALK_PATH:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz}
   BUS_CROSSWALK_SHA256: ${BUS_CROSSWALK_SHA256:-e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd}
 
 # Spark 3개 노드가 공유하는 마운트. 설정은 infra/spark/conf/ 디렉터리를 /opt/spark/conf 에 마운트
@@ -361,7 +361,7 @@ services:
       DDUBI_TRANSIT_MASTER_ALIASES: ${DDUBI_TRANSIT_MASTER_ALIASES:-}
       # 수도권 버스 마스터(V4) 관리 적재. 일반 기동은 false. 적재는 backend 팀과 함께 플래그를 켜 한 번 재기동 → 다시 false
       DDUBI_METROPOLITAN_BUS_IMPORT_ENABLED: ${DDUBI_METROPOLITAN_BUS_IMPORT_ENABLED:-false}
-      DDUBI_METROPOLITAN_BUS_ARTIFACT: ${DDUBI_METROPOLITAN_BUS_ARTIFACT:-/opt/ddubi/transit-master/metropolitan-bus-v6.json.gz}
+      DDUBI_METROPOLITAN_BUS_ARTIFACT: ${DDUBI_METROPOLITAN_BUS_ARTIFACT:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz}
       DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64}   # metropolitan-bus-v6.json.manifest.json 의 sha256
       JAVA_OPTS: -Xms256m -Xmx512m
     volumes:

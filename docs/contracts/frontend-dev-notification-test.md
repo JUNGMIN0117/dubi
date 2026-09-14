@@ -200,12 +200,38 @@ SUPPRESSED 는 세 가지 이유로 뜹니다. `status` 만 보면 구분되지 
 
 ## 4. 연동 서버에서 쓸 수 있나
 
+### ⚠️ 지금은 꺼져 있습니다 — 인프라가 켜야 합니다 (2026-09-14 확인)
+
+서버2 backend 는 `SPRING_PROFILES_ACTIVE=local` 로 돌고 있습니다(인프라 확인). 이 API 는
+원래 `@Profile("dev")` 였기 때문에 **현재 배포 서버에서는 존재하지 않습니다 — 404** 입니다.
+
+**서버를 `dev` 로 바꾸는 것으로는 해결하지 않았습니다.** `application-dev.yml` 이 통째로
+딸려 오는데, 거기에 이 둘이 있습니다.
+
+```yaml
+org.hibernate.orm.jdbc.bind: TRACE        # 쿼리 바인딩 값이 로그에 그대로 — 이메일·좌표가 남는다
+management.endpoints.web.exposure.include: "*"   # /actuator/env · /actuator/heapdump 노출
+```
+
+필요한 건 엔드포인트 하나지 저 둘이 아닙니다. 그래서 **전용 스위치**로 분리했습니다.
+
+```
+DDUBI_DEV_ENDPOINTS_ENABLED=true    # 서버2 .env 에 한 줄 + 재기동
+```
+
+기본값은 꺼짐입니다. **발표 전에 이 줄만 지우면 API 가 사라집니다** — 코드 변경 없이
+되돌릴 수 있습니다. 내 PC(`dev` 프로파일)에서는 지금까지처럼 항상 켜져 있습니다.
+
 | 질문 | 답 |
 | --- | --- |
-| dev 프로파일인가 | **기본값이 `dev`** 입니다. 인프라가 `SPRING_PROFILES_ACTIVE` 를 따로 지정하지 않았다면 dev 로 떠 있고 이 API도 살아 있습니다. 서버의 실제 `.env` 는 제가 볼 수 없어 **인프라 확인이 필요**합니다 |
-| Swagger/Postman 호출 | 됩니다. Swagger 는 인증 없이 열려 있고, dev 프로파일이면 "개발용" 태그로 이 API가 보입니다. **Swagger 문서에 보이는지가 곧 dev 여부 확인법**입니다 |
-| Access Token 필요 | **필요합니다.** `/api/v1/dev/**` 는 공개 경로가 아니라 `Authorization: Bearer {accessToken}` 이 없으면 401 입니다 |
-| 운영에서 자동 비활성화 | **네.** `@Profile("dev")` 라 운영 프로파일에서는 경로가 막히는 게 아니라 **빈 자체가 만들어지지 않습니다.** 호출하면 404 입니다 |
+| 지금 쓸 수 있나 | **아직 아닙니다.** 인프라가 위 환경변수를 켜야 합니다. 켜졌는지는 아래로 확인하세요 |
+| 확인 방법 | 토큰 받아서 `POST /api/v1/dev/notifications/test` 호출 — **404 면 꺼짐**, 그 외(200/400)면 켜짐 |
+| Swagger | **배포 서버에서는 안 열립니다.** nginx 가 `/api/` 와 `/internal/` 만 프록시합니다. 로컬 `http://localhost:8080/swagger-ui/index.html` 을 쓰세요 |
+| Access Token 필요 | **필요합니다.** 공개 경로가 아니라 없으면 401 입니다 |
+| 발표 때 자동 비활성화 | 자동은 아니고 **환경변수 한 줄**입니다. 기본값이 꺼짐이라 지우기만 하면 됩니다 |
+
+메일·FCM 자격증명은 서버에 들어가 있고 기동 로그에 "메일 발송 준비 완료", "FCM 발송 준비
+완료" 가 찍혀 있습니다(인프라 확인). **회원가입 메일과 실제 푸시가 나갑니다.**
 
 ---
 

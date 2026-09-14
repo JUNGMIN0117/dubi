@@ -90,6 +90,8 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.data.persistence.saved").value(true))
                 .andExpect(jsonPath("$.data.persistence.preview").value(true))
                 .andExpect(jsonPath("$.data.persistence.productionReady").value(false))
+                // 배지 하나 띄우려고 추천 근거 API를 한 번 더 부르지 않아도 된다.
+                .andExpect(jsonPath("$.data.persistence.confidence").value("LOW"))
                 .andExpect(jsonPath("$.data.persistence.source").value("API_ONLY"))
                 .andExpect(jsonPath("$.data.persistence.fallbackUsed").value(true))
                 .andReturn().getResponse().getContentAsString();

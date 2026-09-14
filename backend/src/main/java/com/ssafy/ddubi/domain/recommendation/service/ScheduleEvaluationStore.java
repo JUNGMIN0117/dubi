@@ -125,7 +125,8 @@ public class ScheduleEvaluationStore {
                     .route(routes.getReferenceById(cache.routeIds().get(chosenResult.journeyKey())))
                     .departAt(local(chosenResult.departureAt())).eta(local(chosenResult.estimatedArrivalAt()))
                     .durationMin(Math.toIntExact((seconds + 59) / 60)).bufferMin(0).percentileUsed(null)
-                    .confidence(Confidence.LOW).reasons(write(stored)).segmentStatusSnapshot(write(outcome.evidence()))
+                    // 응답에 실은 등급과 행에 남는 등급이 갈라지지 않도록 같은 값을 쓴다.
+                    .confidence(persistence.confidence()).reasons(write(stored)).segmentStatusSnapshot(write(outcome.evidence()))
                     .dataCheckedAt(local(outcome.checkedAt())).policyVersion("sched-v1").triggerType(outcome.trigger()).build());
             recommendationId = recommendation.getId();
         }
@@ -257,8 +258,11 @@ public class ScheduleEvaluationStore {
         String reason = chosen == null ? "NO_CANDIDATE"
                 : chosen.estimatedArrivalAt() == null ? "ETA_UNAVAILABLE"
                 : cache.routeIds().get(chosen.journeyKey()) == null ? "ROUTE_NOT_STORED" : null;
+        // 미승인 모델로 계산한 값이라 등급을 매기지 않는다. 규약 4장 규칙 8의 HIGH/MID/LOW가
+        // 실제로 갈리는 것은 예측 서비스와 baseline_serving이 붙은 뒤다.
         return new ScheduleEvaluationWorkflow.Persistence(reason == null, reason, preview != null,
                 preview == null ? null : preview.status(), preview != null && preview.productionReady(),
+                Confidence.LOW,
                 candidate == null ? null : candidate.quality(), candidate != null && candidate.apiSteps() > 0,
                 candidate == null ? 0 : candidate.mlSteps(), candidate == null ? 0 : candidate.apiSteps(),
                 candidate == null ? 0 : candidate.subwaySteps(), candidate == null ? 0 : candidate.busWaitSteps(),

@@ -1,5 +1,6 @@
 package com.ssafy.ddubi.domain.recommendation.evaluation;
 
+import com.ssafy.ddubi.domain.recommendation.entity.Confidence;
 import com.ssafy.ddubi.domain.recommendation.entity.TriggerType;
 import com.ssafy.ddubi.domain.recommendation.service.*;
 import com.ssafy.ddubi.domain.route.client.PublicTransitRouteClient;
@@ -92,6 +93,7 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         assertThat(result.persistence().preview()).isTrue();
         assertThat(result.persistence().status()).isEqualTo("PREVIEW");
         assertThat(result.persistence().productionReady()).isFalse();
+        assertThat(result.persistence().confidence()).isEqualTo(Confidence.LOW);
         assertThat(result.persistence().source()).isEqualTo("API_ONLY");
         assertThat(result.persistence().fallbackUsed()).isTrue();
         assertThat(result.persistence().reasons()).contains("VALIDATION_ONLY");
@@ -120,20 +122,9 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
      * 상황이다. recommendationId가 null이라는 사실만으로는 프론트가 둘을 구분할 수 없다.
      */
     @Test void resultWithoutEtaIsNotStoredAndSaysWhy() {
-        workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
-        var job = store.claim(scheduleId,owner,now.plusSeconds(10));
-        var previous = store.read(job.previousJson(),ScheduleEvaluationWorkflow.Outcome.class);
-        var noEta = new RouteTimelineEvaluator.Result("candidate-0",now.plusSeconds(600),null,
-                RouteTimelineEvaluator.Assessment.INSUFFICIENT_DATA,true,List.of(),
-                List.of("step-1:ML_NOT_CONFIGURED","step-1:BUS_WAIT_REQUIRED_NOT_APPLIED"),"timeline-v1");
-        var outcome = previous.withPersistence(null);
-        outcome = new ScheduleEvaluationWorkflow.Outcome(job.token(),scheduleId,null,job.departure(),job.arriveBy(),
-                now.plusSeconds(10),"candidate-0",noEta,
-                new DepartureSuggestionService.Suggestion(List.of(noEta),null,null,1,false),
-                outcome.candidates(),outcome.evidence(),TriggerType.REFRESH,"ml-prev-v1",job.eventRevision(),
-                outcome.preview(),null);
+        var noEta = result("candidate-0",null,List.of("step-1:ML_NOT_CONFIGURED","step-1:BUS_WAIT_REQUIRED_NOT_APPLIED"));
 
-        var completed = store.complete(job,job.cache().search(),false,outcome,now.plusSeconds(600),null,null,now.plusSeconds(11));
+        var completed = completeWithChosen(noEta);
 
         assertThat(completed.recommendationId()).isNull();
         assertThat(completed.persistence().saved()).isFalse();
@@ -144,6 +135,52 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         // 사유는 DB 왕복 뒤에도 남아야 프론트가 latest만 보고 판단할 수 있다.
         var stored = (ScheduleEvaluationWorkflow.Outcome) store.latest(scheduleId,owner).get("result");
         assertThat(stored.persistence().reason()).isEqualTo("ETA_UNAVAILABLE");
+    }
+
+    /**
+     * 계산 가능한 후보가 하나도 없을 때. 지금 workflow에서는 selected가 항상 채워져 여기까지
+     * 오지 않지만, 저장 판정이 null을 만나면 NPE가 아니라 사유로 드러나야 한다.
+     */
+    @Test void resultWithoutAnyCandidateIsNotStoredAndSaysWhy() {
+        var completed = completeWithChosen(null);
+
+        assertThat(completed.recommendationId()).isNull();
+        assertThat(completed.persistence().reason()).isEqualTo("NO_CANDIDATE");
+        assertThat(completed.persistence().reasons()).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recommendation",Integer.class)).isEqualTo(1);
+    }
+
+    /** 캐시에 없는 후보를 고른 경우. getReferenceById(null)로 죽는 대신 사유가 남아야 한다. */
+    @Test void chosenCandidateMissingFromCacheIsNotStoredAndSaysWhy() {
+        var unknown = result("candidate-does-not-exist",now.plusSeconds(1200),List.of("VALIDATION_ONLY"));
+
+        var completed = completeWithChosen(unknown);
+
+        assertThat(completed.recommendationId()).isNull();
+        assertThat(completed.persistence().reason()).isEqualTo("ROUTE_NOT_STORED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recommendation",Integer.class)).isEqualTo(1);
+    }
+
+    private RouteTimelineEvaluator.Result result(String key, Instant eta, List<String> reasons) {
+        return new RouteTimelineEvaluator.Result(key,now.plusSeconds(600),eta,
+                eta == null ? RouteTimelineEvaluator.Assessment.INSUFFICIENT_DATA : RouteTimelineEvaluator.Assessment.ON_TIME_ESTIMATE,
+                true,List.of(),reasons,"timeline-v1");
+    }
+
+    /**
+     * 첫 평가로 후보 캐시를 만든 뒤, 선택 결과만 바꿔치기한 평가를 완료시킨다.
+     * 저장 판정은 store의 책임이라 workflow를 거치지 않고 경계에서 직접 검증한다.
+     */
+    private ScheduleEvaluationWorkflow.Outcome completeWithChosen(RouteTimelineEvaluator.Result chosen) {
+        workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        var job = store.claim(scheduleId,owner,now.plusSeconds(10));
+        var previous = store.read(job.previousJson(),ScheduleEvaluationWorkflow.Outcome.class);
+        var outcome = new ScheduleEvaluationWorkflow.Outcome(job.token(),scheduleId,null,job.departure(),job.arriveBy(),
+                now.plusSeconds(10),"candidate-0",chosen,
+                new DepartureSuggestionService.Suggestion(chosen == null ? List.of() : List.of(chosen),null,null,1,false),
+                previous.candidates(),previous.evidence(),TriggerType.REFRESH,"ml-prev-v1",job.eventRevision(),
+                previous.preview(),null);
+        return store.complete(job,job.cache().search(),false,outcome,now.plusSeconds(600),null,null,now.plusSeconds(11));
     }
 
     @Test void storedEvaluationUsesMlAndReturnsFastestCandidateAtUserDeparture() {

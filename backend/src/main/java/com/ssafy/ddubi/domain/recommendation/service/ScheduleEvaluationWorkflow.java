@@ -1,5 +1,6 @@
 package com.ssafy.ddubi.domain.recommendation.service;
 
+import com.ssafy.ddubi.domain.recommendation.entity.Confidence;
 import com.ssafy.ddubi.domain.recommendation.entity.TriggerType;
 import com.ssafy.ddubi.domain.recommendation.evaluation.*;
 import com.ssafy.ddubi.domain.route.client.PublicTransitRouteClient;
@@ -38,11 +39,6 @@ public class ScheduleEvaluationWorkflow {
     /** 화면에서 변경 경로를 확인하는 최소 정보. 외부 raw 응답은 포함하지 않는다. */
     public record RouteStep(String mode, String fromName, String toName, List<String> vehicles) { }
     /**
-     * 계산 시각의 입력·후보·증거를 보존한다. 내부 Instant는 절대시각이고 프론트는 KST로 표시한다.
-     * selected는 기존 선택 경로, preview.fastest는 같은 출발의 최소시간 검증 후보다.
-     * suggestion.proposed는 응답 호환용 동일 후보이며 PREVIEW는 수락·알림을 허용하지 않는다.
-     */
-    /**
      * 추천 행을 남겼는지와 그 근거의 출처다. 화면이 Outcome 전체를 파싱하지 않고
      * <b>"검증용"</b> 표시와 <b>"왜 추천이 없는가"</b>를 읽을 수 있게 한다.
      *
@@ -58,6 +54,8 @@ public class ScheduleEvaluationWorkflow {
      * @param preview   검증용 결과인가. 지금은 항상 true다
      * @param status    비교기가 매긴 상태 그대로. 현재는 {@code "PREVIEW"}
      * @param productionReady 모델 승인 여부. 지금은 항상 false다
+     * @param confidence 저장했거나 저장했을 신뢰도. 미승인 모델이라 지금은 항상 LOW다.
+     *                  추천 근거 API를 한 번 더 부르지 않고도 화면이 등급을 띄울 수 있게 여기 둔다
      * @param source    선택 후보의 계산 출처 (API_ONLY / ML_PREVIEW / SUBWAY_PREVIEW / MIXED_PREVIEW)
      * @param fallbackUsed 경로 API 시간을 그대로 쓴 step이 있는가. 도보도 경로 API라 사실상 항상
      *                  true다 — 출처를 구분하려면 {@code source}와 step 개수를 봐야 한다
@@ -66,11 +64,17 @@ public class ScheduleEvaluationWorkflow {
      *                  저장된 근거가 어긋나기 때문이다
      */
     public record Persistence(boolean saved, String reason, boolean preview, String status, boolean productionReady,
-            String source, boolean fallbackUsed, int mlSteps, int apiSteps, int subwaySteps, int busWaitSteps,
-            List<String> reasons) {
+            Confidence confidence, String source, boolean fallbackUsed, int mlSteps, int apiSteps, int subwaySteps,
+            int busWaitSteps, List<String> reasons) {
         public Persistence { reasons = reasons == null ? List.of() : List.copyOf(reasons); }
     }
 
+    /**
+     * 계산 시각의 입력·후보·증거를 보존한다. 내부 Instant는 절대시각이고 프론트는 KST로 표시한다.
+     * selected는 기존 선택 경로, preview.fastest는 같은 출발의 최소시간 검증 후보다.
+     * suggestion.proposed는 응답 호환용 동일 후보이며 PREVIEW는 수락·알림을 허용하지 않는다.
+     * recommendationId·persistence는 저장 결과이며 store가 채운다.
+     */
     public record Outcome(String evaluationId, long scheduleId, Long recommendationId, Instant plannedDepartAt,
             Instant arriveBy, Instant checkedAt, String selectedKey, Result selected,
             DepartureSuggestionService.Suggestion suggestion, List<CandidateInfo> candidates,

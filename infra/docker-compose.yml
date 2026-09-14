@@ -362,6 +362,7 @@ services:
       # 수도권 버스 마스터(V4) 관리 적재. 일반 기동은 false. 적재는 backend 팀과 함께 플래그를 켜 한 번 재기동 → 다시 false
       DDUBI_METROPOLITAN_BUS_IMPORT_ENABLED: ${DDUBI_METROPOLITAN_BUS_IMPORT_ENABLED:-false}
       DDUBI_METROPOLITAN_BUS_ARTIFACT: ${DDUBI_METROPOLITAN_BUS_ARTIFACT:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz}
+      DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE: ${DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE:-}
       DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64}   # metropolitan-bus-v6.json.manifest.json 의 sha256
       JAVA_OPTS: -Xms256m -Xmx512m
     volumes:

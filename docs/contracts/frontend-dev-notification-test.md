@@ -1,0 +1,211 @@
+# 개발용 테스트 알림 API — 프론트 연동 절차 (NTF-DEV)
+
+> 요청: 프론트, 2026-09-14 (연동 질의 2번) · 대상: `POST /api/v1/dev/notifications/test`
+
+이해하신 대로입니다. 실제 버스 지연을 기다리지 않고 **알림 한 건을 강제로 만들어**
+알림 목록·FCM 푸시·중복 억제를 확인하는 dev 전용 API입니다.
+
+---
+
+## ⚠️ 먼저 — 보내주신 요청 예시로는 400 이 납니다
+
+```jsonc
+// 보내주신 것
+{ "type": "...", "scheduleId": "...", "suppressKey": "delay-test-schedule-1" }
+```
+
+**`title` 과 `body` 가 빠졌습니다. 둘 다 필수입니다.**
+
+알림의 제목·본문은 서버가 만들지 않습니다. 이 API는 "무엇을 알릴지"를 **호출한 쪽이 정하는**
+테스트 도구라, 문구까지 그대로 받습니다. 운영 알림은 추천 엔진이 이 자리를 채웁니다.
+
+```jsonc
+// 실제로 보내야 하는 것
+{
+  "type": "EARLY_DEPART",
+  "title": "10분 일찍 나가세요",
+  "body": "2호선 강남역 구간 지연으로 출발 시각이 앞당겨졌습니다.",
+  "scheduleId": 1,
+  "suppressKey": "delay-test-schedule-1"
+}
+```
+
+## 1. 필드
+
+| 필드 | 필수 | 제약 | 비고 |
+| --- | :---: | --- | --- |
+| `type` | ✅ | 아래 8개 중 하나 | 없는 값이면 400 |
+| `title` | ✅ | 100자 이하 | |
+| `body` | ✅ | 500자 이하 | |
+| `scheduleId` | ❌ | | 없으면 일정과 연결되지 않은 알림 |
+| `suppressKey` | ❌ | | **null 이면 중복 검사를 아예 안 한다** |
+
+대상 사용자는 **항상 토큰의 본인**입니다. `userId` 를 받지 않습니다 — 받으면 아무나 남의 폰에
+푸시를 쏘는 구멍이 됩니다.
+
+### `type` 목록 (8개)
+
+| 값 | 뜻 |
+| --- | --- |
+| `MORNING_BRIEF` | 아침 브리핑 |
+| `DEPART_SOON` | 곧 출발해야 함 |
+| `EARLY_DEPART` | 예정보다 일찍 출발 — 지연 발생 |
+| `ROUTE_CHANGE` | 더 나은 경로로 바뀜 |
+| `ON_TIME_UNLIKELY` | 제시간 도착이 어려움 |
+| `LAST_TRIP` | 막차 위험 |
+| `SCHEDULE_CONFLICT` | 연속 일정 충돌 |
+| `DATA_STALE` | 파이프라인 데이터가 낡음 |
+
+### `scheduleId` — 존재하지 않아도 400 이 나지 않습니다 ⚠️
+
+없는 ID를 보내면 **오류 없이 조용히 일정 없는 알림**이 만들어집니다. 응답의
+`scheduleId` 가 `null` 로 오면 그 ID가 없었다는 뜻입니다. 화면에서 일정으로 이동하는
+동작을 테스트하려면 **응답의 `scheduleId` 가 채워졌는지 반드시 확인**하세요.
+
+### 테스트용 일정 만들기
+
+평소 일정 등록 API 그대로입니다. 특별한 절차가 없습니다.
+
+```
+POST /api/v1/schedules
+Authorization: Bearer {token}
+
+{
+  "title": "알림 테스트",
+  "origin":      { "name": "강남", "lat": 37.4979, "lng": 127.0276 },
+  "destination": { "name": "역삼", "lat": 37.5006, "lng": 127.0364 },
+  "plannedDepartAt": "2026-09-15T08:30:00",
+  "arriveBy":        "2026-09-15T09:00:00"
+}
+```
+
+응답 `data.id` 가 `scheduleId` 입니다.
+
+---
+
+## 2. 첫 번째 요청이 어디까지 하나
+
+네 가지 **전부** 합니다. 순서는 이렇습니다.
+
+```
+① 중복 확인 (suppressKey)  → 걸리면 SUPPRESSED 로 저장하고 끝
+② 알림 켬/끔 확인           → 꺼져 있으면 SUPPRESSED 로 저장하고 끝
+③ 유효 FCM 토큰 확인        → 하나도 없으면 SUPPRESSED 로 저장하고 끝
+④ FCM 발송                 → 성공 SENT / 전부 실패 FAILED
+```
+
+**억제돼도 DB 행은 만들고 알림 목록에도 나옵니다.** 알림을 꺼둔 동안의 일도 나중에 알림함에서
+볼 수 있어야 하기 때문입니다(도메인 규칙 9).
+
+### 응답 예시 — 발송 성공
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "id": 41,
+    "scheduleId": 1,
+    "recommendationId": null,
+    "type": "EARLY_DEPART",
+    "title": "10분 일찍 나가세요",
+    "body": "2호선 강남역 구간 지연으로 출발 시각이 앞당겨졌습니다.",
+    "status": "SENT",
+    "sentAt": "2026-09-14T15:02:11",
+    "readAt": null,
+    "createdAt": "2026-09-14T15:02:11"
+  },
+  "timestamp": "...", "requestId": "..."
+}
+```
+
+`status` 는 세 가지입니다.
+
+| | |
+| --- | --- |
+| `SENT` | FCM 발송 성공. 기기 여러 대 중 **하나만 성공해도** SENT |
+| `FAILED` | 발송을 시도했으나 전부 실패 |
+| `SUPPRESSED` | 보내지 않음 (중복 / 알림 끔 / 기기 없음) |
+
+푸시 payload 에는 `notificationId`, `type`, `scheduleId` 가 실립니다. 앱이 탭했을 때
+어디로 갈지 판단하는 값입니다.
+
+### 알림 목록에서 확인
+
+```
+GET /api/v1/notifications
+GET /api/v1/notifications?type=EARLY_DEPART
+GET /api/v1/notifications?unreadOnly=true
+GET /api/v1/notifications/{notificationId}
+```
+
+---
+
+## 3. 중복 억제 확인
+
+기대하신 동작이 맞습니다. **억제 유효기간은 10분**(`ddubi.notification.suppress-ttl`)입니다.
+
+| | 응답 `status` |
+| --- | --- |
+| 1차 | `SENT` |
+| 2차 (같은 `suppressKey`, 10분 내) | `SUPPRESSED` |
+
+**확인 위치는 네 곳 모두 가능합니다.**
+
+| 위치 | 어떻게 |
+| --- | --- |
+| 테스트 API 응답 | `data.status` — **제일 확실합니다** |
+| 알림 목록 API | 같은 `suppressKey` 로 만든 행 2개가 각각 SENT / SUPPRESSED |
+| DB | `SELECT id, status, suppress_key FROM notification ORDER BY id DESC` |
+| 서버 로그 | `알림 억제(중복) — userId=..., type=...` (DEBUG 레벨) |
+
+### ⚠️ 이 함정을 먼저 알고 시작하세요
+
+**SUPPRESSED 는 세 가지 이유로 뜨는데 응답이 그걸 구분해 주지 않습니다.**
+
+1. 중복 (`suppressKey` 재사용) ← 확인하려는 것
+2. 사용자가 알림을 꺼둠 (`user.isAlarm = false`)
+3. **유효한 FCM 토큰이 하나도 없음** ← 연동 초기에 제일 흔합니다
+
+그래서 **1차가 `SENT` 로 오는 것을 먼저 확인**해야 이 테스트가 의미가 있습니다.
+1차부터 `SUPPRESSED` 면 중복 억제를 검증한 게 아니라 그냥 기기가 없는 것입니다.
+
+**권장 절차**
+
+```
+1. POST /api/v1/users/me/device-tokens  로 FCM 토큰 등록
+2. 마이페이지에서 알림이 켜져 있는지 확인 (isAlarm)
+3. 1차 호출 → status 가 SENT 인지 확인   ← 여기가 통과해야 다음이 의미 있다
+4. 2차 호출 (같은 suppressKey) → SUPPRESSED
+5. suppressKey 를 바꿔서 3차 호출 → 다시 SENT (억제가 키 단위인지 확인)
+```
+
+### 발송에 실패하면 키가 풀립니다
+
+1차가 `FAILED` 였다면 억제 키를 **되돌려 놓습니다.** 실패한 알림 때문에 10분 동안
+재시도조차 막히면 안 되기 때문입니다. 그래서 이 경우 2차는 `SUPPRESSED` 가 아니라
+다시 발송을 시도합니다. **의도된 동작입니다.**
+
+---
+
+## 4. 연동 서버에서 쓸 수 있나
+
+| 질문 | 답 |
+| --- | --- |
+| dev 프로파일인가 | **기본값이 `dev`** 입니다. 인프라가 `SPRING_PROFILES_ACTIVE` 를 따로 지정하지 않았다면 dev 로 떠 있고 이 API도 살아 있습니다. 서버의 실제 `.env` 는 제가 볼 수 없어 **인프라 확인이 필요**합니다 |
+| Swagger/Postman 호출 | 됩니다. Swagger 는 인증 없이 열려 있고, dev 프로파일이면 "개발용" 태그로 이 API가 보입니다. **Swagger 문서에 보이는지가 곧 dev 여부 확인법**입니다 |
+| Access Token 필요 | **필요합니다.** `/api/v1/dev/**` 는 공개 경로가 아니라 `Authorization: Bearer {accessToken}` 이 없으면 401 입니다 |
+| 운영에서 자동 비활성화 | **네.** `@Profile("dev")` 라 운영 프로파일에서는 경로가 막히는 게 아니라 **빈 자체가 만들어지지 않습니다.** 호출하면 404 입니다 |
+
+---
+
+## 참고 — 제안 하나
+
+위 "함정"을 없애려면 응답에 **억제 사유**를 한 필드 추가하는 게 좋겠습니다.
+
+```jsonc
+"status": "SUPPRESSED",
+"suppressedReason": "NO_VALID_DEVICE"   // DUPLICATE / ALARM_OFF / NO_VALID_DEVICE
+```
+
+지금은 세 경우가 같은 값으로 보여서, 프론트가 "억제가 잘 되는구나" 와 "토큰 등록이 안 됐구나"
+를 구분할 수 없습니다. 작은 변경이라 필요하시면 바로 넣겠습니다 — **회신 주세요.**

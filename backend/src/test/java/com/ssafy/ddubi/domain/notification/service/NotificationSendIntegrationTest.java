@@ -3,6 +3,7 @@ package com.ssafy.ddubi.domain.notification.service;
 import com.ssafy.ddubi.domain.notification.entity.Notification;
 import com.ssafy.ddubi.domain.notification.entity.NotificationStatus;
 import com.ssafy.ddubi.domain.notification.entity.NotificationType;
+import com.ssafy.ddubi.domain.notification.entity.SuppressReason;
 import com.ssafy.ddubi.domain.notification.repository.NotificationRepository;
 import com.ssafy.ddubi.domain.user.dto.request.DeviceTokenRegisterRequest;
 import com.ssafy.ddubi.domain.user.entity.DevicePlatform;
@@ -28,7 +29,7 @@ import static org.mockito.Mockito.verify;
 /**
  * 알림 생성·억제·발송 (도메인 규칙 9).
  *
- * 고정하는 것: 억제 3경우 모두 행이 생성되고 status 가 정확할 것,
+ * 고정하는 것: 억제 3경우 모두 행이 생성되고 status·suppressReason 이 정확할 것,
  * 껐다 켜도 알림함에 남을 것, 무효 토큰이 정리될 것(REQ-NTF-004).
  */
 class NotificationSendIntegrationTest extends IntegrationTestSupport {
@@ -83,6 +84,7 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
         Notification result = notificationService.create(command("key-1"));
 
         assertThat(result.getStatus()).isEqualTo(NotificationStatus.SENT);
+        assertThat(result.getSuppressReason()).as("억제하지 않았으니 사유도 없다").isNull();
         assertThat(result.getSentAt()).isNotNull();
         verify(pushSender).send(any());
     }
@@ -116,6 +118,7 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
         Notification second = notificationService.create(command("same-key"));
 
         assertThat(second.getStatus()).isEqualTo(NotificationStatus.SUPPRESSED);
+        assertThat(second.getSuppressReason()).isEqualTo(SuppressReason.DUPLICATE);
         assertThat(second.getSentAt()).isNull();
         verify(pushSender).send(any()); // 첫 건만 발송
         assertThat(notificationRepository.count()).as("억제돼도 행은 2건").isEqualTo(2);
@@ -142,6 +145,7 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
         Notification result = notificationService.create(command("key-1"));
 
         assertThat(result.getStatus()).isEqualTo(NotificationStatus.SUPPRESSED);
+        assertThat(result.getSuppressReason()).isEqualTo(SuppressReason.ALARM_OFF);
         verify(pushSender, never()).send(any());
         // 껐다 켠 뒤에도 알림함에 남아 있다.
         assertThat(notificationQueryService.unreadCount(user.getId())).isEqualTo(1);
@@ -153,8 +157,28 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
         Notification result = notificationService.create(command("key-1"));
 
         assertThat(result.getStatus()).isEqualTo(NotificationStatus.SUPPRESSED);
+        assertThat(result.getSuppressReason()).isEqualTo(SuppressReason.NO_VALID_DEVICE);
         verify(pushSender, never()).send(any());
         assertThat(notificationRepository.count()).isEqualTo(1);
+    }
+
+    /**
+     * 프론트가 FCM 을 붙이는 초기에 정확히 이 순서로 밟는다. 두 건 다 SUPPRESSED 라
+     * status 만 보면 "중복 억제가 잘 되는구나" 로 읽히지만, 실제로는 억제 동작이
+     * 검증되지 않았다 — 받을 기기가 없었을 뿐이다. 사유를 남기는 이유가 이것이다.
+     */
+    @Test
+    @DisplayName("기기 없음과 중복은 status 가 같다 — 사유로만 구분된다")
+    void sameStatusDifferentReason() {
+        Notification first = notificationService.create(command("key-1"));
+        Notification second = notificationService.create(command("key-1"));
+
+        assertThat(first.getStatus()).isEqualTo(second.getStatus());
+        assertThat(first.getSuppressReason()).isEqualTo(SuppressReason.NO_VALID_DEVICE);
+        assertThat(second.getSuppressReason()).isEqualTo(SuppressReason.DUPLICATE);
+        // 프론트가 목록 API 로도 같은 값을 읽을 수 있어야 한다.
+        assertThat(notificationQueryService.get(user.getId(), first.getId()).suppressReason())
+                .isEqualTo(SuppressReason.NO_VALID_DEVICE);
     }
 
     // ------------------------------------------------------------------
@@ -170,6 +194,7 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
         Notification result = notificationService.create(command("key-1"));
 
         assertThat(result.getStatus()).isEqualTo(NotificationStatus.FAILED);
+        assertThat(result.getSuppressReason()).as("보내려고 시도했으니 억제 사유가 없다").isNull();
         assertThat(result.getSentAt()).isNull();
     }
 

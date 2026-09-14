@@ -115,10 +115,10 @@ Authorization: Bearer {{token}}
 # dev 프로파일 전용. 운영에서는 빈 자체가 없어서 404 다.
 #
 # ⚠️ title·body 는 필수다. 빼면 400 이다.
-# ⚠️ 1차가 SUPPRESSED 로 오면 중복이 아니라 아래 둘 중 하나다.
-#      - FCM 토큰이 등록돼 있지 않다  (users.http 의 기기 토큰 등록 먼저)
-#      - 마이페이지에서 알림을 꺼 뒀다 (user.is_alarm = false)
-#    그 상태로는 ⑬ 의 중복 억제를 검증할 수 없다.
+# ⚠️ 1차가 SUPPRESSED 로 오면 suppressReason 을 본다.
+#      NO_VALID_DEVICE — FCM 토큰이 없다. users.http 의 기기 토큰 등록 먼저
+#      ALARM_OFF       — 마이페이지에서 알림을 꺼 뒀다
+#    그 상태로는 ⑬ 의 중복 억제(DUPLICATE)를 검증할 수 없다.
 POST {{host}}/api/v1/dev/notifications/test
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -155,9 +155,11 @@ Content-Type: application/json
 }
 
 > {%
-    client.test("2차는 억제된다", function () {
+    client.test("2차는 중복으로 억제된다", function () {
         client.assert(response.status === 200);
         client.assert(response.body.data.status === "SUPPRESSED");
+        client.assert(response.body.data.suppressReason === "DUPLICATE",
+            "DUPLICATE 가 아니면 억제를 검증한 게 아니다: " + response.body.data.suppressReason);
         client.assert(response.body.data.sentAt === null);
     });
 %}

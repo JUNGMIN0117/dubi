@@ -158,16 +158,27 @@ GET /api/v1/notifications/{notificationId}
 | DB | `SELECT id, status, suppress_key FROM notification ORDER BY id DESC` |
 | 서버 로그 | `알림 억제(중복) — userId=..., type=...` (DEBUG 레벨) |
 
-### ⚠️ 이 함정을 먼저 알고 시작하세요
+### `suppressReason` 으로 왜 억제됐는지 알 수 있습니다
 
-**SUPPRESSED 는 세 가지 이유로 뜨는데 응답이 그걸 구분해 주지 않습니다.**
+SUPPRESSED 는 세 가지 이유로 뜹니다. `status` 만 보면 구분되지 않아 **응답에 사유를
+추가했습니다**(2026-09-14).
 
-1. 중복 (`suppressKey` 재사용) ← 확인하려는 것
-2. 사용자가 알림을 꺼둠 (`user.isAlarm = false`)
-3. **유효한 FCM 토큰이 하나도 없음** ← 연동 초기에 제일 흔합니다
+```jsonc
+{ "status": "SUPPRESSED", "suppressReason": "NO_VALID_DEVICE", "sentAt": null }
+```
 
-그래서 **1차가 `SENT` 로 오는 것을 먼저 확인**해야 이 테스트가 의미가 있습니다.
-1차부터 `SUPPRESSED` 면 중복 억제를 검증한 게 아니라 그냥 기기가 없는 것입니다.
+| `suppressReason` | 뜻 | 해야 할 일 |
+| --- | --- | --- |
+| `DUPLICATE` | 같은 `suppressKey` 를 10분 안에 이미 보냈다 | 없음 — **확인하려던 정상 동작** |
+| `ALARM_OFF` | 사용자가 알림을 꺼 뒀다 | 마이페이지에서 켠다 |
+| `NO_VALID_DEVICE` | 유효한 FCM 토큰이 없다 | **기기 토큰부터 등록한다** |
+
+`SENT`·`FAILED` 이거나 2026-09-14 이전에 쌓인 행은 `null` 입니다.
+
+**⚠️ 연동 초기에는 `NO_VALID_DEVICE` 가 제일 흔합니다.** 토큰을 등록하지 않은 채로
+두 번 호출하면 **둘 다 SUPPRESSED** 인데 사유는 각각 `NO_VALID_DEVICE`, `DUPLICATE`
+입니다. 이때 status 만 보면 "중복 억제가 잘 되는구나" 로 읽히지만 정작 억제 동작은
+검증되지 않았습니다. **1차가 `SENT` 인지부터 확인**하세요.
 
 **권장 절차**
 
@@ -198,14 +209,17 @@ GET /api/v1/notifications/{notificationId}
 
 ---
 
-## 참고 — 제안 하나
+## 스키마 변경 있음 ⚠️
 
-위 "함정"을 없애려면 응답에 **억제 사유**를 한 필드 추가하는 게 좋겠습니다.
+`suppressReason` 을 위해 `notification.suppress_reason` 컬럼이 추가됐습니다
+(`V6__add_notification_suppress_reason.sql`). **로컬 DB는 앱을 다시 띄우면 Flyway 가
+알아서 적용**합니다. 초기화할 필요는 없습니다.
 
-```jsonc
-"status": "SUPPRESSED",
-"suppressedReason": "NO_VALID_DEVICE"   // DUPLICATE / ALARM_OFF / NO_VALID_DEVICE
-```
+기존 행은 `NULL` 로 둡니다 — 그때 무엇이었는지 알 수 없고, 추측을 기록으로 남기면
+나중에 사실과 구분할 수 없습니다.
 
-지금은 세 경우가 같은 값으로 보여서, 프론트가 "억제가 잘 되는구나" 와 "토큰 등록이 안 됐구나"
-를 구분할 수 없습니다. 작은 변경이라 필요하시면 바로 넣겠습니다 — **회신 주세요.**
+## 이 사유는 목록·상세 API 에도 나옵니다
+
+테스트 API 응답뿐 아니라 `GET /api/v1/notifications`, `GET /api/v1/notifications/{id}`
+응답에도 같은 `suppressReason` 이 들어갑니다. 운영 알림이 왜 안 갔는지도 같은 방법으로
+볼 수 있습니다.

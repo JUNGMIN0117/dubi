@@ -64,6 +64,25 @@ class AuthApi {
     );
   }
 
+  Future<Response<Map<String, dynamic>>> loginWithOAuthCode({
+    required String provider,
+    required String authorizationCode,
+    required String redirectUri,
+    required String state,
+    String? deviceId,
+  }) {
+    return _dio.post<Map<String, dynamic>>(
+      ApiPaths.oauthLogin,
+      data: {
+        'provider': provider,
+        'authorizationCode': authorizationCode,
+        'redirectUri': redirectUri,
+        'state': state,
+        'deviceId': ?deviceId,
+      },
+    );
+  }
+
   Future<Response<Map<String, dynamic>>> loginWithOAuthIdToken({
     required String provider,
     required String idToken,

@@ -5,6 +5,7 @@ class ApiPaths {
   static const String emailVerification = '/auth/email/verification';
   static const String emailVerificationConfirm =
       '/auth/email/verification/confirm';
+  static const String oauthLogin = '/auth/oauth';
   static const String oauthTokenLogin = '/auth/oauth/token';
   static const String oauthIdTokenLogin = '/auth/oauth/id-token';
   static const String oauthLink = '/auth/oauth/link';

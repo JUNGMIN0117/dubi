@@ -401,8 +401,11 @@ services:
       redis:
         condition: service_healthy
         required: false
+      # ML 은 보조 축(실패 시 backend 가 카카오 값으로 fallback). healthy 를 기다리게 두면 ml-serving 이미지 실패·
+      # 모델 로드 지연이 곧 backend 다운이 된다 (9/14 15:19~15:26 사용자 API 7분 30초 불가). 기동만 확인하고 기다리지 않는다
       ml-serving:
-        condition: service_healthy
+        condition: service_started
+        required: false
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8080/actuator/health >/dev/null"]
       interval: 15s

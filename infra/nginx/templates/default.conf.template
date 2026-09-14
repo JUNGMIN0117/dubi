@@ -87,6 +87,17 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # API 명세(Swagger UI·OpenAPI JSON) — backend(springdoc)가 만든다. 프론트가 명세를 볼 곳이 필요해 공개(2026-09-14 backend 요청).
+    # 비밀값은 없고 API 주소·형식만 보인다. 운영 전환 뒤에는 backend 가 프로필로 끄거나 이 블록을 지운다.
+    # /swagger-ui.html 은 backend 가 /swagger-ui/index.html 로 302 를 주므로 함께 연다.
+    location ~ ^/(swagger-ui/|swagger-ui\.html$|v3/api-docs) {
+        proxy_pass $backend_upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # 내부 API (HTTPS 경유분) — 계약상 경로. 서버1 사설 IP 만 허용
     location /internal/ {
         allow ${SERVER1_PRIVATE_IP};

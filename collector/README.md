@@ -243,7 +243,7 @@ python -m pytest -q -p no:cacheprovider
 위치 관측의 `sectOrd`만으로 구간을 추측하지 않는다.
 서울 위치는 `stopFlag=0`이고 `sectOrd` 후보의 출발점이 `lastStnId`와 일치할 때
 공통 from/to 필드를 채운다. `stationSeq` 대체는 하지 않으며 정차·불일치는 이유를 남긴다.
-생성·배포 방법은 [마스터 안내](../data/transit-master/README.md)를 따른다.
+생성·배포 방법은 [마스터 안내](../backend/transit-master/README.md)를 따른다.
 
 ## 경기·인천 선택 실행 수집기
 

@@ -42,9 +42,6 @@ client/.metadata
 
 # Runtime data
 data/
-!/data/
-/data/*
-!/data/transit-master/
 /artifacts/ml-serving/
 infra/transit-master/
 logs/

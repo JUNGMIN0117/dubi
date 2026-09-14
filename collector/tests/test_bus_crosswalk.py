@@ -107,7 +107,7 @@ def test_shared_manifest_is_current_and_detects_tampering(tmp_path):
     """공통 묶음의 파일 유실/변조가 환경값 출력 전에 발견되어야 한다."""
     import importlib.util
     import shutil
-    root = Path(__file__).resolve().parents[2]/'data/transit-master'
+    root = Path(__file__).resolve().parents[2]/'backend/transit-master'
     spec = importlib.util.spec_from_file_location('transit_manifest', root/'manage.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -121,7 +121,7 @@ def test_shared_manifest_is_current_and_detects_tampering(tmp_path):
 
 def test_serving_artifact_has_valid_ids_in_every_source():
     root=Path(__file__).resolve().parents[2]
-    path=root/'data/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz'
+    path=root/'backend/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz'
     manifest=json.loads(path.with_suffix('.manifest.json').read_text(encoding='utf-8'))
     crosswalk=BusCrosswalk(path,manifest['sha256'])
     assert crosswalk.version==manifest['masterVersion']

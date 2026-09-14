@@ -95,7 +95,7 @@ def release_static_indexes(spark):
 def test_full_serving_artifact_reuses_materialized_index_without_json_literal(spark):
     # 실배포 105,070 edge → 210,140 조회 행으로 검증한다. 원본 ID 보존뿐 아니라
     # 반복 배치의 실행 계획이 JSON 리터럴을 재파싱하지 않고 캐시를 읽는지도 검사한다.
-    path=Path(__file__).resolve().parents[2]/'data/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz'
+    path=Path(__file__).resolve().parents[2]/'backend/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz'
     raw=path.read_bytes();data=json.loads(gzip.decompress(raw))
     index,version,sha=load_crosswalk(spark,path,hashlib.sha256(raw).hexdigest())
     from pyspark.sql import functions as F

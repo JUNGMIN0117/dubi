@@ -15,7 +15,7 @@ Redis의 `segment:status:{segmentId}`와 BUS의 4개 콜론 구분 필드는 유
 
 ## 대응표 배포
 
-배포 원본은 `data/transit-master/`에서 관리한다. `manifest.json`과 `manage.py check`로
+배포 원본은 `backend/transit-master/`에서 관리한다. `manifest.json`과 `manage.py check`로
 파일별 SHA·호환 조합을 확인하고 `manage.py env`가 출력하는 동일 환경값을 사용한다.
 
 `build_metropolitan_master.py`는 기존 마스터와 별도로 `*.crosswalk.json.gz` 및 SHA manifest를

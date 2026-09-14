@@ -48,6 +48,12 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
                 List.of(RouteEvidenceAssemblerTest.candidate(0,1500,30),RouteEvidenceAssemblerTest.candidate(1,600,30))));
     }
 
+    /** 저장된 근거 JSON의 persistence 필드 하나를 꺼낸다. MySQL이 공백을 정규화하므로 문자열 비교는 쓰지 않는다. */
+    private String storedReason(long recommendationId, String field) {
+        return jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(reasons,'$.persistence." + field + "')) "
+                + "FROM recommendation WHERE id=?", String.class, recommendationId);
+    }
+
     @Test void inputIsStoredAndPeriodicEvaluationReusesCandidates() {
         var first = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
         assertThat(first.selected().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.LATE_ESTIMATE);
@@ -67,14 +73,77 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
                 .isEqualTo(LocalDateTime.ofInstant(now.plusSeconds(600),ZoneId.of("Asia/Seoul")));
     }
 
-    @Test void previewCannotBeAcceptedOrCreateProductionRecommendation() {
+    /**
+     * 저장은 하되 수락·알림은 막는다(2026-09-14).
+     *
+     * <p>예전에는 PREVIEW면 추천 행 자체를 만들지 않았다. 그런데 모델이 미승인이라 <b>모든</b>
+     * 결과가 PREVIEW라, 추천이 하나도 안 생기고 프론트의 최신 추천·근거 화면이 계속 빈손이었다.
+     * 이제 기록은 남기되 <b>사용자를 실제로 움직이게 하는 두 가지</b>는 그대로 막는다 —
+     * 일정 출발시각을 바꾸는 수락과, 폰을 울리는 자동 알림이다.
+     */
+    @Test void previewIsStoredWithItsMarkingButCannotBeAcceptedOrNotified() {
         var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
         assertThat(result.preview().status()).isEqualTo("PREVIEW");
+
+        // 저장됐고, 검증용이라는 표시가 함께 남는다.
+        assertThat(result.recommendationId()).isNotNull();
+        assertThat(result.persistence().saved()).isTrue();
+        assertThat(result.persistence().reason()).isNull();
+        assertThat(result.persistence().preview()).isTrue();
+        assertThat(result.persistence().status()).isEqualTo("PREVIEW");
+        assertThat(result.persistence().productionReady()).isFalse();
+        assertThat(result.persistence().source()).isEqualTo("API_ONLY");
+        assertThat(result.persistence().fallbackUsed()).isTrue();
+        assertThat(result.persistence().reasons()).contains("VALIDATION_ONLY");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recommendation",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT confidence FROM recommendation WHERE id=?",String.class,result.recommendationId()))
+                .as("검증 전 값이라는 사실을 행에도 남긴다").isEqualTo("LOW");
+        // 행에 저장된 근거에도 검증용 표시가 들어 있어야 근거만 꺼내 봐도 출처를 알 수 있다.
+        assertThat(storedReason(result.recommendationId(),"preview")).isEqualTo("true");
+        assertThat(storedReason(result.recommendationId(),"productionReady")).isEqualTo("false");
+        assertThat(storedReason(result.recommendationId(),"source")).isEqualTo("API_ONLY");
+
+        // 여기부터는 막힌 채로 남는다.
         assertThatThrownBy(() -> store.accept(scheduleId,owner+1000,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> store.accept(scheduleId,owner,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recommendation",Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT notification_json FROM schedule_evaluation WHERE schedule_id=?",String.class,scheduleId)).isNull();
+        assertThat(schedules.findById(scheduleId).orElseThrow().getPlannedDepartAt())
+                .as("수락이 막혔으니 일정 출발시각은 그대로다")
+                .isEqualTo(LocalDateTime.ofInstant(now.plusSeconds(600),ZoneId.of("Asia/Seoul")));
         assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("READY");
+    }
+
+    /**
+     * ETA를 계산하지 못하면 저장하지 않고 <b>사유를 남긴다.</b>
+     *
+     * <p>추천이 비어 있는 화면에서 "아직 계산 중"과 "계산은 했는데 근거가 없다"는 전혀 다른
+     * 상황이다. recommendationId가 null이라는 사실만으로는 프론트가 둘을 구분할 수 없다.
+     */
+    @Test void resultWithoutEtaIsNotStoredAndSaysWhy() {
+        workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        var job = store.claim(scheduleId,owner,now.plusSeconds(10));
+        var previous = store.read(job.previousJson(),ScheduleEvaluationWorkflow.Outcome.class);
+        var noEta = new RouteTimelineEvaluator.Result("candidate-0",now.plusSeconds(600),null,
+                RouteTimelineEvaluator.Assessment.INSUFFICIENT_DATA,true,List.of(),
+                List.of("step-1:ML_NOT_CONFIGURED","step-1:BUS_WAIT_REQUIRED_NOT_APPLIED"),"timeline-v1");
+        var outcome = previous.withPersistence(null);
+        outcome = new ScheduleEvaluationWorkflow.Outcome(job.token(),scheduleId,null,job.departure(),job.arriveBy(),
+                now.plusSeconds(10),"candidate-0",noEta,
+                new DepartureSuggestionService.Suggestion(List.of(noEta),null,null,1,false),
+                outcome.candidates(),outcome.evidence(),TriggerType.REFRESH,"ml-prev-v1",job.eventRevision(),
+                outcome.preview(),null);
+
+        var completed = store.complete(job,job.cache().search(),false,outcome,now.plusSeconds(600),null,null,now.plusSeconds(11));
+
+        assertThat(completed.recommendationId()).isNull();
+        assertThat(completed.persistence().saved()).isFalse();
+        assertThat(completed.persistence().reason()).isEqualTo("ETA_UNAVAILABLE");
+        assertThat(completed.persistence().reasons()).contains("step-1:BUS_WAIT_REQUIRED_NOT_APPLIED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recommendation",Integer.class))
+                .as("첫 평가가 남긴 1건뿐이고 이번 평가는 추가하지 않는다").isEqualTo(1);
+        // 사유는 DB 왕복 뒤에도 남아야 프론트가 latest만 보고 판단할 수 있다.
+        var stored = (ScheduleEvaluationWorkflow.Outcome) store.latest(scheduleId,owner).get("result");
+        assertThat(stored.persistence().reason()).isEqualTo("ETA_UNAVAILABLE");
     }
 
     @Test void storedEvaluationUsesMlAndReturnsFastestCandidateAtUserDeparture() {
@@ -92,7 +161,13 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         assertThat(stored.preview().waitPredictions()).hasSize(2);
         assertThat(stored.preview().waitPredictions()).allMatch(w -> w.seconds() == null && !w.applied());
         assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("ML_PREVIEW");
-        assertThat(stored.recommendationId()).isNull();
+        // 예측을 실제로 쓴 후보가 선택됐으면 출처도 그대로 남는다. LOW는 유지된다 — 미승인 모델이다.
+        assertThat(stored.recommendationId()).isNotNull();
+        assertThat(stored.persistence().source()).isEqualTo("ML_PREVIEW");
+        assertThat(stored.persistence().mlSteps()).isEqualTo(1);
+        assertThat(stored.persistence().productionReady()).isFalse();
+        assertThat(jdbc.queryForObject("SELECT confidence FROM recommendation WHERE id=?",String.class,stored.recommendationId()))
+                .isEqualTo("LOW");
     }
 
     @Test void subwayMissingTimetableReasonSurvivesStoredPreviewRoundTrip() {

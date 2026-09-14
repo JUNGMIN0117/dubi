@@ -925,7 +925,12 @@ class _FakeNaverLoginService implements NaverLoginService {
   const _FakeNaverLoginService();
 
   @override
-  Future<String> login(BuildContext context) async => 'test-naver-access-token';
+  Future<NaverAuthorizationResult> login(BuildContext context) async =>
+      const NaverAuthorizationResult(
+        authorizationCode: 'test-naver-authorization-code',
+        state: 'test-state',
+        redirectUri: naverRedirectUri,
+      );
 }
 
 class _FakePlaceSearchService implements PlaceSearchService {

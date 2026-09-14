@@ -8,6 +8,7 @@ import 'package:ddubi/services/api_auth_repository.dart';
 import 'package:ddubi/services/auth_api.dart';
 import 'package:ddubi/services/app_api.dart';
 import 'package:ddubi/services/place_api.dart';
+import 'package:ddubi/services/naver_login_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -22,6 +23,7 @@ void main() {
     );
     expect(ApiPaths.refresh, '/auth/refresh');
     expect(ApiPaths.logout, '/auth/logout');
+    expect(ApiPaths.oauthLogin, '/auth/oauth');
     expect(ApiPaths.oauthTokenLogin, '/auth/oauth/token');
     expect(ApiPaths.oauthIdTokenLogin, '/auth/oauth/id-token');
     expect(ApiPaths.oauthLink, '/auth/oauth/link');
@@ -117,26 +119,82 @@ void main() {
     expect(notificationLocationFromData(const {}), '/notifications');
   });
 
-  test('소셜 로그인 계정 충돌 응답을 연동 확인 흐름으로 변환한다', () async {
+  test('인가 코드 로그인 요청과 중첩 토큰 응답을 처리한다', () async {
+    late RequestOptions captured;
     final dio = Dio(BaseOptions(baseUrl: 'https://example.test/api/v1'))
       ..interceptors.add(
         InterceptorsWrapper(
-          onRequest: (options, handler) => handler.reject(
-            DioException(
-              requestOptions: options,
-              response: Response<Map<String, dynamic>>(
+          onRequest: (options, handler) {
+            captured = options;
+            handler.resolve(
+              Response<Map<String, dynamic>>(
                 requestOptions: options,
-                statusCode: 409,
+                statusCode: 200,
                 data: {
-                  'success': false,
-                  'error': {'code': 'ACCOUNT_LINK_REQUIRED'},
+                  'success': true,
                   'data': {
-                    'linkToken': 'one-time-link-token',
-                    'provider': 'KAKAO',
-                    'email': 'm***@example.com',
+                    'status': 'AUTHENTICATED',
+                    'tokens': {
+                      'accessToken': 'access',
+                      'refreshToken': 'refresh',
+                      'tokenType': 'Bearer',
+                      'deviceId': 'device-1',
+                      'user': {
+                        'id': 7,
+                        'provider': 'NAVER',
+                        'email': 'member@example.com',
+                        'nickname': '뚜비',
+                      },
+                    },
                   },
                 },
               ),
+            );
+          },
+        ),
+      );
+    final store = AuthSessionStore();
+    final repository = ApiAuthRepository(
+      api: AuthApi(dio),
+      sessionStore: store,
+      deviceTokenService: DeviceTokenService(dio, store),
+    );
+
+    await repository.loginWithOAuthCode(
+      provider: 'NAVER',
+      authorizationCode: 'authorization-code',
+      redirectUri: naverRedirectUri,
+      state: 'verified-state',
+    );
+
+    expect(captured.path, '/auth/oauth');
+    expect(captured.data, {
+      'provider': 'NAVER',
+      'authorizationCode': 'authorization-code',
+      'redirectUri': naverRedirectUri,
+      'state': 'verified-state',
+    });
+    expect(store.session?.accessToken, 'access');
+    expect(store.session?.user.provider, 'NAVER');
+  });
+
+  test('200 계정 연동 필요 응답을 연동 확인 흐름으로 변환한다', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://example.test/api/v1'))
+      ..interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) => handler.resolve(
+            Response<Map<String, dynamic>>(
+              requestOptions: options,
+              statusCode: 200,
+              data: {
+                'success': true,
+                'data': {
+                  'status': 'ACCOUNT_LINK_REQUIRED',
+                  'linkToken': 'one-time-link-token',
+                  'provider': 'NAVER',
+                  'email': 'm***@example.com',
+                },
+              },
             ),
           ),
         ),
@@ -149,9 +207,11 @@ void main() {
     );
 
     await expectLater(
-      repository.loginWithOAuthToken(
-        provider: 'KAKAO',
-        accessToken: 'provider-token',
+      repository.loginWithOAuthCode(
+        provider: 'NAVER',
+        authorizationCode: 'authorization-code',
+        redirectUri: naverRedirectUri,
+        state: 'verified-state',
       ),
       throwsA(
         isA<AccountLinkRequiredException>()
@@ -160,8 +220,61 @@ void main() {
               'linkToken',
               'one-time-link-token',
             )
-            .having((error) => error.provider, 'provider', 'KAKAO')
+            .having((error) => error.provider, 'provider', 'NAVER')
             .having((error) => error.email, 'email', 'm***@example.com'),
+      ),
+    );
+  });
+
+  test('네이버 인가 URL과 Callback 주소를 정확히 구성한다', () {
+    const state = 'random-state';
+    final uri = createNaverAuthorizationUri(
+      clientId: 'client-id',
+      redirectUri: naverRedirectUri,
+      state: state,
+    );
+
+    expect(uri.host, 'nid.naver.com');
+    expect(uri.queryParameters['response_type'], 'code');
+    expect(uri.queryParameters['client_id'], 'client-id');
+    expect(uri.queryParameters['redirect_uri'], naverRedirectUri);
+    expect(uri.queryParameters['state'], state);
+    expect(
+      isNaverRedirect(
+        Uri.parse('$naverRedirectUri?code=code&state=$state'),
+        naverRedirectUri,
+      ),
+      isTrue,
+    );
+    expect(
+      isNaverRedirect(
+        Uri.parse('https://example.com/oauth/naver?code=code&state=$state'),
+        naverRedirectUri,
+      ),
+      isFalse,
+    );
+    final callback = parseNaverAuthorizationCallback(
+      Uri.parse('$naverRedirectUri?code=code&state=$state'),
+      expectedState: state,
+      redirectUri: naverRedirectUri,
+    );
+    expect(callback.authorizationCode, 'code');
+    expect(callback.state, state);
+  });
+
+  test('네이버 Callback state가 다르면 인증 코드를 사용하지 않는다', () {
+    expect(
+      () => parseNaverAuthorizationCallback(
+        Uri.parse('$naverRedirectUri?code=code&state=wrong-state'),
+        expectedState: 'expected-state',
+        redirectUri: naverRedirectUri,
+      ),
+      throwsA(
+        isA<NaverLoginException>().having(
+          (error) => error.message,
+          'message',
+          contains('로그인 요청을 확인할 수 없어요'),
+        ),
       ),
     );
   });

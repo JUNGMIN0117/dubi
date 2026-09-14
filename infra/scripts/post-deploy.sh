@@ -57,6 +57,8 @@ case "$target" in
     report_bad_containers
     ;;
   server2)
+    # ML 프리뷰 모델과 참조 번들의 무결성 검사를 통과해야 backend 연결을 허용한다.
+    wait_for "ml-serving healthy" 180 health ml-serving
     # 1) nginx 템플릿 재적용: 설정을 다시 만들고 문법 검사 뒤 reload
     docker exec nginx /docker-entrypoint.d/20-envsubst-on-templates.sh >/dev/null
     docker exec nginx nginx -t

@@ -306,6 +306,30 @@ services:
   #  - 외부 공개는 nginx 의 80/443 뿐. backend 는 호스트 포트를 열지 않는다
   #  - JWT_SECRET 이 비어 있으면 backend 가 기동을 거부한다 (.env 에 반드시 설정)
   # =========================================================================
+  ml-serving:
+    <<: *common
+    build:
+      context: ../ml-serving
+      dockerfile: Dockerfile
+    image: ddubi/ml-serving:${APP_VERSION:-0.1.0}
+    container_name: ml-serving
+    profiles: ["serving"]
+    mem_limit: 4g
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      ML_BUNDLE_DIR: /models/v12
+      ML_MAX_WAITING_REQUESTS: ${ML_MAX_WAITING_REQUESTS:-4}
+      ML_QUEUE_WAIT_SECONDS: ${ML_QUEUE_WAIT_SECONDS:-5}
+      ML_REFERENCE_CACHE_MIB: ${ML_REFERENCE_CACHE_MIB:-256}
+    volumes:
+      - ${ML_BUNDLE_DIR:-../artifacts/ml-serving/20260908-v12}:/models/v12:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 10
+      start_period: 60s
+
   backend:
     <<: *common
     build:
@@ -364,6 +388,7 @@ services:
       DDUBI_METROPOLITAN_BUS_ARTIFACT: ${DDUBI_METROPOLITAN_BUS_ARTIFACT:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz}
       DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE: ${DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE:-}
       DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64}   # metropolitan-bus-v6.json.manifest.json 의 sha256
+      DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL: ${DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL:-http://ml-serving:8000}
       JAVA_OPTS: -Xms256m -Xmx512m
     volumes:
       # 기본값을 저장소의 backend/transit-master 로(9/11). 이전 기본값 ./transit-master 는 서버에 빈 폴더였다.
@@ -376,6 +401,8 @@ services:
       redis:
         condition: service_healthy
         required: false
+      ml-serving:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8080/actuator/health >/dev/null"]
       interval: 15s

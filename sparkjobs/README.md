@@ -57,7 +57,7 @@ BUS 대응표를 사용하려면 driver에서 읽을 수 있는 `BUS_CROSSWALK_P
 Collector와 같은 버전의 파일을 함께 배포·재시작하며 불일치한 BUS ID는 비운다.
 전체 인접 edge는 기동 시 JVM 인덱스로 만들고 원천 이벤트는 DataFrame 조인으로 처리한다.
 파일 미설정은 `CROSSWALK_NOT_CONFIGURED`, SHA 오류는 잡 기동 실패다.
-재생성·배포 방법은 [마스터 안내](../backend/transit-master/README.md), 의미·키 규칙은
+재생성·배포 방법은 [마스터 안내](../data/transit-master/README.md), 의미·키 규칙은
 [구간 연결 계약](../docs/contracts/metropolitan-segment-integration.md)을 따른다.
 
 ## 구간 기준선·판정 실행 준비 (2026-09-10)

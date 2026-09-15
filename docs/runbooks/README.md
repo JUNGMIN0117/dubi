@@ -9,6 +9,7 @@
 | [spark-streaming-crash.md](spark-streaming-crash.md) | Spark 스트리밍 잡이 죽었다 | 검증됨 (9/7) |
 | [backend-down-and-nginx-502.md](backend-down-and-nginx-502.md) | backend 가 죽었다 / 배포 뒤 API 가 502 | 검증됨 (9/7) |
 | [hdfs-datanode-down.md](hdfs-datanode-down.md) | HDFS 데이터노드 한 대가 죽었다 | 검증됨 (9/7, 읽기 약점 발견) |
+| [hdfs-namenode-metadata-loss.md](hdfs-namenode-metadata-loss.md) | 서버1 네임노드 메타데이터를 잃었다(서버1 사망·볼륨 손실) → 서버2 예비 네임노드로 이어받기 | **미검증** (9/14 작성, 연습 예정) |
 | [kafka-restart.md](kafka-restart.md) | Kafka 가 죽었거나 재시작해야 한다 | 검증됨 (9/7) |
 | [reprocess-from-archive.md](reprocess-from-archive.md) | 데이터를 다시 계산해야 한다 (재처리) | 검증됨 (9/7) |
 | [deploy-rollback.md](deploy-rollback.md) | 잘못된 배포를 되돌려야 한다 | 검증됨 (9/7, revert 롤백 2분 59초) |

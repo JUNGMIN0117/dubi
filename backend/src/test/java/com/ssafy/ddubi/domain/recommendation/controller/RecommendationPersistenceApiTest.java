@@ -5,6 +5,7 @@ import com.ssafy.ddubi.domain.recommendation.evaluation.BusPreviewClient;
 import com.ssafy.ddubi.domain.recommendation.evaluation.RouteEvidenceAssemblerTest;
 import com.ssafy.ddubi.domain.route.client.PublicTransitRouteClient;
 import com.ssafy.ddubi.domain.route.model.RouteSearchResult;
+import com.ssafy.ddubi.domain.schedule.repository.ScheduleRepository;
 import com.ssafy.ddubi.domain.user.entity.User;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
 import com.ssafy.ddubi.global.security.JwtTokenProvider;
@@ -47,6 +48,7 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
     @Autowired MockMvc http;
     @Autowired ObjectMapper json;
     @Autowired UserRepository users;
+    @Autowired ScheduleRepository schedules;
     @Autowired JwtTokenProvider tokens;
     @Autowired JdbcTemplate jdbc;
     @MockitoBean PublicTransitRouteClient routeClient;
@@ -136,8 +138,10 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
         assertThat(jdbc.queryForObject(
                 "SELECT notification_json FROM schedule_evaluation WHERE schedule_id=?", String.class, scheduleId))
                 .as("검증 전 값으로 폰을 울리지 않는다").isNull();
-        assertThat(jdbc.queryForObject(
-                "SELECT planned_depart_at FROM schedule WHERE id=?", LocalDateTime.class, scheduleId))
+        // 출발시각은 생 JDBC 로 읽지 않는다. hibernate.jdbc.time_zone=Asia/Seoul 이라 JPA 의
+        // 쓰기/읽기는 서로 역변환이라 짝이 맞지만, 그 사이에 생 JDBC 로 끼어들면 JVM 이 UTC 인
+        // CI 에서만 9시간 어긋난 값이 보인다. 애플리케이션이 실제로 읽는 경로로 확인한다.
+        assertThat(schedules.findById(scheduleId).orElseThrow().getPlannedDepartAt())
                 .as("수락이 막혔으니 출발시각도 그대로다")
                 .isEqualTo(LocalDateTime.ofInstant(now.plusSeconds(600), KST).withNano(0));
     }

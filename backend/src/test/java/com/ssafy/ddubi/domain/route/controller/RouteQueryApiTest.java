@@ -1,5 +1,9 @@
 package com.ssafy.ddubi.domain.route.controller;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.ddubi.domain.route.entity.RouteProvider;
 import com.ssafy.ddubi.domain.route.entity.RouteRequest;
@@ -8,6 +12,7 @@ import com.ssafy.ddubi.domain.route.entity.SavedRouteSegment;
 import com.ssafy.ddubi.domain.route.model.TransportMode;
 import com.ssafy.ddubi.domain.route.repository.RouteRequestRepository;
 import com.ssafy.ddubi.domain.route.repository.SavedRouteRepository;
+import com.ssafy.ddubi.domain.route.service.RouteQueryService;
 import com.ssafy.ddubi.domain.schedule.dto.request.LocationRequest;
 import com.ssafy.ddubi.domain.schedule.dto.request.ScheduleCreateRequest;
 import com.ssafy.ddubi.domain.schedule.entity.Schedule;
@@ -23,6 +28,7 @@ import java.time.ZoneId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
@@ -207,21 +213,55 @@ class RouteQueryApiTest extends IntegrationTestSupport {
         broken.addSegment(SavedRouteSegment.builder().seq(3).mode(TransportMode.BUS)
                 .fromName("C").toName("D").baseDurationMin(5)
                 .geometry("[{\"longitude\":127.0,\"latitude\":37.5},{\"longitude\":999,\"latitude\":999}]").build());
+        // ④ 정확히 (0,0) — JSON 도 타입도 맞고 WGS84 범위 안이라 앞의 두 겹을 다 통과한다.
+        //    필드 이름이 어긋나 기본값 0 이 채워졌을 때 나오는 모양이라 따로 막는다.
+        broken.addSegment(SavedRouteSegment.builder().seq(4).mode(TransportMode.BUS)
+                .fromName("D").toName("E").baseDurationMin(5)
+                .geometry("[{\"longitude\":127.0,\"latitude\":37.5},{\"longitude\":0,\"latitude\":0}]").build());
         long brokenId = savedRoutes.save(broken).getId();
 
-        http.perform(get("/api/v1/routes/{id}/map", brokenId).header("Authorization", bearer))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.segments.length()").value(3))
-                .andExpect(jsonPath("$.data.segments[0].coordinates").isEmpty())
-                .andExpect(jsonPath("$.data.segments[1].coordinates").isEmpty())
-                .andExpect(jsonPath("$.data.segments[2].coordinates").isEmpty())
-                .andExpect(jsonPath("$.data.bounds").doesNotExist());
+        var captured = captureServiceLogs();
+        try {
+            http.perform(get("/api/v1/routes/{id}/map", brokenId).header("Authorization", bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.segments.length()").value(4))
+                    .andExpect(jsonPath("$.data.segments[0].coordinates").isEmpty())
+                    .andExpect(jsonPath("$.data.segments[1].coordinates").isEmpty())
+                    .andExpect(jsonPath("$.data.segments[2].coordinates").isEmpty())
+                    .andExpect(jsonPath("$.data.segments[3].coordinates").isEmpty())
+                    .andExpect(jsonPath("$.data.bounds").doesNotExist());
+        } finally {
+            detachServiceLogs(captured);
+        }
+
+        // 조용히 비면 "왜 선이 안 그려지지" 를 추적할 수 없다. 운영자가 볼 신호가 남아야 한다.
+        var messages = captured.list.stream()
+                .filter(event -> event.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage).toList();
+        assertThat(messages).as("파싱 실패 2건 + 범위 위반 2건")
+                .filteredOn(message -> message.contains("읽지 못했습니다")).hasSize(2);
+        assertThat(messages)
+                .filteredOn(message -> message.contains("지구 밖입니다")).hasSize(2);
+        assertThat(messages).allMatch(message -> message.contains("routeSegmentId="),
+                "어느 구간인지 없으면 로그를 보고도 찾아갈 수 없다");
 
         // 좌표만 못 읽었을 뿐 경로 안내는 멀쩡해야 한다.
         http.perform(get("/api/v1/routes/{id}", brokenId).header("Authorization", bearer))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.segments.length()").value(3))
+                .andExpect(jsonPath("$.data.segments.length()").value(4))
                 .andExpect(jsonPath("$.data.segments[0].fromName").value("A"));
+    }
+
+    private ListAppender<ILoggingEvent> captureServiceLogs() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(RouteQueryService.class)).addAppender(appender);
+        return appender;
+    }
+
+    private void detachServiceLogs(ListAppender<ILoggingEvent> appender) {
+        ((Logger) LoggerFactory.getLogger(RouteQueryService.class)).detachAppender(appender);
+        appender.stop();
     }
 
     @Test

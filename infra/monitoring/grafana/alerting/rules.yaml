@@ -187,6 +187,27 @@ groups:
             datasourceUid: __expr__
             model: { refId: C, type: math, expression: "$A > 0" }
 
+      # 서버2의 세컨더리 네임노드는 한 시간마다 네임노드 목차의 사본을 만든다. 세 시간 넘게 새 사본이 없으면 세컨더리가 죽었거나
+      # 서버1에 붙지 못하는 것이다. 이 사본은 서버1 디스크를 잃었을 때 유일한 복구 수단이라, 조용히 멈추는 일을 알림으로 드러낸다.
+      - uid: ddubi-hdfs-checkpoint-stale
+        title: HDFS 체크포인트 멈춤
+        condition: C
+        for: 10m
+        labels: { severity: warning, layer: data }
+        annotations:
+          summary: 세컨더리 네임노드(서버2)가 3시간 넘게 메타데이터 사본을 만들지 않았다. docker logs hdfs-secondarynamenode 확인
+          runbook: docs/runbooks/hdfs-namenode-metadata-loss.md
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: (time() * 1000 - hdfs_namenode_last_checkpoint_time_ms) / 3600000 }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A > 3" }
+
   - orgId: 1
     name: ddubi-host
     folder: DDUBI 알림

@@ -142,15 +142,17 @@ def collect_remote():
 
 
 def collect_local():
-    """서버2 로컬: 재시작·backend 오류 로그·배포 커밋·Redis TTL 없는 키·인증서 만료."""
+    """서버2 로컬: 재시작·backend 오류 로그·배포 커밋·Redis TTL 없는 키·인증서 만료.
+    TTL 없는 키는 키마다 따로 묻지 않고 한 연결로 한꺼번에 묻는다(파이프라인). 키마다 묻던 방식은 키가 17,000개가 되자
+    40초를 넘겨 서버2 조회 전체가 실패로 처리됐다(9/15 17:00 브리핑). 지금 방식은 0.1초 안에 끝난다. 제한은 안전하게 60초."""
     out = _run(["bash", "-c", r"""
 echo "@@restarts"; docker ps -a --filter label=com.docker.compose.project=ddubi --format '{{.Names}}' | xargs -r -I{} docker inspect {} --format '{{.Name}} {{.RestartCount}} {{.State.Status}}'
 echo "@@errors"; printf "backend %s
 " "$(docker logs backend --since %(h)dh 2>&1 | grep -cE ' ERROR ')"
 echo "@@deploy"; cd ~/S15P21E202 && git log -1 --format='%h %cd' --date=format:'%m-%d %H:%M' && stat -c %y .git/FETCH_HEAD 2>/dev/null | cut -c1-16
-echo "@@redis_nottl"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | while read k; do [ "$(redis-cli -a "$REDIS_PASSWORD" --no-auth-warning TTL "$k")" = "-1" ] && echo "$k"; done | wc -l'
+echo "@@redis_nottl"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | awk "{print \"TTL \" \$0}" | redis-cli -a "$REDIS_PASSWORD" --no-auth-warning | grep -c "^-1$"'
 echo "@@cert"; echo | openssl s_client -connect localhost:443 -servername j15e202.p.ssafy.io 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2
-""".replace("%(h)d", str(WINDOW_H))])
+""".replace("%(h)d", str(WINDOW_H))], timeout=60)
     return _split_sections(out or "")
 
 

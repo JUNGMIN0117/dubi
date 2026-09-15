@@ -114,7 +114,9 @@ Grafana `DDUBI 파이프라인` 대시보드와 알림(Mattermost)으로 봅니�
 | **MySQL 서비스 데이터(회원·일정 등)** | **일일 논리 백업 7일**(2026-09-09 도입) | 서버2 볼륨 손실 | 아래 절차 |
 | Grafana 대시보드·알림 | 깃 파일 프로비저닝 | 볼륨 손실 | 재배포로 복원 |
 
-**MySQL 백업** — `infra/scripts/backup-db.sh` 가 매일 04:10(KST, 크론은 UTC 19:10) 에 `mysqldump --single-transaction`(서비스 중단 없음)으로 `ddubi` 를 gzip 해 서버2 `~/backups/mysql/ddubi-<날짜>.sql.gz` 로 저장하고, 무결성 확인 뒤 7일 지난 파일을 지웁니다. 크론은 서버2 `ubuntu` 사용자에 등록되어 있고 결과는 같은 폴더의 `backup.log` 에 한 줄씩 남습니다. 백업이 서버2 안에만 있으므로 서버2 디스크 전체가 망가지면 백업도 잃습니다. 발표 전 한 번은 다른 곳(개인 PC)으로 내려받아 두는 것을 권합니다.
+**MySQL 백업** — `infra/scripts/backup-db.sh` 가 매일 04:10(KST, 크론은 UTC 19:10) 에 `mysqldump --single-transaction`(서비스 중단 없음)으로 `ddubi` 를 gzip 해 서버2 `~/backups/mysql/ddubi-<날짜>.sql.gz` 로 저장하고, 무결성 확인 뒤 7일 지난 파일을 지웁니다. 크론은 서버2 `ubuntu` 사용자에 등록되어 있고 결과는 같은 폴더의 `backup.log` 에 한 줄씩 남습니다. **2026-09-15 부터는 같은 스크립트가 백업 파일을 서버1 `~/backups/mysql-from-server2/` 에도 복사합니다**(배포용 키 사용, 서버1에서도 7일 보존). 그래서 서버2 디스크를 잃어도 전날 새벽까지의 백업은 서버1에 남습니다. 복사가 실패하면 로그 줄에 WARN 이 붙고 아침 브리핑이 "백업 확인 필요" 로 알립니다.
+
+**서버2 생존 감시** — 알림을 보내는 Grafana·Prometheus 와 브리핑이 모두 서버2에 있어서, 서버2가 통째로 죽으면 알림도 함께 죽어 아무도 모르는 구조였습니다. 2026-09-15 부터 서버1 크론이 5분마다 `infra/scripts/check-server2.sh` 로 서버2의 nginx, backend, Prometheus, Grafana 를 확인하고, 두 번 연속 실패하면 Mattermost 로 직접 "서버2 응답 없음" 을 보냅니다. 복구되면 "복구" 를 한 번 보냅니다. 기록은 서버1 `~/check-server2.log` 에 남습니다.
 
 **MySQL 복구 절차** (서버2)
 ```

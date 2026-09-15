@@ -389,7 +389,8 @@ def build(env):
         w("안정성", "재시작 있음")
 
     backup = last_backup()
-    if "OK" not in backup:
+    # 마지막 줄이 OK 가 아니면 백업이 실패한 것이고, OK 라도 WARN 이 붙어 있으면 서버1 로 사본을 못 보낸 것이다. 둘 다 알린다.
+    if "OK" not in backup or "WARN" in backup:
         w("운영", "백업 확인 필요")
     # 서버1의 네임노드 목차 백업(backup-namenode.sh, 매일 04:20) 결과를 본다. 서버1 조회 자체가 실패한 경우는 위에서 이미
     # 빨간불로 처리했으므로 여기서는 건너뛴다. 로그가 없거나 마지막 줄이 OK 가 아니면 "백업 확인 필요" 로, OK 라도 WARN 이 붙어 있으면

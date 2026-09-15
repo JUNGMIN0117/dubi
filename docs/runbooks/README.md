@@ -57,4 +57,9 @@ docker logs collector-weather --since 15m 2>&1 | grep "cycle ok"        # sent=1
 # 서버2
 docker ps -a --format "{{.Names}}\t{{.Status}}"
 curl -s -o /dev/null -w "%{http_code}\n" https://j15e202.p.ssafy.io/api/health   # 401 이면 backend 정상 (502·000 이면 비정상)
+
+# 서버1이 서버2를 지켜본 기록 (5분마다, 정상일 때는 줄이 안 남고 실패·복구만 남는다)
+tail -n 5 ~/check-server2.log; cat ~/.check-server2.last          # .last 가 10분 넘게 오래됐으면 감시 크론이 멈춘 것
 ```
+
+서버2가 통째로 죽으면 서버2에 있는 Grafana 알림도 함께 죽습니다. 그때는 서버1의 `check-server2.sh` 가 10분 안에 Mattermost 로 "서버2 응답 없음" 을 보내는 것이 유일한 알림입니다(2026-09-15 도입).

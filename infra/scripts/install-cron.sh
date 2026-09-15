@@ -22,6 +22,8 @@ case "$target" in
       "*/5 * * * * bash $REPO/infra/scripts/check-server2.sh >> $HOME_DIR/check-server2.log 2>&1"
       # HDFS 네임노드 메타데이터(목차) 일일 백업, 04:20 KST
       "20 19 * * * bash $REPO/infra/scripts/backup-namenode.sh >> $HOME_DIR/backups/hdfs-name/backup.log 2>&1"
+      # 도커 빌드 캐시·태그 없는 이미지 주간 정리, 일요일 04:40 KST (볼륨은 건드리지 않음)
+      "40 19 * * 6 bash $REPO/infra/scripts/docker-prune.sh >> $HOME_DIR/docker-prune.log 2>&1"
     )
     mkdir -p "$HOME_DIR/backups/hdfs-name"
     ;;
@@ -32,6 +34,8 @@ case "$target" in
       # 인프라 브리핑을 Mattermost 로, 09:30 과 17:00 KST
       "30 0 * * * python3 $REPO/infra/scripts/daily-brief.py >> $HOME_DIR/brief.log 2>&1"
       "0 8 * * * python3 $REPO/infra/scripts/daily-brief.py >> $HOME_DIR/brief.log 2>&1"
+      # 도커 빌드 캐시·태그 없는 이미지 주간 정리, 일요일 04:40 KST (볼륨은 건드리지 않음). 서버2는 backend·ml-serving 빌드로 캐시가 빨리 쌓인다
+      "40 19 * * 6 bash $REPO/infra/scripts/docker-prune.sh >> $HOME_DIR/docker-prune.log 2>&1"
     )
     mkdir -p "$HOME_DIR/backups/mysql"
     ;;

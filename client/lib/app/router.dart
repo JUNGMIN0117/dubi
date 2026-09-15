@@ -94,11 +94,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               ),
               GoRoute(
                 path: ':id',
-                builder: (context, state) => ScheduleDetailScreen(
-                  repository: scheduleRepository,
-                  scheduleId: state.pathParameters['id']!,
-                  arrivalApi: arrivalApi,
-                ),
+                builder: (context, state) {
+                  final arguments = state.extra is ScheduleDetailArguments
+                      ? state.extra! as ScheduleDetailArguments
+                      : null;
+                  return ScheduleDetailScreen(
+                    repository: scheduleRepository,
+                    routeRepository: repository,
+                    scheduleId: state.pathParameters['id']!,
+                    arrivalApi: arrivalApi,
+                    initialSchedule: arguments?.schedule,
+                    initialRoutes: arguments?.routes,
+                  );
+                },
               ),
             ],
           ),

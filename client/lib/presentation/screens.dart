@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../providers/app_providers.dart';
+
 import 'package:flutter/services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:go_router/go_router.dart';
@@ -40,6 +42,13 @@ RouteOption? _primaryRoute(List<RouteOption> routes) {
     (route) => route.kind == RouteKind.recommended,
     orElse: () => routes.first,
   );
+}
+
+class ScheduleDetailArguments {
+  const ScheduleDetailArguments({required this.schedule, required this.routes});
+
+  final Schedule schedule;
+  final List<RouteOption> routes;
 }
 
 class _RouteSearchHistory {
@@ -1216,20 +1225,31 @@ class HomeScreen extends StatelessWidget {
             if (!routeSnapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                final isWide =
-                    constraints.maxWidth >=
-                    LayoutConstants.wideScreenBreakpoint;
-                return isWide
-                    ? _WebHomeContent(
-                        routes: routeSnapshot.data!,
-                        summary: homeSnapshot.data!,
-                      )
-                    : _MobileHomeContent(
-                        routes: routeSnapshot.data!,
-                        summary: homeSnapshot.data!,
-                      );
+            return FutureBuilder<List<Schedule>>(
+              future: repository.schedules(),
+              builder: (context, scheduleSnapshot) {
+                if (scheduleSnapshot.hasError) {
+                  return const DataLoadError(message: '오늘 일정을 불러오지 못했어요.');
+                }
+                if (!scheduleSnapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide =
+                        constraints.maxWidth >=
+                        LayoutConstants.wideScreenBreakpoint;
+                    return isWide
+                        ? _WebHomeContent(
+                            routes: routeSnapshot.data!,
+                            summary: homeSnapshot.data!,
+                          )
+                        : _MobileHomeContent(
+                            schedules: scheduleSnapshot.data!,
+                            routes: routeSnapshot.data!,
+                          );
+                  },
+                );
               },
             );
           },
@@ -1240,165 +1260,270 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _MobileHomeContent extends StatelessWidget {
-  const _MobileHomeContent({required this.routes, required this.summary});
+  const _MobileHomeContent({required this.schedules, required this.routes});
 
+  final List<Schedule> schedules;
   final List<RouteOption> routes;
-  final HomeSummary summary;
 
   @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: const Color(0xFFF5FAF9),
-    child: ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      children: [
-        const Text(
-          '오늘도 안전한 이동 되세요',
-          style: TextStyle(fontSize: 14, color: Color(0xFF6D7C88)),
-        ),
-        const SizedBox(height: 16),
-        _HomeScheduleCard(
-          schedule: summary.nextSchedule,
-          previewRoutes: routes,
-        ),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.fromLTRB(8, 10, 16, 10),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFFE6F8F4), Color(0xFFF0FCF9)],
-            ),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: const Color(0xFFBDE9DF)),
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today =
+        schedules
+            .where(
+              (schedule) =>
+                  schedule.date.year == now.year &&
+                  schedule.date.month == now.month &&
+                  schedule.date.day == now.day,
+            )
+            .toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
+    return ColoredBox(
+      color: const Color(0xFFF7FBFA),
+      child: ListView(
+        key: const Key('todayScheduleList'),
+        padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
+        children: [
+          const Text(
+            '오늘도 안전한 이동 되세요!',
+            style: TextStyle(fontSize: 14, color: Color(0xFF718497)),
           ),
-          child: Row(
-            children: [
-              Image.asset(
-                'assets/images/ttubee/home-megaphone.png',
-                width: 105,
-                height: 100,
+          const SizedBox(height: 14),
+          Container(
+            height: 130,
+            padding: const EdgeInsets.fromLTRB(22, 16, 8, 0),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFCFF6FA), Color(0xFFE8FAE9)],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '뚜비가 알려드려요!',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: DdubiColors.navy,
-                      ),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '오늘도\n뚜비와 함께\n좋은 하루 되세요!',
+                    style: TextStyle(
+                      fontSize: 22,
+                      height: 1.35,
+                      fontWeight: FontWeight.w900,
+                      color: DdubiColors.navy,
                     ),
-                    const SizedBox(height: 7),
-                    Text(
-                      routes.isEmpty
-                          ? '목적지에 맞는 경로를 찾아보세요.'
-                          : '${_primaryRoute(routes)!.departure}에 출발하면 안전해요!',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: DdubiColors.navy,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      _primaryRoute(routes)?.margin ?? '일정을 등록하면 이동을 챙겨드려요.',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF617783),
-                      ),
-                    ),
-                  ],
+                  ),
+                ),
+                Image.asset(
+                  'assets/images/ttubee/welcome.png',
+                  width: 145,
+                  fit: BoxFit.contain,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.chevron_left_rounded, color: Color(0xFF52709B)),
+              const SizedBox(width: 14),
+              Text(
+                '${now.month}월 ${now.day}일 (${_weekdays[now.weekday - 1]})',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: DdubiColors.navy,
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFF52709B)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '오늘의 일정',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: DdubiColors.navy,
+                  ),
+                ),
+              ),
+              Text(
+                '${today.length}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  color: DdubiColors.green,
+                ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton.icon(
+                onPressed: () => context.push('/schedules/new', extra: now),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('일정 추가'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
                 ),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                '추천 경로',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: DdubiColors.navy,
+          const SizedBox(height: 10),
+          if (today.isEmpty)
+            const InfoCard(
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Text('오늘 등록된 일정이 없어요.'),
                 ),
               ),
-            ),
-            TextButton(
-              onPressed: () => context.go('/recommendations'),
-              child: const Text('경로 찾기 ›'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (routes.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('표시할 추천 경로가 없어요.'),
-          )
-        else
-          _HomeRouteTile(route: _primaryRoute(routes)!, index: 0),
-        const SizedBox(height: 14),
-        const Text(
-          '오늘의 이동 변수',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: DdubiColors.navy,
-          ),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          summary.dataState == 'UNKNOWN'
-              ? '실시간 정보가 아직 확인되지 않았어요'
-              : '데이터 상태 · ${summary.dataState}',
-          style: const TextStyle(fontSize: 12, color: Color(0xFF72818A)),
-        ),
-        const SizedBox(height: 12),
-        const Row(
-          children: [
-            Expanded(
-              child: _HomeVariable(
-                icon: Icons.wb_sunny_rounded,
-                label: '날씨',
-                tone: Color(0xFFEDF5FE),
+            )
+          else
+            for (var index = 0; index < today.length; index++) ...[
+              _TodayScheduleCard(
+                schedule: today[index],
+                routes: routes,
+                index: index,
               ),
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: _HomeVariable(
-                icon: Icons.groups_rounded,
-                label: '혼잡도',
-                tone: Color(0xFFE9F7F0),
-              ),
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: _HomeVariable(
-                icon: Icons.directions_car_rounded,
-                label: '도로 통제',
-                tone: Color(0xFFFFF1EE),
-              ),
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: _HomeVariable(
-                icon: Icons.directions_subway_rounded,
-                label: '지하철 지연',
-                tone: Color(0xFFEEF3FB),
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
+              const SizedBox(height: 10),
+            ],
+        ],
+      ),
+    );
+  }
 }
 
+class _TodayScheduleCard extends StatelessWidget {
+  const _TodayScheduleCard({
+    required this.schedule,
+    required this.routes,
+    required this.index,
+  });
+  final Schedule schedule;
+  final List<RouteOption> routes;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    const tones = [
+      Color(0xFF4D80E8),
+      Color(0xFFFFA626),
+      Color(0xFF8A72E8),
+      Color(0xFFFF639A),
+    ];
+    const icons = [
+      Icons.work_rounded,
+      Icons.restaurant_rounded,
+      Icons.menu_book_rounded,
+      Icons.fitness_center_rounded,
+    ];
+    final tone = tones[index % tones.length];
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: DdubiColors.green.withValues(alpha: .22)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: Key('todaySchedule-${schedule.id}'),
+        onTap: () => context.push(
+          '/schedules/${schedule.id}',
+          extra: ScheduleDetailArguments(schedule: schedule, routes: routes),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icons[index % icons.length], color: tone),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      schedule.time,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF1B43A6),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      schedule.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                        color: DdubiColors.navy,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.location_on,
+                          size: 14,
+                          color: Color(0xFF8391A8),
+                        ),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            schedule.place,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF718098),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F8F2),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Text(
+                  '예정',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: DdubiColors.green,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFF1D3F8E)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Retained for the desktop dashboard route cards.
+// ignore: unused_element
 class _HomePlayfulIcon extends StatelessWidget {
   const _HomePlayfulIcon({
     required this.icon,
@@ -1457,6 +1582,7 @@ class _HomePlayfulIcon extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _HomeVariable extends StatelessWidget {
   const _HomeVariable({
     required this.icon,
@@ -1500,6 +1626,7 @@ class _HomeVariable extends StatelessWidget {
   );
 }
 
+// ignore: unused_element
 class _HomeRouteTile extends StatelessWidget {
   const _HomeRouteTile({required this.route, required this.index});
   final RouteOption route;
@@ -1709,7 +1836,10 @@ class _WebHomeContent extends StatelessWidget {
         children: [
           Expanded(
             flex: 3,
-            child: _HomeScheduleCard(schedule: summary.nextSchedule),
+            child: _HomeScheduleCard(
+              schedule: summary.nextSchedule,
+              previewRoutes: routes,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -2606,12 +2736,12 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   late ScheduleImportance importance;
   TransportPreferenceChoice transport = TransportPreferenceChoice.balanced;
   late bool considerLastTrip;
-  late DateTime selectedDate;
+  late DateTime departureDate;
+  late DateTime arrivalDate;
+  late TimeOfDay departureTime;
+  late TimeOfDay arrivalTime;
   final formKey = GlobalKey<FormState>();
   late final TextEditingController title;
-  late final TextEditingController time;
-  late final TextEditingController departureTime;
-  late DateTime departureDate;
   PlaceLocation? origin;
   PlaceLocation? destination;
 
@@ -2619,13 +2749,23 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   void initState() {
     super.initState();
     final schedule = widget.schedule;
-    title = TextEditingController(text: schedule?.title ?? '잠실야구장');
-    time = TextEditingController(text: schedule?.time ?? '19:30');
-    final departure = schedule?.plannedDepartAt;
-    departureTime = TextEditingController(text: departure == null ? '' :
-        '${departure.hour.toString().padLeft(2, '0')}:${departure.minute.toString().padLeft(2, '0')}');
-    departureDate = departure ?? schedule?.date ?? widget.initialDate ?? DateTime.now();
-    selectedDate = schedule?.date ?? widget.initialDate ?? DateTime.now();
+    title = TextEditingController(text: schedule?.title ?? '');
+    final arriveBy =
+        schedule?.arriveBy ??
+        DateTime(
+          (widget.initialDate ?? DateTime.now()).year,
+          (widget.initialDate ?? DateTime.now()).month,
+          (widget.initialDate ?? DateTime.now()).day,
+          19,
+          30,
+        );
+    final departAt =
+        schedule?.plannedDepartAt ??
+        arriveBy.subtract(const Duration(hours: 1));
+    arrivalDate = arriveBy;
+    arrivalTime = TimeOfDay.fromDateTime(arriveBy);
+    departureDate = departAt;
+    departureTime = TimeOfDay.fromDateTime(departAt);
     origin = schedule?.origin;
     destination = schedule?.destination;
     importance = schedule?.importance ?? ScheduleImportance.high;
@@ -2637,121 +2777,295 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   @override
   void dispose() {
     title.dispose();
-    time.dispose();
-    departureTime.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext c) => AppPage(
-    title: widget.schedule == null ? '일정 등록' : '일정 수정',
-    child: Form(
-      key: formKey,
-      child: ListView(
-        padding: _pad,
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: const Color(0xFFF2FBF9),
+    appBar: AppBar(
+      backgroundColor: const Color(0xFFF2FBF9),
+      surfaceTintColor: Colors.transparent,
+      centerTitle: true,
+      leading: IconButton(
+        key: const Key('scheduleFormBackButton'),
+        tooltip: '뒤로가기',
+        onPressed: () => _leaveForm(context),
+        icon: const Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: DdubiColors.navy,
+          size: 22,
+        ),
+      ),
+      title: Text(widget.schedule == null ? '일정 등록' : '일정 수정'),
+    ),
+    body: SafeArea(
+      top: false,
+      child: Form(
+        key: formKey,
+        child: ListView(
+          key: const Key('scheduleFormScrollView'),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+          children: [
+            _hero(),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x12004F4A),
+                    blurRadius: 24,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _field('일정 제목', title, icon: Icons.edit_calendar_rounded),
+                  PlaceSearchField(
+                    key: const Key('originPlaceField'),
+                    label: '출발지',
+                    value: origin,
+                    searchService: widget.placeSearchService,
+                    onSelected: (value) => setState(() => origin = value),
+                  ),
+                  _dateTimeSection(
+                    label: '출발 예정 시간',
+                    icon: Icons.schedule_rounded,
+                    date: departureDate,
+                    time: departureTime,
+                    dateKey: const Key('scheduleDepartureDateButton'),
+                    timeKey: const Key('scheduleDepartureTimeButton'),
+                    onDatePressed: () => _pickDate(context, arrival: false),
+                    onTimePressed: () => _pickTime(context, arrival: false),
+                  ),
+                  const SizedBox(height: 15),
+                  PlaceSearchField(
+                    key: const Key('destinationPlaceField'),
+                    label: '도착지',
+                    value: destination,
+                    searchService: widget.placeSearchService,
+                    onSelected: (value) => setState(() => destination = value),
+                  ),
+                  _dateTimeSection(
+                    label: '도착 희망 시간',
+                    icon: Icons.flag_rounded,
+                    date: arrivalDate,
+                    time: arrivalTime,
+                    dateKey: const Key('scheduleDateButton'),
+                    timeKey: const Key('scheduleArrivalTimeButton'),
+                    onDatePressed: () => _pickDate(context, arrival: true),
+                    onTimePressed: () => _pickTime(context, arrival: true),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            _lastTripCard(),
+            const SizedBox(height: 12),
+            _infoCard(),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 56,
+              child: PrimaryButton(
+                widget.schedule == null ? '저장하기' : '수정 완료',
+                onPressed: _save,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _hero() => Container(
+    height: 210,
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        colors: [Color(0xFFE6FBF6), Color(0xFFD6F5F1)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      borderRadius: BorderRadius.circular(28),
+    ),
+    child: LayoutBuilder(
+      builder: (context, constraints) => Stack(
         children: [
-          _field('일정 제목', title),
-          PlaceSearchField(
-            key: const Key('destinationPlaceField'),
-            label: '도착지',
-            value: destination,
-            searchService: widget.placeSearchService,
-            onSelected: (value) => setState(() => destination = value),
+          const Positioned(
+            left: -22,
+            bottom: -32,
+            child: _ScheduleHeroBubble(size: 110),
           ),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _fullDate(selectedDate),
-                  style: Theme.of(c).textTheme.bodySmall,
+          const Positioned(
+            right: 78,
+            top: 18,
+            child: _ScheduleHeroBubble(size: 48),
+          ),
+          Positioned(
+            left: 20,
+            top: 24,
+            width: constraints.maxWidth * .59,
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '어디서 출발해서\n어디로 가시나요?',
+                  style: TextStyle(
+                    color: DdubiColors.navy,
+                    fontSize: 24,
+                    height: 1.25,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -.7,
+                  ),
                 ),
-              ),
-              OutlinedButton.icon(
-                key: const Key('scheduleDateButton'),
-                onPressed: () => _pickDate(c),
-                icon: const Icon(Icons.calendar_month_outlined),
-                label: const Text('날짜 변경'),
-              ),
-            ],
+                SizedBox(height: 12),
+                Text(
+                  '뚜비가 가장 좋은 출발 시간을\n찾도록 도와드릴게요!',
+                  style: TextStyle(
+                    color: Color(0xFF587086),
+                    fontSize: 13,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          _field('반드시 도착해야 하는 시간', time, icon: Icons.schedule),
-          _field('출발 예정시간', departureTime, icon: Icons.schedule),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('출발 날짜: ${_fullDate(departureDate)}'),
-            trailing: const Icon(Icons.calendar_month_outlined),
-            onTap: () async {
-              final value = await showDatePicker(context: c, initialDate: departureDate,
-                  firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                  lastDate: DateTime.now().add(const Duration(days: 365 * 2)));
-              if (value != null && mounted) setState(() => departureDate = value);
-            },
-          ),
-          PlaceSearchField(
-            key: const Key('originPlaceField'),
-            label: '출발지',
-            value: origin,
-            searchService: widget.placeSearchService,
-            onSelected: (value) => setState(() => origin = value),
-          ),
-          const Text('중요도', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          SegmentedButton<ScheduleImportance>(
-            segments: const [
-              ButtonSegment(
-                value: ScheduleImportance.normal,
-                label: Text('일반'),
-              ),
-              ButtonSegment(value: ScheduleImportance.high, label: Text('중요')),
-              ButtonSegment(
-                value: ScheduleImportance.critical,
-                label: Text('절대 지각 불가'),
-              ),
-            ],
-            selected: {importance},
-            onSelectionChanged: (v) => setState(() => importance = v.first),
-          ),
-          const SizedBox(height: 20),
-          const Text('교통수단 선호', style: TextStyle(fontWeight: FontWeight.w700)),
-          TransportPreferenceSelector(
-            value: transport,
-            onChanged: (value) => setState(() => transport = value),
-          ),
-          const SizedBox(height: 12),
-          SwitchListTile(
-            key: const Key('considerLastTripSwitch'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('막차 고려'),
-            subtitle: const Text('늦은 일정의 막차 위험을 함께 확인해요.'),
-            value: considerLastTrip,
-            onChanged: (value) => setState(() => considerLastTrip = value),
-          ),
-          const SizedBox(height: 10),
-          PrimaryButton(
-            widget.schedule == null ? '저장하기' : '수정 완료',
-            onPressed: _save,
+          Positioned(
+            right: -8,
+            bottom: -2,
+            width: constraints.maxWidth * .43,
+            height: 170,
+            child: Image.asset(
+              'assets/images/ttubee/intro-calendar-clock.png',
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+            ),
           ),
         ],
       ),
     ),
   );
 
+  Future<void> _leaveForm(BuildContext context) async {
+    FocusScope.of(context).unfocus();
+    if (await Navigator.of(context).maybePop()) return;
+    if (!context.mounted) return;
+    GoRouter.maybeOf(context)?.go('/schedules');
+  }
+
+  Widget _lastTripCard() => Container(
+    decoration: BoxDecoration(
+      color: const Color(0xFFE4F8F4),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFC2EEE5)),
+    ),
+    child: Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: SwitchListTile(
+        key: const Key('considerLastTripSwitch'),
+        contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 6),
+        secondary: const CircleAvatar(
+          radius: 22,
+          backgroundColor: DdubiColors.green,
+          child: Icon(Icons.directions_bus_rounded, color: Colors.white),
+        ),
+        title: const Text(
+          '막차 고려',
+          style: TextStyle(
+            color: DdubiColors.navy,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        subtitle: const Text(
+          '늦은 일정의 막차 위험을 함께 확인해요.',
+          style: TextStyle(color: Color(0xFF60778A), fontSize: 12),
+        ),
+        value: considerLastTrip,
+        onChanged: (value) => setState(() => considerLastTrip = value),
+      ),
+    ),
+  );
+
+  Widget _infoCard() => Container(
+    height: 104,
+    clipBehavior: Clip.antiAlias,
+    padding: const EdgeInsets.fromLTRB(16, 14, 2, 12),
+    decoration: BoxDecoration(
+      color: const Color(0xFFECFAF7),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFCBEFE8)),
+    ),
+    child: Row(
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFEAA0),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.lightbulb_rounded,
+            color: Color(0xFFFFB800),
+            size: 24,
+          ),
+        ),
+        const SizedBox(width: 11),
+        const Expanded(
+          child: Text(
+            '도착 희망 시간까지 갈 수 있도록\n교통 상황을 고려해 최적의\n출발 시간을 추천해드려요!',
+            style: TextStyle(
+              color: DdubiColors.navy,
+              fontSize: 12,
+              height: 1.45,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 78,
+          height: 88,
+          child: Image.asset(
+            'assets/images/ttubee/welcome.png',
+            fit: BoxFit.contain,
+            alignment: Alignment.bottomCenter,
+            filterQuality: FilterQuality.high,
+          ),
+        ),
+      ],
+    ),
+  );
+
   Future<void> _save() async {
     if (!(formKey.currentState?.validate() ?? false)) return;
     if (origin == null || destination == null) return;
-    final date = selectedDate;
-    final parts = time.text.trim().split(':');
-    final departureParts = departureTime.text.trim().split(':');
-    final plannedDeparture = DateTime(departureDate.year, departureDate.month, departureDate.day,
-        int.parse(departureParts.first), int.parse(departureParts.last));
-    final arriveBy = DateTime(
-      date.year,
-      date.month,
-      date.day,
-      int.parse(parts.first),
-      int.parse(parts.last),
+    final plannedDeparture = DateTime(
+      departureDate.year,
+      departureDate.month,
+      departureDate.day,
+      departureTime.hour,
+      departureTime.minute,
     );
+    final arriveBy = DateTime(
+      arrivalDate.year,
+      arrivalDate.month,
+      arrivalDate.day,
+      arrivalTime.hour,
+      arrivalTime.minute,
+    );
+    if (!plannedDeparture.isBefore(arriveBy)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('출발시각은 도착시각보다 앞서야 합니다.')));
+      return;
+    }
     final schedule = Schedule(
       id:
           widget.schedule?.id ??
@@ -2767,10 +3081,6 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       repeatLabel: widget.schedule?.repeatLabel,
       updatedAt: widget.schedule?.updatedAt,
     );
-    if (!plannedDeparture.isBefore(arriveBy)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('출발시각은 도착시각보다 앞서야 합니다.')));
-      return;
-    }
     try {
       if (widget.schedule == null) {
         await widget.repository.addSchedule(schedule);
@@ -2797,14 +3107,37 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     }
   }
 
-  Future<void> _pickDate(BuildContext context) async {
+  Future<void> _pickDate(BuildContext context, {required bool arrival}) async {
+    final initialDate = arrival ? arrivalDate : departureDate;
     final selected = await showDatePicker(
       context: context,
-      initialDate: selectedDate,
+      initialDate: initialDate,
       firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
     );
-    if (selected != null && mounted) setState(() => selectedDate = selected);
+    if (selected == null || !mounted) return;
+    setState(() {
+      if (arrival) {
+        arrivalDate = selected;
+      } else {
+        departureDate = selected;
+      }
+    });
+  }
+
+  Future<void> _pickTime(BuildContext context, {required bool arrival}) async {
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: arrival ? arrivalTime : departureTime,
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      if (arrival) {
+        arrivalTime = selected;
+      } else {
+        departureTime = selected;
+      }
+    });
   }
 
   Widget _field(
@@ -2826,17 +3159,147 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
           validator: (value) {
             final text = (value ?? '').trim();
             if (text.isEmpty) return '필수 입력 항목입니다.';
-            if ((controller == time || controller == departureTime) &&
-                !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(text)) {
-              return '시간을 HH:mm 형식으로 입력해주세요.';
-            }
             return null;
           },
           decoration: InputDecoration(
-            suffixIcon: icon == null ? null : Icon(icon),
+            filled: true,
+            fillColor: const Color(0xFFFAFCFD),
+            prefixIcon: icon == null
+                ? null
+                : Icon(icon, color: DdubiColors.green),
+            suffixIcon: controller.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: '입력값 지우기',
+                    onPressed: () => setState(controller.clear),
+                    icon: const Icon(Icons.cancel_rounded, size: 20),
+                  ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Color(0xFFD7E4E8)),
+            ),
           ),
         ),
       ],
+    ),
+  );
+
+  Widget _dateTimeSection({
+    required String label,
+    required IconData icon,
+    required DateTime date,
+    required TimeOfDay time,
+    required Key dateKey,
+    required Key timeKey,
+    required VoidCallback onDatePressed,
+    required VoidCallback onTimePressed,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Icon(icon, color: DdubiColors.green, size: 20),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: const TextStyle(
+              color: DdubiColors.navy,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            flex: 6,
+            child: _dateTimeButton(
+              key: dateKey,
+              icon: Icons.calendar_month_rounded,
+              text: _scheduleDateLabel(date),
+              onPressed: onDatePressed,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: _dateTimeButton(
+              key: timeKey,
+              icon: Icons.access_time_filled_rounded,
+              text: _scheduleTimeLabel(time),
+              onPressed: onTimePressed,
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _dateTimeButton({
+    required Key key,
+    required IconData icon,
+    required String text,
+    required VoidCallback onPressed,
+  }) => InkWell(
+    key: key,
+    borderRadius: BorderRadius.circular(14),
+    onTap: onPressed,
+    child: Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 11),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAFCFD),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD7E4E8)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF365976), size: 20),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: DdubiColors.navy,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+        ],
+      ),
+    ),
+  );
+
+  String _scheduleDateLabel(DateTime date) {
+    const weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+    return '${date.year}.${date.month}.${date.day} (${weekdays[date.weekday - 1]})';
+  }
+
+  String _scheduleTimeLabel(TimeOfDay time) {
+    final period = time.hour < 12 ? '오전' : '오후';
+    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
+    return '$period $hour:${time.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _ScheduleHeroBubble extends StatelessWidget {
+  const _ScheduleHeroBubble({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: .38),
+      shape: BoxShape.circle,
     ),
   );
 }
@@ -2845,16 +3308,22 @@ class ScheduleDetailScreen extends StatelessWidget {
   const ScheduleDetailScreen({
     super.key,
     required this.repository,
+    required this.routeRepository,
     required this.scheduleId,
     required this.arrivalApi,
+    this.initialSchedule,
+    this.initialRoutes,
   });
   final ScheduleRepository repository;
+  final DdubiRepository routeRepository;
   final String scheduleId;
   final ArrivalApi arrivalApi;
+  final Schedule? initialSchedule;
+  final List<RouteOption>? initialRoutes;
 
   @override
   Widget build(BuildContext c) => FutureBuilder<Schedule?>(
-    future: repository.scheduleById(scheduleId),
+    future: _loadSchedule(),
     builder: (context, snapshot) {
       if (snapshot.hasError) {
         return const AppPage(
@@ -2875,122 +3344,323 @@ class ScheduleDetailScreen extends StatelessWidget {
           child: DataLoadError(message: '해당 일정을 찾을 수 없어요.'),
         );
       }
-      return _content(context, schedule);
+      return FutureBuilder<List<RouteOption>>(
+        future: initialRoutes == null
+            ? routeRepository.routes()
+            : Future.value(initialRoutes),
+        builder: (context, routeSnapshot) {
+          if (routeSnapshot.hasError) {
+            return const AppPage(
+              title: '일정 상세',
+              child: DataLoadError(message: '추천 경로를 불러오지 못했어요.'),
+            );
+          }
+          if (!routeSnapshot.hasData) {
+            return const AppPage(
+              title: '일정 상세',
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return _content(context, schedule, routeSnapshot.data!);
+        },
+      );
     },
   );
 
-  Widget _content(BuildContext c, Schedule schedule) => AppPage(
-    title: '일정 상세',
-    child: ListView(
-      padding: _pad,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: DdubiColors.blue,
-            borderRadius: BorderRadius.circular(14),
+  Future<Schedule?> _loadSchedule() async {
+    if (initialSchedule != null) return initialSchedule;
+    try {
+      return await repository.scheduleById(scheduleId);
+    } on Object {
+      final schedules = await repository.schedules();
+      for (final schedule in schedules) {
+        if (schedule.id == scheduleId) return schedule;
+      }
+      return null;
+    }
+  }
+
+  Widget _content(BuildContext c, Schedule schedule, List<RouteOption> routes) {
+    final route = _primaryRoute(routes);
+    return AppPage(
+      title: '일정 상세',
+      child: ListView(
+        key: const Key('scheduleRouteOverview'),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFD5E6FA)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 58,
+                  height: 58,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE9F1FF),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.work_rounded,
+                    color: Color(0xFF3C73DD),
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        schedule.title,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                          color: DdubiColors.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '${_fullDate(schedule.date)}  ${schedule.time}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF415A89),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 16,
+                            color: Color(0xFF516A98),
+                          ),
+                          const SizedBox(width: 3),
+                          Expanded(
+                            child: Text(
+                              schedule.place,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF516A98),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _fullDate(schedule.date),
-                style: const TextStyle(color: Colors.white, fontSize: 12),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.fromLTRB(8, 10, 16, 10),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFE1FAF5), Color(0xFFF1FBE8)],
               ),
-              const SizedBox(height: 8),
-              Text(
-                '${schedule.time} ${schedule.title}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
+              borderRadius: BorderRadius.circular(19),
+              border: Border.all(color: const Color(0xFFC7EEDC)),
+            ),
+            child: Row(
+              children: [
+                Image.asset(
+                  'assets/images/ttubee/running.png',
+                  width: 104,
+                  height: 92,
+                  fit: BoxFit.contain,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Text(
+                          '이 일정에 맞춰',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF35528A),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        route == null
+                            ? '추천 출발 시간을 확인 중이에요.'
+                            : '${route.departure}에 출발하는 것을\n추천해요!',
+                        style: const TextStyle(
+                          fontSize: 19,
+                          height: 1.28,
+                          fontWeight: FontWeight.w900,
+                          color: DdubiColors.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '실시간 이동 상황을 반영했어요.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF68808B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '뚜비 최종 추천 경로',
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                    color: DdubiColors.navy,
+                  ),
                 ),
               ),
-              Text(
-                schedule.place,
-                style: const TextStyle(color: Colors.white70),
-              ),
+              if (route != null)
+                TextButton(
+                  key: const Key('routeDetailButton'),
+                  onPressed: () => _open(
+                    c,
+                    RouteMapScreen(
+                      repository: routeRepository,
+                      selectedRoute: route,
+                      departureLabel: schedule.departurePlace,
+                      destinationLabel: schedule.place,
+                    ),
+                  ),
+                  child: const Text('상세보기 〉'),
+                ),
             ],
           ),
-        ),
-        const SizedBox(height: 14),
-        if (repository is ScheduleEvaluationRepository)
-          ScheduleEvaluationCard(repository: repository as ScheduleEvaluationRepository, scheduleId: schedule.id)
-        else
-          const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          key: const Key('editScheduleButton'),
-          onPressed: () async {
-            final changed = await c.push<bool>(
-              '/schedules/${schedule.id}/edit',
-            );
-            if (changed == true && c.mounted) {
-              c.go('/schedules/${schedule.id}');
-            }
-          },
-          icon: const Icon(Icons.edit_outlined),
-          label: const Text('일정 수정'),
-        ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          key: const Key('completeScheduleButton'),
-          onPressed: () => _recordArrival(c, schedule),
-          icon: const Icon(Icons.check_circle_outline),
-          label: const Text('도착 완료'),
-        ),
-        const SizedBox(height: 8),
-        TextButton.icon(
-          key: const Key('cancelScheduleButton'),
-          onPressed: () => _confirmCancel(c, schedule),
-          icon: const Icon(Icons.delete_outline, color: DdubiColors.red),
-          label: const Text('일정 취소', style: TextStyle(color: DdubiColors.red)),
-        ),
-        const SizedBox(height: 18),
-        const SectionHeader('한눈에 보기'),
-        const SizedBox(height: 8),
-        const Row(
-          children: [
-            Expanded(
-              child: InfoCard(
-                child: Column(
-                  children: [
-                    Icon(Icons.sunny, color: Colors.orange),
-                    Text('날씨'),
-                    Text('맑음 22℃'),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: InfoCard(
-                child: Column(
-                  children: [
-                    Icon(Icons.groups_outlined),
-                    Text('행사/이벤트'),
-                    Text('대규모 행사 없음'),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: InfoCard(
-                child: Column(
-                  children: [
-                    Icon(Icons.check_circle_outline, color: DdubiColors.green),
-                    Text('교통 상황'),
-                    Text('지금은 정상'),
-                  ],
-                ),
+          if (route == null)
+            const InfoCard(child: Text('표시할 추천 경로가 없어요.'))
+          else ...[
+            _FinalRouteSummary(route: route),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 190,
+              child: _CompactRoutePreview(
+                departure: schedule.departurePlace,
+                destination: schedule.place,
               ),
             ),
           ],
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 16),
+          const Text(
+            '오늘의 이동 변수',
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w900,
+              color: DdubiColors.navy,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Row(
+            children: [
+              Expanded(
+                child: _RouteVariable(
+                  icon: Icons.wb_sunny_rounded,
+                  label: '날씨',
+                  value: '맑음',
+                  color: Color(0xFFFFB323),
+                ),
+              ),
+              SizedBox(width: 7),
+              Expanded(
+                child: _RouteVariable(
+                  icon: Icons.groups_rounded,
+                  label: '혼잡도',
+                  value: '보통',
+                  color: Color(0xFF4D80E8),
+                ),
+              ),
+              SizedBox(width: 7),
+              Expanded(
+                child: _RouteVariable(
+                  icon: Icons.directions_car_rounded,
+                  label: '도로 통제',
+                  value: '없음',
+                  color: Color(0xFF00A873),
+                ),
+              ),
+              SizedBox(width: 7),
+              Expanded(
+                child: _RouteVariable(
+                  icon: Icons.directions_subway_rounded,
+                  label: '지하철 지연',
+                  value: '없음',
+                  color: Color(0xFF00A873),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (repository is ScheduleEvaluationRepository)
+            ScheduleEvaluationCard(
+              repository: repository as ScheduleEvaluationRepository,
+              scheduleId: schedule.id,
+            )
+          else
+            const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            key: const Key('editScheduleButton'),
+            onPressed: () async {
+              final changed = await c.push<bool>(
+                '/schedules/${schedule.id}/edit',
+              );
+              if (changed == true && c.mounted) {
+                c.go('/schedules/${schedule.id}');
+              }
+            },
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('일정 수정'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            key: const Key('completeScheduleButton'),
+            onPressed: () => _recordArrival(c, schedule),
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('도착 완료'),
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            key: const Key('cancelScheduleButton'),
+            onPressed: () => _confirmCancel(c, schedule),
+            icon: const Icon(Icons.delete_outline, color: DdubiColors.red),
+            label: const Text(
+              '일정 취소',
+              style: TextStyle(color: DdubiColors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _confirmCancel(BuildContext context, Schedule schedule) async {
     final confirmed = await showDialog<bool>(
@@ -3053,6 +3723,147 @@ class ScheduleDetailScreen extends StatelessWidget {
           .showSnackBar(const SnackBar(content: Text('도착 기록을 저장하지 못했어요.')));
     }
   }
+}
+
+class _FinalRouteSummary extends StatelessWidget {
+  const _FinalRouteSummary({required this.route});
+  final RouteOption route;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 13),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: const Color(0xFFBDE9DF)),
+    ),
+    child: Row(
+      children: [
+        _metric(Icons.schedule_rounded, '예상 이동 시간', route.detail),
+        _divider(),
+        _metric(Icons.payments_outlined, '예상 요금', route.fare),
+        _divider(),
+        _metric(Icons.eco_rounded, '주요 변동 요소', route.margin),
+      ],
+    ),
+  );
+
+  Widget _metric(IconData icon, String label, String value) => Expanded(
+    child: Column(
+      children: [
+        Icon(icon, size: 23, color: DdubiColors.green),
+        const SizedBox(height: 5),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 10, color: Color(0xFF62758A)),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            color: DdubiColors.navy,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _divider() =>
+      Container(width: 1, height: 50, color: const Color(0xFFE4ECEF));
+}
+
+class _CompactRoutePreview extends StatelessWidget {
+  const _CompactRoutePreview({
+    required this.departure,
+    required this.destination,
+  });
+  final String departure;
+  final String destination;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(18),
+    child: Stack(
+      children: [
+        const Positioned.fill(child: ColoredBox(color: Color(0xFFE9F3EC))),
+        const Positioned.fill(
+          child: CustomPaint(
+            painter: _MapPainter(selectedKind: RouteKind.recommended),
+          ),
+        ),
+        Positioned(
+          left: 12,
+          bottom: 12,
+          child: _MapMarker(
+            label: '출발 · $departure',
+            icon: Icons.trip_origin,
+            tone: DdubiColors.green,
+          ),
+        ),
+        Positioned(
+          right: 12,
+          top: 12,
+          child: _MapMarker(
+            label: '도착 · $destination',
+            icon: Icons.location_on,
+            tone: DdubiColors.red,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _RouteVariable extends StatelessWidget {
+  const _RouteVariable({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 3),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: .09),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Column(
+      children: [
+        Icon(icon, size: 23, color: color),
+        const SizedBox(height: 5),
+        Text(
+          label,
+          maxLines: 1,
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF617083),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            color: DdubiColors.navy,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class ScheduleEditScreen extends StatelessWidget {
@@ -3505,11 +4316,17 @@ class RouteMapScreen extends StatefulWidget {
     required this.repository,
     this.selectedRoute,
     this.condition,
+    this.departureLabel,
+    this.destinationLabel,
+    this.initialRouteDeviation = false,
   });
 
   final DdubiRepository repository;
   final RouteOption? selectedRoute;
   final RouteSearchCondition? condition;
+  final String? departureLabel;
+  final String? destinationLabel;
+  final bool initialRouteDeviation;
 
   @override
   State<RouteMapScreen> createState() => _RouteMapScreenState();
@@ -3518,11 +4335,13 @@ class RouteMapScreen extends StatefulWidget {
 class _RouteMapScreenState extends State<RouteMapScreen> {
   late final Future<List<RouteOption>> _routes;
   late RouteKind _selectedKind;
+  late bool _showDeviationBanner;
 
   @override
   void initState() {
     super.initState();
     _selectedKind = widget.selectedRoute?.kind ?? RouteKind.recommended;
+    _showDeviationBanner = widget.initialRouteDeviation;
     _routes = widget.selectedRoute != null
         ? Future.value([widget.selectedRoute!])
         : widget.repository.routes(condition: widget.condition).then((routes) {
@@ -3533,7 +4352,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
 
   @override
   Widget build(BuildContext context) => AppPage(
-    title: '전체 지도',
+    title: '경로 상세',
     webTitle: '경로 지도',
     webSubtitle: '추천 경로와 이동 단계, 현재 위치를 한 화면에서 확인하세요.',
     child: FutureBuilder<List<RouteOption>>(
@@ -3559,18 +4378,31 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             final map = _RouteMapView(
               routes: routes,
               selectedKind: selected.kind,
-              departureLabel: widget.condition?.departurePlace ?? '역삼역 입구',
-              destinationLabel: widget.condition?.destinationPlace ?? '잠실야구장',
+              departureLabel:
+                  widget.departureLabel ??
+                  widget.condition?.departurePlace ??
+                  '출발지',
+              destinationLabel:
+                  widget.destinationLabel ??
+                  widget.condition?.destinationPlace ??
+                  '도착지',
               onSelected: (kind) => setState(() => _selectedKind = kind),
+              showRouteSelector: false,
             );
             final detail = _RouteMapDetail(
               route: selected,
               repository: widget.repository,
-              departureLabel: widget.condition?.departurePlace ?? '역삼역 입구',
-              destinationLabel: widget.condition?.destinationPlace ?? '잠실야구장',
+              departureLabel:
+                  widget.departureLabel ??
+                  widget.condition?.departurePlace ??
+                  '출발지',
+              destinationLabel:
+                  widget.destinationLabel ??
+                  widget.condition?.destinationPlace ??
+                  '도착지',
             );
             if (isWide) {
-              return Padding(
+              final layout = Padding(
                 key: const Key('webRouteMapLayout'),
                 padding: const EdgeInsets.all(16),
                 child: Row(
@@ -3584,11 +4416,26 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                   ],
                 ),
               );
+              return Column(
+                children: [
+                  if (_showDeviationBanner)
+                    _RouteDeviationBanner(
+                      onDismiss: () =>
+                          setState(() => _showDeviationBanner = false),
+                    ),
+                  Expanded(child: layout),
+                ],
+              );
             }
             return Column(
               key: const Key('mobileRouteMapLayout'),
               children: [
-                Expanded(flex: 5, child: map),
+                if (_showDeviationBanner)
+                  _RouteDeviationBanner(
+                    onDismiss: () =>
+                        setState(() => _showDeviationBanner = false),
+                  ),
+                Expanded(flex: 6, child: map),
                 Flexible(
                   flex: 4,
                   child: SingleChildScrollView(
@@ -3612,6 +4459,7 @@ class _RouteMapView extends StatefulWidget {
     required this.departureLabel,
     required this.destinationLabel,
     required this.onSelected,
+    this.showRouteSelector = true,
   });
 
   final List<RouteOption> routes;
@@ -3619,6 +4467,7 @@ class _RouteMapView extends StatefulWidget {
   final String departureLabel;
   final String destinationLabel;
   final ValueChanged<RouteKind> onSelected;
+  final bool showRouteSelector;
 
   @override
   State<_RouteMapView> createState() => _RouteMapViewState();
@@ -3728,35 +4577,36 @@ class _RouteMapViewState extends State<_RouteMapView> {
                     ),
                   ),
           ),
-          Positioned(
-            left: 12,
-            right: 12,
-            top: 12,
-            child: Material(
-              color: Colors.white.withValues(alpha: .94),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: widget.routes
-                      .map(
-                        (route) => ChoiceChip(
-                          label: Text(route.label),
-                          selected: route.kind == widget.selectedKind,
-                          avatar: CircleAvatar(
-                            backgroundColor: _routeTone(route.kind),
-                            radius: 5,
+          if (widget.showRouteSelector)
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 12,
+              child: Material(
+                color: Colors.white.withValues(alpha: .94),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: widget.routes
+                        .map(
+                          (route) => ChoiceChip(
+                            label: Text(route.label),
+                            selected: route.kind == widget.selectedKind,
+                            avatar: CircleAvatar(
+                              backgroundColor: _routeTone(route.kind),
+                              radius: 5,
+                            ),
+                            onSelected: (_) => _handleRouteSelected(route.kind),
                           ),
-                          onSelected: (_) => _handleRouteSelected(route.kind),
-                        ),
-                      )
-                      .toList(),
+                        )
+                        .toList(),
+                  ),
                 ),
               ),
             ),
-          ),
           if (!KakaoMapConfig.isReady) ...[
             Positioned(
               key: const Key('mapCurrentMarker'),
@@ -3909,32 +4759,13 @@ class _RouteMapDetail extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        StatusBadge(
-          route.label,
-          tone: _routeTone(route.kind),
-          icon: Icons.route_outlined,
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          runSpacing: 8,
+        Row(
           children: [
-            Text(
-              '${route.departure} 출발',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const Icon(Icons.arrow_forward, size: 18),
-            Text(
-              '${route.arrival} 도착',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            Text(
-              route.margin,
-              style: const TextStyle(
-                color: DdubiColors.green,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+            Expanded(child: _liveMetric('도착까지', route.detail)),
+            Container(width: 1, height: 40, color: const Color(0xFFE0E8EE)),
+            Expanded(child: _liveMetric('남은 거리', '약 6.2km')),
+            Container(width: 1, height: 40, color: const Color(0xFFE0E8EE)),
+            Expanded(child: _liveMetric('도착 예정', route.arrival)),
           ],
         ),
         const Divider(height: 25),
@@ -3963,6 +4794,77 @@ class _RouteMapDetail extends StatelessWidget {
             context,
             MovingScreen(repository: repository, route: route),
           ),
+        ),
+      ],
+    ),
+  );
+
+  static Widget _liveMetric(String label, String value) => Column(
+    children: [
+      Text(
+        label,
+        style: const TextStyle(fontSize: 11, color: Color(0xFF62758A)),
+      ),
+      const SizedBox(height: 3),
+      Text(
+        value,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w900,
+          color: DdubiColors.navy,
+        ),
+      ),
+    ],
+  );
+}
+
+class _RouteDeviationBanner extends StatelessWidget {
+  const _RouteDeviationBanner({required this.onDismiss});
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('routeDeviationBanner'),
+    margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+    padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFECEE),
+      borderRadius: BorderRadius.circular(15),
+      border: Border.all(color: const Color(0xFFFFB8BD)),
+    ),
+    child: Row(
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFF5964),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.priority_high_rounded,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Text(
+            '추천 경로에서 벗어났어요.\n현재 위치를 확인해 주세요.',
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.35,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF9D2731),
+            ),
+          ),
+        ),
+        IconButton(
+          key: const Key('dismissRouteDeviationBanner'),
+          onPressed: onDismiss,
+          icon: const Icon(Icons.close_rounded, color: Color(0xFF9D2731)),
         ),
       ],
     ),
@@ -4006,9 +4908,6 @@ class _MapPainter extends CustomPainter {
       );
     canvas.drawPath(basePath, road);
 
-    for (final kind in RouteKind.values.where((kind) => kind != selectedKind)) {
-      _drawRoute(canvas, size, kind, selected: false);
-    }
     _drawRoute(canvas, size, selectedKind, selected: true);
   }
 
@@ -4083,24 +4982,41 @@ class _DelayAlertScreenState extends ConsumerState<DelayAlertScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return Center(child: TextButton(
-              onPressed: () => setState(() => _schedules = repository.schedules()),
-              child: const Text('일정을 불러오지 못했습니다. 다시 시도'),
-            ));
+            return Center(
+              child: TextButton(
+                onPressed: () =>
+                    setState(() => _schedules = repository.schedules()),
+                child: const Text('일정을 불러오지 못했습니다. 다시 시도'),
+              ),
+            );
           }
           if (repository is! ScheduleEvaluationRepository) {
-            return const Center(child: Text('실제 교통 상황은 일정 API 연결 후 확인할 수 있습니다.'));
+            return const Center(
+              child: Text('실제 교통 상황은 일정 API 연결 후 확인할 수 있습니다.'),
+            );
           }
           final schedules = snapshot.data ?? <Schedule>[];
-          if (schedules.isEmpty) return const Center(child: Text('등록된 일정이 없습니다.'));
-          return ListView(padding: _pad, children: [
-            const Text('각 일정의 최신 평가와 데이터 부족 사유를 확인하세요.'),
-            for (final schedule in schedules) ...[
-              const SizedBox(height: 16),
-              Text(schedule.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              ScheduleEvaluationCard(key: ValueKey(schedule.id), repository: repository as ScheduleEvaluationRepository, scheduleId: schedule.id),
+          if (schedules.isEmpty) {
+            return const Center(child: Text('등록된 일정이 없습니다.'));
+          }
+          return ListView(
+            padding: _pad,
+            children: [
+              const Text('각 일정의 최신 평가와 데이터 부족 사유를 확인하세요.'),
+              for (final schedule in schedules) ...[
+                const SizedBox(height: 16),
+                Text(
+                  schedule.title,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                ScheduleEvaluationCard(
+                  key: ValueKey(schedule.id),
+                  repository: repository as ScheduleEvaluationRepository,
+                  scheduleId: schedule.id,
+                ),
+              ],
             ],
-          ]);
+          );
         },
       ),
     );
@@ -6267,7 +7183,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.cloud_off_outlined, color: Color(0xFFFF6B35), size: 20),
+                  Icon(
+                    Icons.cloud_off_outlined,
+                    color: Color(0xFFFF6B35),
+                    size: 20,
+                  ),
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -6284,7 +7204,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 7),
               const Text(
                 '등록한 일정의 평가 결과와 정보 갱신 시각을 확인할 수 있어요.',
-                style: TextStyle(color: Color(0xFF64708B), fontSize: 12, height: 1.4),
+                style: TextStyle(
+                  color: Color(0xFF64708B),
+                  fontSize: 12,
+                  height: 1.4,
+                ),
               ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -6300,7 +7224,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 iconAlignment: IconAlignment.end,
                 icon: const Icon(Icons.chevron_right_rounded, size: 19),
-                label: const Text('상세 확인', style: TextStyle(fontWeight: FontWeight.w800)),
+                label: const Text(
+                  '상세 확인',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
               ),
             ],
           ),
@@ -6533,10 +7460,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Align(
           alignment: Alignment.centerRight,
           child: OutlinedButton(
-            onPressed: () => _open(
-              context,
-              DelayAlertScreen(repository: widget.repository),
-            ),
+            onPressed: () =>
+                _open(context, DelayAlertScreen(repository: widget.repository)),
             child: const Text('상세 확인'),
           ),
         ),

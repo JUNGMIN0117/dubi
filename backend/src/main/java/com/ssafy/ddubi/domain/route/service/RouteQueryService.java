@@ -1,7 +1,9 @@
 package com.ssafy.ddubi.domain.route.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.ssafy.ddubi.domain.route.dto.response.RouteDetailResponse;
 import com.ssafy.ddubi.domain.route.dto.response.RouteMapResponse;
 import com.ssafy.ddubi.domain.route.dto.response.RouteSummaryResponse;
@@ -37,14 +39,15 @@ public class RouteQueryService {
 
     private final SavedRouteRepository savedRouteRepository;
     private final ScheduleRepository scheduleRepository;
-    private final ObjectMapper objectMapper;
+    private final ObjectReader coordinateReader;
 
     public RouteQueryService(SavedRouteRepository savedRouteRepository,
                              ScheduleRepository scheduleRepository,
                              ObjectMapper objectMapper) {
         this.savedRouteRepository = savedRouteRepository;
         this.scheduleRepository = scheduleRepository;
-        this.objectMapper = objectMapper;
+        this.coordinateReader = objectMapper.readerFor(COORDINATES)
+                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     }
 
     /**
@@ -95,16 +98,39 @@ public class RouteQueryService {
      * <p>읽지 못하면 <b>빈 목록</b>이고 조회는 성공한다. 좌표는 지도를 그리는 부가 정보라,
      * 한 구간이 깨졌다고 경로 안내 전체를 500 으로 막을 이유가 없다. 대신 로그를 남긴다 —
      * 조용히 비면 "왜 선이 안 그려지지" 를 추적할 수 없다.
+     *
+     * <h3>모르는 필드에 엄격하게 읽는다</h3>
+     * 이 프로젝트의 기본 ObjectMapper 는 모르는 필드를 무시한다(Spring Boot 기본값). 그대로
+     * 쓰면 <b>모양이 다른 JSON 이 예외 없이 통과</b>한다 — {@code [{"x":1,"y":2}]} 는
+     * longitude/latitude 가 없으니 {@code (0.0, 0.0)} 짜리 좌표가 되고, 지도는 기니만
+     * 앞바다로 선을 긋는다. 못 읽는 편이 틀린 좌표보다 낫다.
      */
     private List<Coordinate> coordinates(SavedRouteSegment segment) {
         if (segment.getGeometry() == null || segment.getGeometry().isBlank()) {
             return List.of();
         }
         try {
-            return objectMapper.readValue(segment.getGeometry(), COORDINATES);
+            List<Coordinate> parsed = coordinateReader.readValue(segment.getGeometry());
+            if (parsed.stream().anyMatch(RouteQueryService::implausible)) {
+                log.warn("구간 좌표가 지구 밖입니다 routeSegmentId={}", segment.getId());
+                return List.of();
+            }
+            return parsed;
         } catch (Exception unreadable) {
             log.warn("구간 좌표를 읽지 못했습니다 routeSegmentId={}", segment.getId(), unreadable);
             return List.of();
         }
+    }
+
+    /**
+     * WGS84 범위를 벗어났거나 정확히 (0, 0) 인가.
+     *
+     * <p>(0,0) 을 막는 이유: 좌표 자체로는 유효하지만 대한민국 대중교통 구간에는 나올 수 없고,
+     * 필드 이름이 어긋나 기본값 0 이 채워졌을 때 나오는 값이다. 한 점만 섞여도 bounds 가
+     * 지구 반대편까지 늘어나 지도 전체가 못 쓰게 된다.
+     */
+    private static boolean implausible(Coordinate point) {
+        return Math.abs(point.latitude()) > 90 || Math.abs(point.longitude()) > 180
+                || (point.latitude() == 0 && point.longitude() == 0);
     }
 }

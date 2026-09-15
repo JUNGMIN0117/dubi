@@ -174,6 +174,56 @@ class RouteQueryApiTest extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.data.segments[0].coordinates").isEmpty());
     }
 
+    /**
+     * 좌표가 깨져 있어도 조회는 성공해야 한다. 좌표는 지도를 그리는 부가 정보라, 한 구간이
+     * 깨졌다고 경로 안내 전체를 막을 이유가 없다.
+     *
+     * <p>넣는 값이 "깨진 JSON" 이 아니라 <b>JSON 은 맞는데 모양이 다른 것</b>인 이유:
+     * {@code geometry} 는 MySQL {@code json} 컬럼이라 문법이 틀린 문자열은 INSERT 단계에서
+     * 거부된다. 실제로 일어날 수 있는 손상은 제공자 응답 형식이 바뀌어 <b>다른 모양의 JSON</b>
+     * 이 들어오는 경우다.
+     *
+     * <p>이 경우가 특히 위험했다. 기본 ObjectMapper 는 모르는 필드를 무시하므로
+     * {@code {"x":1,"y":2}} 가 예외 없이 {@code (0.0, 0.0)} 좌표가 된다 — 지도가 기니만
+     * 앞바다로 선을 긋고 bounds 가 지구 반대편까지 늘어난다. 엄격하게 읽어 걸러 낸다.
+     */
+    @Test
+    @DisplayName("좌표가 깨져 있어도 500 이 아니라 빈 배열이다")
+    void brokenGeometryDegradesToEmptyInsteadOfFailing() throws Exception {
+        Schedule schedule = schedules.findById(scheduleId).orElseThrow();
+        RouteRequest request = routeRequests.save(RouteRequest.builder().schedule(schedule)
+                .provider(RouteProvider.KAKAO).rawResponse(null).requestedAt(LocalDateTime.now(KST)).build());
+        SavedRoute broken = SavedRoute.builder().schedule(schedule).routeRequest(request)
+                .providerPathId("path-broken").baseDurationMin(10).selected(false).rankNo(3).build();
+        // ① 모양이 다른 객체 — 무시하면 (0,0) 이 된다
+        broken.addSegment(SavedRouteSegment.builder().seq(1).mode(TransportMode.BUS)
+                .fromName("A").toName("B").baseDurationMin(5)
+                .geometry("[{\"x\":127.0,\"y\":37.5}]").build());
+        // ② 배열이 아닌 GeoJSON 스타일
+        broken.addSegment(SavedRouteSegment.builder().seq(2).mode(TransportMode.BUS)
+                .fromName("B").toName("C").baseDurationMin(5)
+                .geometry("{\"type\":\"LineString\",\"coordinates\":[[127.0,37.5]]}").build());
+        // ③ 파싱은 되지만 지구 밖 — 한 점만 섞여도 bounds 가 못 쓰게 된다
+        broken.addSegment(SavedRouteSegment.builder().seq(3).mode(TransportMode.BUS)
+                .fromName("C").toName("D").baseDurationMin(5)
+                .geometry("[{\"longitude\":127.0,\"latitude\":37.5},{\"longitude\":999,\"latitude\":999}]").build());
+        long brokenId = savedRoutes.save(broken).getId();
+
+        http.perform(get("/api/v1/routes/{id}/map", brokenId).header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.segments.length()").value(3))
+                .andExpect(jsonPath("$.data.segments[0].coordinates").isEmpty())
+                .andExpect(jsonPath("$.data.segments[1].coordinates").isEmpty())
+                .andExpect(jsonPath("$.data.segments[2].coordinates").isEmpty())
+                .andExpect(jsonPath("$.data.bounds").doesNotExist());
+
+        // 좌표만 못 읽었을 뿐 경로 안내는 멀쩡해야 한다.
+        http.perform(get("/api/v1/routes/{id}", brokenId).header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.segments.length()").value(3))
+                .andExpect(jsonPath("$.data.segments[0].fromName").value("A"));
+    }
+
     @Test
     @DisplayName("남의 경로는 볼 수 없다 — routeId 는 순번이라 찍어 볼 수 있다")
     void routesAreOwnedByTheScheduleOwner() throws Exception {
@@ -189,6 +239,75 @@ class RouteQueryApiTest extends IntegrationTestSupport {
 
         http.perform(get("/api/v1/routes/{id}", selectedRouteId)).andExpect(status().isUnauthorized());
         http.perform(get("/api/v1/routes/{id}/map", selectedRouteId)).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * 두 사용자가 동시에 자기 경로를 읽고, 서로의 경로를 찔러 본다.
+     *
+     * <p>순차 테스트로도 소유권 자체는 잡힌다. 여기서 보려는 것은 <b>동시에 돌 때도 섞이지
+     * 않는가</b> 다 — 소유자 판정에 쓰는 값이 요청마다 독립적이어야 한다. 사용자 정보를
+     * 필드나 캐시에 얹는 흔한 실수가 있으면 한쪽 응답에 다른 쪽 데이터가 섞인다.
+     */
+    @Test
+    @DisplayName("두 사용자가 동시에 조회해도 서로의 경로가 섞이지 않는다")
+    void concurrentUsersStayIsolated() throws Exception {
+        long other = users.save(User.builder().email("other@example.test").nickname("다른 사람").build()).getId();
+        String otherBearer = "Bearer " + tokens.createAccessToken(other);
+        long otherSchedule = scheduleService.create(other, new ScheduleCreateRequest("남의 일정",
+                new LocationRequest("강남", new BigDecimal("37.4979"), new BigDecimal("127.0276")),
+                new LocationRequest("역삼", new BigDecimal("37.5006"), new BigDecimal("127.0364")),
+                LocalDateTime.now(KST).plusHours(4), null, null, null)).id();
+        Schedule theirSchedule = schedules.findById(otherSchedule).orElseThrow();
+        RouteRequest theirRequest = routeRequests.save(RouteRequest.builder().schedule(theirSchedule)
+                .provider(RouteProvider.KAKAO).rawResponse(null).requestedAt(LocalDateTime.now(KST)).build());
+        SavedRoute theirRoute = SavedRoute.builder().schedule(theirSchedule).routeRequest(theirRequest)
+                .providerPathId("path-other").baseDurationMin(40).selected(true).rankNo(1).build();
+        theirRoute.addSegment(SavedRouteSegment.builder().seq(1).mode(TransportMode.SUBWAY)
+                .fromName("남의출발").toName("남의도착").baseDurationMin(40).geometry(null).build());
+        long otherRouteId = savedRoutes.save(theirRoute).getId();
+
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            // 각자 자기 것을 읽고, 곧바로 남의 것을 찔러 본다. 두 스레드를 같은 순간에 출발시킨다.
+            java.util.concurrent.Callable<String> mine = probe(ready, start, bearer, scheduleId, otherRouteId);
+            java.util.concurrent.Callable<String> theirs = probe(ready, start, otherBearer, otherSchedule, selectedRouteId);
+
+            var first = pool.submit(mine);
+            var second = pool.submit(theirs);
+            assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            assertThat(first.get(30, java.util.concurrent.TimeUnit.SECONDS))
+                    .as("내 목록에는 내 구간만, 남의 경로는 403")
+                    .isEqualTo("집|403");
+            assertThat(second.get(30, java.util.concurrent.TimeUnit.SECONDS))
+                    .as("남의 목록에는 남의 구간만, 내 경로는 403")
+                    .isEqualTo("남의출발|403");
+        } finally {
+            start.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    /** 자기 목록의 첫 출발지 이름과, 남의 경로를 찔렀을 때의 상태코드를 {@code 이름|코드} 로 돌려준다. */
+    private java.util.concurrent.Callable<String> probe(java.util.concurrent.CountDownLatch ready,
+                                                        java.util.concurrent.CountDownLatch start,
+                                                        String token, long ownSchedule, long foreignRoute) {
+        return () -> {
+            ready.countDown();
+            if (!start.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new AssertionError("start timeout");
+            }
+            String listed = http.perform(get("/api/v1/schedules/{id}/routes", ownSchedule)
+                            .header("Authorization", token))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            String fromName = json.readTree(listed).path("data").get(0).path("fromName").asText();
+            int forbidden = http.perform(get("/api/v1/routes/{id}", foreignRoute).header("Authorization", token))
+                    .andReturn().getResponse().getStatus();
+            return fromName + "|" + forbidden;
+        };
     }
 
     @Test

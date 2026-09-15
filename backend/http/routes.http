@@ -18,8 +18,10 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "origin":      { "lng": 127.0276, "lat": 37.4979 },
-  "destination": { "lng": 127.0364, "lat": 37.5006 }
+  "startLongitude": 127.0276,
+  "startLatitude": 37.4979,
+  "endLongitude": 127.0364,
+  "endLatitude": 37.5006
 }
 
 ### ② 일정의 후보 경로 목록 — 저장된 것

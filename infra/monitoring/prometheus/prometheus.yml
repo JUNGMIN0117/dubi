@@ -67,6 +67,22 @@ scrape_configs:
       - target_label: __address__
         replacement: 172.26.15.35:7979
 
+  # ml-serving(버스 구간 예측). 지표 주소가 없어 blackbox-exporter 가 /health/ready 를 대신 찔러 본다.
+  # 결과는 probe_success{job="ml-serving"} 1(준비됨) / 0(죽었거나 모델 미준비). 0 이어도 backend 는 카카오 값으로 대체 동작한다 (2026-09-15)
+  - job_name: ml-serving
+    metrics_path: /probe
+    params: { module: [http_2xx] }
+    static_configs:
+      - targets: ["http://ml-serving:8000/health/ready"]
+        labels: { server: server2-service }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
   - job_name: redis
     static_configs:
       - targets: ["redis-exporter:9121"]

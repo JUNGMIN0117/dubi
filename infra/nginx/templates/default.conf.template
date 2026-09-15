@@ -41,7 +41,9 @@ server {
 
     location = /healthz {
         access_log off;
-        add_header Content-Type text/plain;
+        # add_header 를 여기 쓰면 nginx 규칙상 서버 수준의 보안 헤더 3개가 이 응답에서 빠진다(2026-09-15 점검에서 발견).
+        # 응답 형식만 정하는 default_type 을 쓰면 상속이 유지된다.
+        default_type text/plain;
         return 200 "ok\n";
     }
 
@@ -121,7 +123,9 @@ server {
 
     location = /healthz {
         access_log off;
-        add_header Content-Type text/plain;
+        # add_header 를 여기 쓰면 nginx 규칙상 서버 수준의 보안 헤더 3개가 이 응답에서 빠진다(2026-09-15 점검에서 발견).
+        # 응답 형식만 정하는 default_type 을 쓰면 상속이 유지된다.
+        default_type text/plain;
         return 200 "ok\n";
     }
 }

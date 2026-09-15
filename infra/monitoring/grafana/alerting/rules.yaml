@@ -84,6 +84,27 @@ groups:
             datasourceUid: __expr__
             model: { refId: C, type: math, expression: "$A > 90" }
 
+      # ml-serving(버스 구간 예측)이 죽었거나 모델이 준비되지 않았다. backend 는 카카오 값으로 대체하므로 사용자 장애는 아니지만,
+      # 조용히 지나가면 며칠 동안 예측 없이 서비스되는 것을 아무도 모른다 (2026-09-15). 지표는 blackbox-exporter 가 만든다
+      - uid: ddubi-ml-serving-down
+        title: ml-serving 다운 (버스 예측은 카카오 값으로 대체 중)
+        condition: C
+        for: 5m
+        labels: { severity: warning, layer: service }
+        annotations:
+          summary: ml-serving 의 /health/ready 가 5분 넘게 실패했다. docker logs ml-serving 에서 모델 묶음·메모리 확인. 사용자 API 는 카카오 값으로 계속 동작
+          runbook: docs/runbooks/backend-down-and-nginx-502.md
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: 'probe_success{job="ml-serving"}' }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A < 1" }
+
   - orgId: 1
     name: ddubi-data
     folder: DDUBI 알림
@@ -207,6 +228,27 @@ groups:
           - refId: C
             datasourceUid: __expr__
             model: { refId: C, type: math, expression: "$A > 3" }
+
+      # Spark 스트리밍 한 배치의 처리 시간(ms). 평소 3ms~13초인데, 9/11 대응표 OOM 사고 때는 32~52초로 늘다가 멈췄다.
+      # 5분(트리거 간격)을 넘으면 배치가 밀리기 시작한 것이라 미리 알린다. 잡이 죽어 지표가 사라지는 경우는 "Spark 스트리밍 잡 부족" 이 잡는다 (2026-09-15)
+      - uid: ddubi-spark-batch-slow
+        title: Spark 배치 처리 5분 초과
+        condition: C
+        for: 10m
+        labels: { severity: warning, layer: data }
+        annotations:
+          summary: Spark 스트리밍 배치 하나가 5분 넘게 걸린다. 드라이버 로그와 메모리(docker stats spark-streaming-*)를 확인. 9/11 처럼 커널 OOM 으로 이어질 수 있다
+          runbook: docs/runbooks/spark-streaming-crash.md
+        noDataState: OK
+        execErrState: Error
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, instant: true, expr: 'max({__name__=~"metrics_.*_driver_spark_streaming_.*_latency_Value"})' }
+          - refId: C
+            datasourceUid: __expr__
+            model: { refId: C, type: math, expression: "$A > 300000" }
 
   - orgId: 1
     name: ddubi-host

@@ -89,5 +89,33 @@ def send_fail_main():
     finally: b.send = orig_send
 case("9 발송 실패 시 main rc", send_fail_main)
 
+# 10. Spark 잡이 sparkjobs 코드보다 먼저 시작됨 → 데이터 행에 "재시작 필요" 노란불 (9/15 실제 사고: TTL 코드가 나흘간 미적용)
+orig_rem = b.collect_remote
+def spark_stale():
+    def fake():
+        r = dict(orig_rem() or {})
+        r["spark_started"] = ["/spark-streaming-realtime 2026-09-01T00:00:00.000000000Z", "/spark-streaming-weather 2026-09-20T00:00:00Z"]
+        r["sparkjobs_commit"] = ["1789000000"]   # 2026-09-10 무렵
+        return r
+    b.collect_remote = fake
+    try:
+        t = b.build(env)
+        hit = [l for l in t.splitlines() if "재시작 필요" in l]
+        return hit[0][:130] if hit else "경고 없음 — 실패"
+    finally: b.collect_remote = orig_rem
+case("10 Spark 잡이 코드보다 오래됨", spark_stale)
+
+# 11. 같은 자료가 깨져 있으면(커밋 시각이 숫자가 아님) 크래시 없이 조용히 넘어가야 한다
+def spark_stale_bad():
+    def fake():
+        r = dict(orig_rem() or {})
+        r["spark_started"] = ["이상한 줄"]; r["sparkjobs_commit"] = ["fatal: not a git repo"]
+        return r
+    b.collect_remote = fake
+    try:
+        t = b.build(env); return "크래시 없음, 재시작 경고 " + ("있음(오탐)" if any("재시작 필요" in l for l in t.splitlines()) else "없음")
+    finally: b.collect_remote = orig_rem
+case("11 Spark 시각 자료 깨짐", spark_stale_bad)
+
 for name, st, out, sec in results:
     print(f"[{st}] {name} ({sec}s) -> {out}")

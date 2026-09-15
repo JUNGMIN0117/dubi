@@ -5,12 +5,17 @@ import com.ssafy.ddubi.domain.notification.entity.NotificationStatus;
 import com.ssafy.ddubi.domain.notification.entity.NotificationType;
 import com.ssafy.ddubi.domain.notification.entity.SuppressReason;
 import com.ssafy.ddubi.domain.notification.repository.NotificationRepository;
+import com.ssafy.ddubi.domain.schedule.dto.request.LocationRequest;
+import com.ssafy.ddubi.domain.schedule.dto.request.ScheduleCreateRequest;
+import com.ssafy.ddubi.domain.schedule.service.ScheduleService;
 import com.ssafy.ddubi.domain.user.dto.request.DeviceTokenRegisterRequest;
 import com.ssafy.ddubi.domain.user.entity.DevicePlatform;
 import com.ssafy.ddubi.domain.user.entity.User;
 import com.ssafy.ddubi.domain.user.repository.DeviceTokenRepository;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
 import com.ssafy.ddubi.domain.user.service.DeviceTokenService;
+import com.ssafy.ddubi.global.exception.BusinessException;
+import com.ssafy.ddubi.global.exception.ErrorCode;
 import com.ssafy.ddubi.global.push.PushMessage;
 import com.ssafy.ddubi.global.push.PushResult;
 import com.ssafy.ddubi.support.IntegrationTestSupport;
@@ -20,7 +25,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -48,6 +57,8 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
     private DeviceTokenRepository deviceTokenRepository;
     @Autowired
     private UserRepository userRepository;
+    @Autowired
+    private ScheduleService scheduleService;
 
     private User user;
 
@@ -63,13 +74,92 @@ class NotificationSendIntegrationTest extends IntegrationTestSupport {
     }
 
     private NotificationCommand command(String suppressKey) {
+        return command(suppressKey, null);
+    }
+
+    private NotificationCommand command(String suppressKey, Long scheduleId) {
         return NotificationCommand.builder()
                 .userId(user.getId())
+                .scheduleId(scheduleId)
                 .type(NotificationType.DEPART_SOON)
                 .title("곧 출발하세요")
                 .body("10분 뒤 출발하면 제시간에 도착해요.")
                 .suppressKey(suppressKey)
                 .build();
+    }
+
+    /** 다른 사람 소유의 일정을 하나 만든다. */
+    private Long scheduleOwnedBySomeoneElse() {
+        Long stranger = userRepository.save(
+                User.builder().email("stranger@ddubi.com").nickname("남").build()).getId();
+        return scheduleService.create(stranger, new ScheduleCreateRequest("남의 일정",
+                new LocationRequest("강남", new BigDecimal("37.4979"), new BigDecimal("127.0276")),
+                new LocationRequest("역삼", new BigDecimal("37.5006"), new BigDecimal("127.0364")),
+                LocalDateTime.now().plusHours(2), null, null, null)).id();
+    }
+
+    // ------------------------------------------------------------------
+    // 일정 소유권 (2026-09-15 리뷰 지적)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("남의 일정 ID를 자기 알림에 붙일 수 없다")
+    void rejectsScheduleOwnedBySomeoneElse() {
+        registerDevice();
+        Long theirs = scheduleOwnedBySomeoneElse();
+
+        assertThatThrownBy(() -> notificationService.create(command("key-1", theirs)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FORBIDDEN_RESOURCE);
+
+        assertThat(notificationRepository.count()).as("거절된 요청은 행을 남기지 않는다").isZero();
+        verify(pushSender, never()).send(any());
+    }
+
+    @Test
+    @DisplayName("없는 일정 ID 는 조용히 무시하지 않고 거절한다")
+    void rejectsUnknownSchedule() {
+        registerDevice();
+
+        assertThatThrownBy(() -> notificationService.create(command("key-1", 999_999L)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.SCHEDULE_NOT_FOUND);
+
+        assertThat(notificationRepository.count()).isZero();
+        verify(pushSender, never()).send(any());
+    }
+
+    /**
+     * 거절할 요청이 먼저 억제 키를 잡아 버리면, 그 뒤 TTL(10분) 동안 <b>같은 키의 정상 알림까지</b>
+     * 중복으로 몰려 막힌다. 그래서 일정 검증이 억제 선점보다 앞에 있어야 한다.
+     */
+    @Test
+    @DisplayName("거절된 요청은 억제 키를 점유하지 않는다")
+    void rejectedRequestDoesNotConsumeSuppressionKey() {
+        registerDevice();
+        Long theirs = scheduleOwnedBySomeoneElse();
+        assertThatThrownBy(() -> notificationService.create(command("shared-key", theirs)))
+                .isInstanceOf(BusinessException.class);
+
+        Notification legitimate = notificationService.create(command("shared-key"));
+
+        assertThat(legitimate.getStatus()).isEqualTo(NotificationStatus.SENT);
+        assertThat(legitimate.getSuppressReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("내 일정이면 붙는다 — 알림함에서 그 일정으로 갈 수 있다")
+    void attachesMyOwnSchedule() {
+        registerDevice();
+        Long mine = scheduleService.create(user.getId(), new ScheduleCreateRequest("내 일정",
+                new LocationRequest("강남", new BigDecimal("37.4979"), new BigDecimal("127.0276")),
+                new LocationRequest("역삼", new BigDecimal("37.5006"), new BigDecimal("127.0364")),
+                LocalDateTime.now().plusHours(2), null, null, null)).id();
+
+        Notification result = notificationService.create(command("key-1", mine));
+
+        assertThat(result.getStatus()).isEqualTo(NotificationStatus.SENT);
+        assertThat(result.scheduleId()).isEqualTo(mine);
     }
 
     // ------------------------------------------------------------------

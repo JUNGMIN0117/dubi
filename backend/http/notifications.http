@@ -112,9 +112,12 @@ Authorization: Bearer {{token}}
 %}
 
 ### ⑫ 개발용 테스트 발송 — 1차. status 가 SENT 여야 한다
-# dev 프로파일 전용. 운영에서는 빈 자체가 없어서 404 다.
+# ddubi.dev-endpoints.enabled=true 일 때만 존재한다. 꺼져 있으면 404 다.
+# 내 PC(dev 프로파일)는 켜져 있고, 배포 서버는 인프라가 환경변수로 켠다.
 #
 # ⚠️ title·body 는 필수다. 빼면 400 이다.
+# ⚠️ scheduleId 는 내 일정이어야 한다. 없으면 404, 남의 것이면 403 (⑯ 참고).
+#    아래 1 은 자리표시자다 — schedules.http 로 만든 내 일정 ID 로 바꿔 쓴다.
 # ⚠️ 1차가 SUPPRESSED 로 오면 suppressReason 을 본다.
 #      NO_VALID_DEVICE — FCM 토큰이 없다. users.http 의 기기 토큰 등록 먼저
 #      ALARM_OFF       — 마이페이지에서 알림을 꺼 뒀다
@@ -198,5 +201,26 @@ Content-Type: application/json
 > {%
     client.test("400", function () {
         client.assert(response.status === 400);
+    });
+%}
+
+### ⑯ 남의 일정 ID — 403
+# 알림에 붙일 일정은 내 것이어야 한다. 거절된 요청은 알림 행도 억제 키도 남기지 않는다.
+POST {{host}}/api/v1/dev/notifications/test
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "type": "EARLY_DEPART",
+  "title": "남의 일정",
+  "body": "붙으면 안 된다",
+  "scheduleId": 99999,
+  "suppressKey": "ownership-test"
+}
+
+> {%
+    client.test("없거나 남의 일정이면 404/403", function () {
+        client.assert(response.status === 404 || response.status === 403,
+            "실제: " + response.status);
     });
 %}

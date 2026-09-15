@@ -569,6 +569,10 @@ services:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 같은 표준 DataFrame을 Redis 최신값과 HDFS Silver에 각각 쓴다.
+      SILVER_OUTPUT_URI: ${SILVER_OUTPUT_URI:-}
+      WEATHER_SILVER_TRIGGER: ${WEATHER_SILVER_TRIGGER:-10 minutes}
+      WEATHER_SILVER_WATERMARK: ${WEATHER_SILVER_WATERMARK:-2 days}
     volumes:
       - ./spark/conf:/opt/spark/conf:ro
       - ../sparkjobs:/opt/ddubi/sparkjobs

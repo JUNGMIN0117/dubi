@@ -143,3 +143,46 @@ python -m unittest discover -s sparkjobs/tests -p test_bus_silver_core.py -v
 원본 8건 = 정상 4건 + 거절 2건 + 중복 1건 + 비버스 제외 1건이다.
 정상 위치에도 원본 관측시각이 없을 수 있고, 정상 도착에도 잘못된 선택값이 null로 남을 수 있다.
 실제 HDFS 원본은 로컬에 없어 이번 구현에서 운영 일괄 처리는 수행하지 않았다.
+# 실시간 HDFS·Redis 저장 (realtime-v1)
+
+`streaming/realtime_latest.py`는 Kafka 버스 원문에 기존 `bus_normalizer`와
+배치 `prepare` 규칙을 적용한다. 전처리한 하나의 DataFrame을 캐시한 뒤 아래로 분기한다.
+
+- HDFS: `BUS_SILVER_OUTPUT_URI/batches/batch=<Spark batchId>/data`에 Parquet 이력 저장.
+  기본값은 `hdfs://hdfs-namenode:9000/ddubi/silver/bus/realtime-v1`.
+  eventType/providerNamespace/archiveDate로 파티션을 나눈다.
+  정상·제외·중복 행을 모두 보존한다. 분석 시 `status='ACCEPTED' AND repeatIndex=1`을 선택한다.
+- Redis: 정상 행에서 노선·차량 또는 노선·정류장별 최신 행을 선택해 JSON 저장.
+  기존 `transit:latest:bus-position:*`, `transit:latest:bus-arrival:*` 키를 유지한다.
+  서울 외 출처에는 namespace를 붙이고 인천 도착은 차량 ID도 붙인다.
+  JSON 최상위에는 Silver 표준 컬럼 전체(원문 payload 포함)를 동일하게 제공한다.
+  기존 조회용 observation/location/providerIds 및 검증된 매핑 필드를 함께 제공한다.
+  결측값은 JSON에서도 명시적 null이다. 품질·결측 사유도 HDFS와 같다.
+
+매핑은 기존 realtime crosswalk 검증을 유지하며, upstream 매핑 주장만으로 확정하지 않는다.
+관측시각이 없으면 observedAt/occurredAt/validUntil은 null로 유지한다.
+이때 `_latestOrderAt`만 수집시각을 사용해 최신 수집 결과를 갱신한다. 이 필드는
+관측시각이나 학습 정답이 아니다. 소비자는 validUntil이 null이거나 지났으면 현재 관측으로
+사용하지 않아야 한다. Redis 보관 TTL은 기존 86400초, 관측 신선도는 120초다.
+
+HDFS 저장 후 Redis를 저장하고 둘 다 성공하면 해당 배치의 `complete` 디렉터리를 기록한다.
+저장 실패는 Spark로 전파되어 checkpoint가 진행되지 않는다. 재시도는 같은 batchId의
+Parquet 디렉터리만 다시 작성하고 Redis는 Lua로 과거값 덮어쓰기를 막는다.
+두 저장소를 하나의 원자적 트랜잭션으로 묶지는 않으므로 복구 중에는 일시적 차이가 있다.
+외부 분석은 complete가 있는 배치를 대상으로 읽어야 한다.
+이력은 `batches/batch=*/data`를 읽고 배치 간 반복 eventId는 추가로 중복 제거한다.
+실시간 충돌 검증 범위는 하나의 micro-batch이며 배치 작업은 전체 입력 범위다.
+
+**checkpoint를 삭제하거나 새로운 스트림으로 교체하면 출력 URI도 새로운 버전으로 변경해야 한다.**
+batchId가 다시 0부터 시작하므로 같은 출력 URI를 재사용하면 기존 이력이 덮어써진다.
+여러 잡이 같은 출력 URI에 쓰지 않는다. URI 미설정/공백/잘못된 scheme은 시작 단계에서 실패한다.
+
+운영 반영: 저장소 코드를 서버에 반영한 뒤 infra에서
+`docker compose --profile spark up -d --force-recreate spark-streaming-realtime`.
+기존 checkpoint는 유지한다. 이후 로그의 busSilverRows/busRedisKeys, HDFS complete,
+Redis JSON의 silverVersion/missingFields를 확인한다. 기존 archive나 과거 Silver는 자동 재처리하지 않는다.
+전체 payload를 Redis에 추가하므로 배포 후 Redis used_memory/evicted_keys도 확인한다.
+
+검증: 공통 규칙 unittest 10개 통과. Spark 테스트에는 저장소 간 컬럼 값 일치,
+동일 batch 재처리, Redis 실패 전파, 관측시각 결측 처리를 추가했다.
+로컬에는 PySpark가 없어 Spark 통합 및 운영 Kafka/HDFS/Redis 검증은 아직 수행하지 못했다.

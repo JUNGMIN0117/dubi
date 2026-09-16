@@ -609,6 +609,7 @@ services:
       SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
       SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
       SPARK_JOB_TOPICS: transport.raw,city.raw
+      BUS_SILVER_OUTPUT_URI: ${BUS_SILVER_OUTPUT_URI-hdfs://hdfs-namenode:9000/ddubi/silver/bus/realtime-v1}
       # 날씨 잡이 각 워커의 1GiB를 사용하므로 남은 512MiB 안에 executor가 배치되게 한다.
       # 수집기 4개가 켜지면 날씨보다 유입이 많다. 480m 은 Spark 최소치에 가까워 768m 으로, 코어는 1 (2026-09-07)
       SPARK_DRIVER_MEMORY: ${REALTIME_DRIVER_MEMORY:-2g}        # submit.sh 기본 512m 은 대응표 DataFrame 을 못 담는다

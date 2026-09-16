@@ -630,3 +630,195 @@ cause에는 `incidentKey,revision,source,officialNoticeAt,affectedSegmentIds,evi
 실제 구현 시 Backend는 Gradle 관련 테스트, Client는 `flutter test`, Python 파트는 해당 디렉터리에서 `python -m pytest -q`를 실행한다. 실시간 전체 흐름은 테스트 Kafka/Redis/DB와 고정 clock으로 검증한다. 성능 검증은 고정 입력량·worker 수·원천 호출 예산을 기록하고 정확도 시험과 따로 보고한다.
 
 **이번 문서 수정의 검증 범위는 참조 경로·링크·JSON 예제·조건부 수식·diff다. 위 구현 테스트를 이미 통과했다는 의미가 아니다.**
+
+## 15. 파트별 실행 작업 카드
+
+이 절은 각 담당자가 이 문서만 보고 이슈를 쪼갤 수 있도록 **선행 입력 → 실제 수정 순서 → 산출물 → 실패 처리 → 완료 증거**를 고정한다. 경로에 `(추가)`가 붙은 파일은 목표 구조이며, 구현 중 동일 책임의 기존 파일이 확인되면 중복 파일을 만들지 말고 그 파일을 확장한다.
+
+### 15.1 C01 계약 담당
+
+**선행 입력:** 이 문서 2절의 v2 예제, 계산 정책의 decision/quality 정의, 기존 Controller 응답 fixture.
+
+1. `docs/contracts/schedule-evaluation-v2.schema.json`을 추가하여 필수 필드, nullable, enum, `date-time`, 초 단위를 기계 검증한다.
+2. `resultVersion=2`를 최상위에 두고 `decision`, `executionStatus`, `quality`를 서로 다른 enum으로 정의한다.
+3. `plannedDepartAt`, `userInputDepartAt`, `proposedDepartAt`, `actualDepartAt`을 한 필드로 합치지 않는다.
+4. timeline leg와 cause를 `$defs`로 만들고 `additionalProperties` 정책을 명시한다. 구버전 Client를 위해 최상위 확장 필드는 허용하더라도 핵심 객체의 오타는 schema가 거부하게 한다.
+5. 정상, `DATA_INSUFFICIENT`, `SEARCH_INCOMPLETE`, FULL 통제, 과거 P, PREVIEW 예제를 fixture로 저장한다.
+6. Backend Jackson 직렬화 결과와 Client fixture parser가 같은 파일을 읽는 contract test를 만든다.
+
+**산출물:** schema, 예제 6종 이상, 필드 변경표, Client/Backend contract test. **실패 처리:** enum 합의가 끝나지 않으면 문자열을 임의 추가하지 않고 schema PR에서 미확정 목록으로 남긴다. **완료 증거:** 모든 예제가 schema를 통과하고 단위·시각 경계 T01~T03을 양쪽 테스트가 같은 값으로 해석한다.
+
+### 15.2 B01 일정·반복 일정 담당
+
+**수정 순서:** request DTO → service 검증 → migration/entity → 평가 작업 생성 → response DTO → 반복 materialize → 통합 테스트 순서로 진행한다.
+
+```text
+create(request):
+  P = request.plannedDepartAt
+  D = request.arriveBy
+  require P != null, D != null, P < D
+  transaction:
+    schedule.userInputDepartAt = P
+    schedule.plannedDepartAt = P
+    schedule.planSource = USER_INPUT
+    schedule.inputRevision = 1
+    insert schedule_evaluation(nextCheckAt=now, inputRevision=1)
+  afterCommit: worker.wake(scheduleId)
+```
+
+update는 patch가 적용된 **최종 P,D**를 검증한다. 사용자가 P를 직접 바꾼 경우 `userInputDepartAt=P`, `planSource=USER_INPUT`, revision 증가, 이전 추천/알림 취소, `nextCheckAt=now`를 한 트랜잭션에서 처리한다. 제목만 바뀌었을 때도 현재 구현 정책상 경로 입력에 영향을 주는지 분류하고, 영향 없는 변경으로 불필요한 외부 호출을 만들지 않는다.
+
+반복 일정은 `occurrenceDate + plannedDepartDayOffset + plannedDepartTime`으로 P를, 기존 `occurrenceDate + localTime`으로 D를 만든 뒤 P<D를 검증한다. offset=-1이면 전날이다. DST가 없는 Asia/Seoul이어도 `LocalDateTime` 조합 뒤 명시적으로 zone을 붙인다. 이미 개별 수정·취소된 occurrence는 재생성으로 덮지 않는다.
+
+**DB 이행:** 기존 P가 있으면 `user_input_depart_at=P`, `plan_source=LEGACY_UNKNOWN`; 기존 P가 없으면 null을 유지하여 `DEPARTURE_REQUIRED`로 노출한다. D에서 임의 역산하여 채우지 않는다. migration rollback을 데이터 삭제로 설계하지 않는다.
+
+**완료 증거:** create/update/accept/repeat/legacy 각각 통합 테스트, 트랜잭션 rollback 시 평가 행도 남지 않는 테스트, afterCommit wake 유실 시 DB due가 다시 집는 테스트.
+
+### 15.3 B02 후보 조립·계산 담당
+
+**호출 순서:**
+
+```text
+ScheduleEvaluationWorkflow.evaluate(claim)
+  1. RouteCandidateProvider.loadOrRefresh(schedule, snapshotAsOf)
+  2. RouteLegRoleClassifier.classify(steps)
+  3. MasterDataTransitMappingResolver.resolve(BUS/SUBWAY)
+  4. WalkingEndpointResolver.resolve(EXACT mapped first/last transit)
+  5. WalkingRouteClient.fetch ACCESS/EGRESS with request budget
+  6. RouteEvidenceAssembler.freeze all evidence and versions
+  7. JourneyEvaluationService.evaluate each candidate at P
+  8. ConditionalDeparturePolicy.decide P branch
+  9. if required, DepartureSuggestionService.search T
+ 10. RecommendationChangeAnalyzer.compare previous/current
+ 11. ScheduleEvaluationStore.complete(result, nextCheckAt, outbox)
+```
+
+1~6에서 외부/Redis/DB 읽기를 끝내고 불변 `EvaluationSnapshot`을 만든다. 7~9의 반복 평가에서는 snapshot을 다시 읽지 않는다. 다만 출발시각에 따라 차량 선택, hourSlot, 사건 겹침은 매번 다시 계산한다.
+
+`JourneyEvaluationService`는 `EvaluationInput(candidate, departAt, D, snapshot)`을 받고 `CandidateEvaluation`을 반환한다. 예외를 catch하여 임의의 큰 소요시간으로 바꾸지 말고 `usable`, `quality`, `failureReasons`로 반환한다. 필수 leg 누락은 INSUFFICIENT, 공식 FULL 통제는 UNUSABLE, 외부 timeout은 FALLBACK 가능 여부에 따라 분기한다.
+
+탐색은 시간표에서 생성한 후보와 제한 격자를 합치고 중복 절대시각을 제거한 뒤 늦은 순으로 검증한다. 한 후보가 T를 만족해도 그보다 늦은 미검증 후보가 남아 있으면 최신 출발로 확정하지 않는다. 예산 종료 시 `SEARCH_INCOMPLETE`, `searchedFrom`, `searchedUntil`, `evaluatedDepartures`, `remainingCandidateCount`를 남긴다.
+
+**완료 증거:** T01~T08, T27~T34와 timeline 합계=durationSeconds, snapshot hash 고정, 동일 입력의 외부 호출 cache hit를 검증한다.
+
+### 15.4 D01 Collector 담당
+
+**source 하나를 추가하거나 고칠 때의 동일한 절차:**
+
+1. 키를 제거한 raw fixture에 정상, 정상 빈 응답, 일부 페이지, 인증 오류, rate limit, 오래된 응답을 넣는다.
+2. source 모듈은 HTTP 상태와 원천 내부 결과코드를 함께 검사한다. HTTP 200의 오류 XML/JSON을 성공으로 발행하지 않는다.
+3. 원천 ID·발생시각·페이지 완전성·대상 scope를 검증하고 raw envelope로 Kafka에 발행한다.
+4. Kafka ACK 후에만 dedup/request cursor를 갱신한다. 발행 실패는 성공 poll로 기록하지 않는다.
+5. `SourcePollStatus`에 SUCCESS/EMPTY_COMPLETE/PARTIAL/FAILED/RATE_LIMITED/SCHEDULED_SKIP, pagesExpected/pagesReceived, sourceGeneratedAt, nextAllowedAt을 기록한다.
+6. 본문 revision과 ‘이번 poll에서 여전히 존재함을 확인’한 observedAt을 분리한다.
+
+`DemandRegistry`는 `scopeKey`로 합치고 `neededFrom<=now<expiresAt`인 항목만 활성화한다. 한 사용자의 일정이 여러 개여도 provider 요청은 한 번이다. artifact 파싱 실패 시 마지막 검증 버전을 사용하되 만료 뒤에는 고정 최소 scope 또는 수집 불가 상태로 전환한다. 사용자 ID·제목·정확한 출발지 좌표를 artifact에 넣지 않는다.
+
+**완료 증거:** source별 fixture/공식 필드표/실제 호출량 산정, 24시간 rolling budget 테스트, Kafka 실패 후 재시도 멱등성, poll-status 계약 테스트.
+
+### 15.5 D02 마스터·매핑 담당
+
+**버스:** 공식 노선-정류장 순서에서 `(providerNamespace, routeId, fromStopId, toStopId, fromOccurrence, toOccurrence)`를 만들고 인접성·방향을 검증한다. canonical segment ID를 기존 factory와 동일 규칙으로 생성하고 중복/순환 노선은 occurrence로 구별한다.
+
+**지하철:** 역 마스터 매핑과 운행 매핑을 분리한다. 역 이름 일치는 후보 생성일 뿐이다. `serviceDate/dayType + line + direction + trainPattern + stopSequence`가 확인된 경우만 staticTripKey와 providerTrainId를 EXACT로 올린다.
+
+**도로:** 공식 버스 구간→BIS 링크→공간 링크 방향→TOPIS 표준링크→AccInfo namespace 순서로 evidence chain을 만든다. 중간 파일 하나라도 버전/방향을 검증하지 못하면 mappingStatus를 낮춘다.
+
+모든 artifact는 `artifactVersion, createdAt, validFrom, validUntil, sourceFiles[{name,sha256,officialRef}], recordCount, rejectedCount, builderVersion` manifest와 함께 원자 배포한다. Backend와 Spark가 시작할 때 expected SHA를 검사한다. 이전 artifact를 삭제하지 말고 Replay 기간 동안 보존한다.
+
+**완료 증거:** 같은 입력의 byte-stable artifact, mapping 결과별 통계, AMBIGUOUS/UNMAPPED 샘플, Backend/Spark loader 계약 테스트.
+
+### 15.6 D03 Spark 담당
+
+각 잡은 `parse → validate → normalize → deduplicate → event-time join/state → output/rejected` 순서를 지킨다. parser/normalize는 배치 DataFrame에서도 실행 가능한 순수 함수로 분리한다.
+
+| 잡 | 상태 키 | 핵심 join | 출력 전 게이트 |
+|---|---|---|---|
+| realtime latest | source+provider entity | 동일 키의 최신 occurredAt/revision | future/stale/invalid ID 제외, TTL과 validUntil 일치 |
+| trip stop prediction | serviceDate+tripKey+stopSequence | timetable left join realtime EXACT crosswalk | 다른 운행일·방향 결합 금지 |
+| incident lifecycle | source+incidentKey | revision과 complete poll heartbeat | poll 실패를 ENDED로 전이 금지 |
+| road/transit impact | incident revision+mapping version | incident 범위와 edge/trip artifact | PARTIAL/AMBIGUOUS를 confirmed 영향으로 승격 금지 |
+| segment status | segmentId+window | ACTUAL_TRAVERSAL과 활성 baseline version | p50·표본·freshness 없으면 unknown |
+| segment baseline | segmentId+dow+hour+weather | 검증된 fact만 group | p50≤p80≤p95, sampleCount, 전량 upload 후 activate |
+
+watermark 밖 데이터는 최신 상태를 되돌리지 않지만 raw/rejected에서 추적한다. Redis 쓰기 성공 전에 변경 Kafka 이벤트를 발행하지 않는다. 다중 sink 원자성이 없으면 deterministic eventId와 재시도 시 멱등 upsert로 복구한다.
+
+**완료 증거:** 중복·순서역전·늦은 이벤트·checkpoint 재시작·Redis 부분 실패·Replay 동일성 테스트와 state 크기/lag 측정.
+
+### 15.7 B03 스케줄러·사건 wake 담당
+
+`ScheduleMonitoringPolicy.next(D,asOf)`는 D 기준 tick 표에서 다음 미래 시각을 반환하는 순수 함수로 만든다. DB due query는 `next_check_at<=now`, UPCOMING, NOT_STARTED, D가 지나지 않은 행을 batch로 읽고 `lease_token/lease_until`을 조건부 갱신한다.
+
+```text
+claim: READY/RETRY -> RUNNING, attempts+1, lease 발급
+complete current revision: RUNNING -> READY(next tick) 또는 FINISHED
+retryable failure: RUNNING -> RETRY(nextAttemptAt, errorCode)
+permanent input failure: RUNNING -> WAITING_INPUT
+lease timeout: 다른 worker가 새 token으로 재claim
+old token complete: 저장 거부
+```
+
+사건 listener는 이벤트 payload의 segmentIds를 그대로 신뢰하지 않고 mappingVersion과 `route_segment_edge`를 확인한다. `processed_impact_event` insert와 일정 `event_revision+1/next_check_at=min(current,now)`를 같은 트랜잭션에 둔다. 동일 eventId는 멱등이고 같은 incident의 새 revision은 새 평가다.
+
+**완료 증거:** T16~T19, worker 2개 동시 claim, lease 만료, listener redelivery, 일정 수정과 complete 경쟁 테스트.
+
+### 15.8 N01 알림 담당
+
+`RecommendationChangeAnalyzer`는 이전과 새 v2 결과를 입력받아 `ChangeSet`을 만든다. 비교 항목은 decision, proposedDepartAt 초 차이, routeId, usable, on-time 가능성, quality, cause revision이다. 문구 생성 전에 알림 필요 여부와 templateCode를 결정한다.
+
+평가 완료 트랜잭션은 notification을 직접 보내지 않고 outbox PENDING만 저장한다. dispatcher는 짧은 트랜잭션으로 lease를 잡고, 트랜잭션 밖에서 FCM을 호출한 뒤 별도 트랜잭션으로 SENT/RETRY/FAILED를 저장한다. 발송 직전 schedule inputRevision, journeyState, payload validUntil을 다시 확인한다.
+
+```text
+PENDING/RETRY -> SENDING (lease)
+SENDING + provider success -> SENT
+SENDING + retryable -> RETRY(nextAttemptAt)
+SENDING + permanent token failure -> 다른 device 결과 확인 후 FAILED 또는 SENT
+obsolete revision/departed/expired -> CANCELED
+alarm off/no device/policy suppressed -> SUPPRESSED
+```
+
+FCM 성공 뒤 ack 전에 죽는 경우 중복 가능성을 인정하고 `notificationId/dedupKey`를 Client에 보낸다. raw 사건 본문과 API key는 payload에 넣지 않는다.
+
+**완료 증거:** T23, 알람 off, 장치 없음, 일부 device 성공, timeout 후 재시도, stale 취소, 같은 incident revision 중복 억제 테스트.
+
+### 15.9 F01 Client 담당
+
+일정 등록 화면은 P와 D를 별도 컨트롤로 유지하고 P<D를 로컬에서 먼저 검증하되 서버 오류를 최종 기준으로 표시한다. 등록 성공 후 일정 상세로 이동하여 latest endpoint를 조회하고 P를 추천값으로 덮어쓰지 않는다.
+
+| 서버 상태 | 화면 행동 |
+|---|---|
+| PENDING/RUNNING | 마지막 유효 결과가 있으면 시각·최신성을 함께 표시, 없으면 계산 중 |
+| KEEP_DEPARTURE | 입력 P와 ETA 표시, 10분 여유 적용 문구 없음 |
+| ADVANCE_DEPARTURE | 현재 P, 제안 P, 목표 T, ETA, 수락 버튼 |
+| MARGIN_UNAVAILABLE | 가능한 출발/ETA와 ‘10분 여유 미달’을 함께 표시 |
+| ON_TIME_UNLIKELY | 가장 빠른 ETA와 지각 예상, 과거 출발 권고 금지 |
+| DATA_INSUFFICIENT/STALE | 누락 원천·마지막 확인시각, 0분/정상 기본값 금지 |
+| SEARCH_INCOMPLETE | 현재 최선과 검색 범위, 확정 최신 출발 문구 금지 |
+
+수락은 evaluationId만 보내고 409이면 최신 결과를 다시 읽는다. 알림 딥링크도 evaluationId의 유효성을 재조회한다. 앱 polling은 재계산을 매번 요청하지 않으며 백그라운드/종료 일정에서 중단한다.
+
+**완료 증거:** 각 상태 golden/widget test, nullable/unknown enum parser, 편집 후 입력 P 보존, 알림 중복 표시 억제, 409/503 복구 테스트.
+
+### 15.10 J01·O01 이동 중·Replay·운영 담당
+
+출발 endpoint는 최초 요청에서만 `actualDepartAt`을 설정하고 IN_PROGRESS로 전이한다. 위치 sequence가 이전 이하이면 무시/409 처리하고, 미래 관측·허용 정확도 밖 값은 low quality로 격리한다. 남은 여정 계산은 현재 위치에서 일반 길찾기를 매번 새로 하는 단일 방식으로 만들지 않고 탑승 확인 상태가 있으면 해당 trip/vehicle의 남은 stop부터 계산한다.
+
+Replay manifest에는 `asOf, inputRevision, candidatePayloadHash, raw archive refs, timetable/master/model/policy versions, active baseline version, event revisions, random seed(사용 시)`를 넣는다. 재생 중 wall clock이나 현재 Redis를 읽지 않는다. 동일 manifest 결과의 decision/timeline/cause/nextCheckAt hash를 비교한다.
+
+운영 대시보드는 최소 source age, queue age, evaluation p95, SEARCH_INCOMPLETE, stale/unknown 비율, outbox retry, mapping EXACT 비율을 기능 flag와 함께 보여 준다. 데이터가 오래되면 알림과 추천 수락을 어떤 순서로 제한하는지 runbook에 기록한다.
+
+**완료 증거:** 출발/도착 멱등성, 위치 순서역전, 막차·자정, 동일 Replay hash, 장애별 기능 제한과 복구 절차를 staging에서 검증한다.
+
+## 16. PR·인계 단위 완료 체크리스트
+
+각 작업 PR은 아래 항목을 모두 적는다.
+
+- 변경한 입력 원천과 정확한 필드·ID namespace·시각·단위
+- 변경한 파일과 공개 메서드, 새 DB/Kafka/Redis/API 계약
+- 정상 처리 순서와 결측·stale·중복·순서역전·외부 실패 처리
+- 결과에 남기는 source/revision/version/confidence/validUntil
+- 실행한 단위·계약·통합·Replay 테스트와 미실행 사유
+- 기능 flag, 구버전 호환, rollback 시 유지할 데이터
+- 다음 파트가 받을 fixture·schema·artifact SHA와 담당자
+
+‘API 연결’, ‘실시간 반영’, ‘알림 완료’처럼 범위를 확인할 수 없는 문구만으로 완료 처리하지 않는다. 예를 들어 ‘버스 실시간 반영’은 어느 원천의 어떤 ETA 필드를 어떤 절대시각으로 만들고, 어떤 노선/정류장 매핑과 freshness를 통과했으며, 어떤 fallback과 fixture로 검증했는지까지 있어야 한다.

@@ -131,6 +131,80 @@ WALK의 역할은 배열 위치만으로 이름을 붙이지 않고 양옆의 �
 
 카카오 총시간과 step 합의 차이 `unassignedDurationSeconds`를 대기로 단정하지 않는다. 분해 검증 없이 기존 총시간에 새 접근·이탈 도보 또는 대기를 더하지 않는다. ACCESS/EGRESS WALK가 대중교통 step에 이미 있으면 같은 역할을 **교체**하고, 없으면 provider 전체시간에 해당 비용이 숨어 있을 수 있으므로 비용 범위 검증 후 componentized 계산으로 전환한다. 검증 실패 시 별도 도보 결과를 표시용 근거로만 보존하고 provider 전체시간 fallback을 유지한다.
 
+### 4.2 버스 구간 계산 절차
+
+버스 step은 `승차 정류장 도착시각 → 탑승 가능한 차량 선택 → 인접 edge별 이동 → 하차시각` 순서로 계산한다. 카카오 step의 소요시간에 실시간 대기와 ML 이동시간을 함께 더하는 방식은 비용을 중복시킬 수 있으므로 사용하지 않는다.
+
+```text
+입력: mapped BUS step, platformArriveAt, EvaluationSnapshot
+1. routeId + boardStopId + alightStopId + occurrence로 마스터 edge 목록을 찾는다.
+2. 매핑이 EXACT가 아니면 실시간/ML 교체를 중단하고 provider fallback 품질을 남긴다.
+3. boardStop 도착 이후의 실시간 도착 후보를 원천 발생시각 기준으로 정렬한다.
+4. 운행 종료·우회·만차 등 원천 코드로 탑승 불가인 차량을 제외한다.
+5. 확인 가능한 첫째, 필요하면 둘째 차량까지만 고른다. 없는 셋째 차량을 배차간격으로 합성하지 않는다.
+6. 차량 도착시각을 boardAt으로 정하고 각 인접 edge 진입시각으로 ML/기준선 입력 hourSlot을 다시 만든다.
+7. 모든 edge가 동일한 운영 가능 모델·마스터 버전으로 평가되면 edge 시간을 합한다.
+8. 일부 edge만 유효하면 provider BUS step 전체시간 또는 하나의 검증된 기준선 정책으로 fallback한다.
+9. alightAt을 다음 WALK/TRANSFER의 시작시각으로 넘긴다.
+```
+
+실시간 버스 도착의 기준은 `mkTm + exps` 또는 원천 계약이 정의한 절대 ETA다. `collectedAt + exps`로 바꾸지 않는다. 차량 위치는 도착예측을 검증하거나 순서 역전을 찾는 보조 증거이며, 정류장 간 거리만으로 도착시각을 새로 만들지 않는다. 출발 후보가 바뀌어 승차 정류장 도착시각이 첫 차량보다 늦어지면 둘째 차량부터 전체 뒷구간을 다시 계산한다.
+
+### 4.3 지하철 구간 계산 절차
+
+지하철은 노선 평균 지연을 기존 총시간에 더하지 않고 운행 하나를 선택한 뒤 정차시각을 다시 연결한다.
+
+```text
+입력: mapped SUBWAY step, platformArriveAt, serviceDate, EvaluationSnapshot
+1. 노선·방향·승차역·하차역·급행/지선 패턴이 일치하는 정적 trip을 조회한다.
+2. 24시 초과 시간은 해당 serviceDate의 절대시각으로 변환한다.
+3. platformArriveAt 이후 승차 가능한 trip만 남기고 취소·무정차·운행중단 범위를 제외한다.
+4. staticTripKey와 실시간 providerTrainId의 EXACT crosswalk가 있을 때만 실시간 정차예측을 결합한다.
+5. 승차역 예측이 있으면 실제 탑승 가능시각을, 하차역 예측도 있으면 실제 하차예상시각을 사용한다.
+6. 하차역 예측이 없으면 동일 trip의 정적 역간 시간을 사용하되 quality=ESTIMATED와 누락 범위를 남긴다.
+7. 다음 환승 승차시각보다 늦어지면 놓친 환승을 유지하지 않고 다음 trip을 선택한다.
+8. 막차가 끝났으면 다음 운행일 첫차를 같은 날의 대기시간으로 연결하지 않는다.
+```
+
+실시간 열차 위치와 도착정보가 서로 충돌하면 갱신시각만 보고 하나를 정상으로 채택하지 않는다. 같은 운행일·열차·방향·정차순서가 확인되지 않으면 실시간 결합을 거부하고 정적 시간표 또는 정보 부족으로 낮춘다. 공지는 원인과 운행 가능성 증거이고, 분 단위 지연값은 정차예측 또는 검증된 운행 기록에서 계산한다.
+
+### 4.4 도로 사건과 경로 이용 가능성 판정
+
+도로 사건은 아래 조건을 모두 만족할 때만 해당 edge의 직접 원인이다.
+
+```text
+sameNamespace
+AND mappingStatus == EXACT
+AND directionMatches
+AND affectedModeContains(routeMode)
+AND [edgeEnterAt, edgeExitAt) overlaps [incidentStartAt, incidentEndAt)
+```
+
+`restriction=FULL`이고 위 조건이 모두 맞으면 해당 후보를 이용 불가로 처리한다. PARTIAL/UNKNOWN은 경로를 자동 제외하지 않는다. 관측 속도·제공자 재조회·검증된 모델이 새 이동시간을 산출한 경우에만 ETA를 바꾸며, 사건 종류별 고정 5분 같은 임의 가산은 금지한다. 앞 구간 지연으로 edge 통과 예정시각이 달라지면 사건 시간 겹침도 다시 검사한다.
+
+### 4.5 하나의 완성된 timeline과 비용 범위
+
+계산 결과는 각 leg마다 `role, source, startAt, endAt, durationSeconds, quality, sourceGeneratedAt, validUntil, mappingVersion, causeRefs`를 갖는다. 연속한 leg는 앞 leg의 `endAt`과 다음 leg의 `startAt`이 같아야 하고, 설명되지 않은 양수 간격은 `UNASSIGNED`로 남긴다. 이를 자동으로 WAIT로 바꾸지 않는다.
+
+`costCoverage`는 `COMPONENTIZED`, `PROVIDER_TOTAL`, `PARTIAL` 중 하나다. COMPONENTIZED는 접근 도보부터 최종 도보까지 모든 시간을 겹침 없이 설명할 때만 사용한다. PROVIDER_TOTAL에서는 별도 도보·실시간 대기·ML 값을 총시간에 가산하지 않고 비교 근거로만 남긴다. PARTIAL 결과는 수치 ETA가 있더라도 최신 출발 확정에 단독 사용하지 않는다.
+
+### 4.6 후보 평가 출력
+
+각 후보 평가는 최소 다음을 반환한다.
+
+| 필드 | 생성 규칙 |
+|---|---|
+| `candidateId`, `routeId` | 카카오 후보와 저장 route를 안정적으로 연결 |
+| `requestedDepartAt`, `effectiveDepartAt` | 사용자/탐색 입력과 과거 P 보정 결과를 분리 |
+| `estimatedArriveAt`, `durationSeconds` | 완성 timeline의 첫 시작과 마지막 종료에서 계산 |
+| `usable` | 확정 통제·운행 종료·필수 매핑 실패 등 숫자 ETA와 별도 판정 |
+| `quality`, `qualityReasons[]` | LIVE/ESTIMATED/FALLBACK/PREVIEW/INSUFFICIENT와 근거 |
+| `timeline[]` | 위 leg 계약. UI 표시값도 이 합과 일치해야 함 |
+| `causes[]` | 실제 결과에 영향을 준 사건 revision과 edge/trip 범위만 포함 |
+| `snapshotRef` | asOf, source revision, master/model/policy version hash |
+
+후보 정렬 전에 `usable=false`와 `quality=INSUFFICIENT`를 늦은 ETA 하나로 축약하지 않는다. 같은 snapshot을 사용한 후보끼리만 정시 여부와 최신 출발을 비교한다.
+
 ## 5. 최신 출발 탐색·예외
 
 ### 5.1 범위와 과거 출발
@@ -188,6 +262,21 @@ P가 과거이고 출발 확인이 없으면 P를 실행 가능한 추천으로 
 
 일정·평가 작업은 함께 커밋하고 외부 I/O는 트랜잭션 밖에서 수행한다. 완료 저장은 `inputVersion`, lease 소유권, 사건 revision을 검사한다. 수정·취소·출발 이후 도착한 이전 결과를 폐기한다. 계산 중 사건 변경은 다음 최신 평가를 예약하며 오래된 결과로 새 결과를 덮지 않는다.
 
+### 6.1 다음 실행시각 선택 절차
+
+`nextCheckAt`은 평가 종료시각에 interval을 단순 더하지 않고 D 기준 tick 집합에서 처음으로 미래인 값을 고른다.
+
+```text
+ticks = {등록 즉시, D-60, D-50, D-40, D-30,
+         D-25, D-20, D-15, D-10, D-9 ... D}
+nextScheduled = min(tick > asOf)
+nextEventWake = 사건 listener가 기록한 즉시 실행 요청
+nextRetry = 외부 장애 backoff 시각
+nextCheckAt = min(non-null(nextScheduled, nextEventWake, nextRetry))
+```
+
+여러 사건이 같은 일정을 깨워도 `eventRevision`만 증가시키고 실행 대기 행을 무한 생성하지 않는다. claim은 lease와 inputRevision을 고정하고, complete는 둘 중 하나라도 바뀌면 결과를 최신값으로 게시하지 않는다. 사건 revision이 계산 중 바뀌면 계산 결과는 감사용으로 남길 수 있지만 다음 평가를 즉시 예약하고 수락 가능한 최신 결과로 표시하지 않는다.
+
 ## 7. 통제·지연·원인
 
 - 도로는 통과 링크와 사건 링크의 namespace·방향·적용시간·차량 범위가 검증돼야 직접 영향이다. 좌표 근접이나 ‘사고’ 문자열만으로 차단하지 않는다.
@@ -198,6 +287,18 @@ P가 과거이고 출발 확인이 없으면 P를 실행 가능한 추천으로 
 - 원천 사건 ID·revision·영향 구간을 보존한다. 여러 사건의 지연초를 근거 없이 분배하지 않는다.
 - 만료·수집 실패·불완전 목록에서의 미등장은 상황 해제가 아니다. 명시적 종료 또는 종료 판정 가능한 완전 스냅샷 계약이 있어야 해제한다.
 
+### 7.1 사용자 원인으로 승격하는 절차
+
+1. 이전 결과와 새 결과의 timeline을 같은 role/edge/trip 기준으로 비교한다.
+2. ETA 또는 이용 가능성 변화가 시작된 leg를 찾는다.
+3. 그 leg의 계산에 실제 사용된 `causeRefs`만 후보 원인으로 모은다.
+4. 사건의 source, revision, 적용 범위, 시간 겹침, 매핑 품질을 다시 검증한다.
+5. 공식 FULL 통제·운행 중단처럼 인과 범위가 명확하면 구체 원인을 표시한다.
+6. 같은 시점에 여러 사건이 있고 기여분을 분리할 수 없으면 모두 ‘관련 정보’로 표시하되 단일 원인으로 단정하지 않는다.
+7. causeRefs 없이 ETA만 변했으면 `ETA_INCREASE_CAUSE_UNKNOWN`을 사용한다.
+
+알림 문구는 raw 공지 본문을 그대로 노출하지 않는다. `templateCode + 정제된 노선/구간 + 관측시각 + 새 출발/도착시각`으로 만들고, 원문 ID는 운영 추적 필드에 둔다.
+
 ## 8. 품질·이동 중·알림
 
 실시간 반영 여부, 원천 시각, 매핑 품질, fallback, 표본 수, 모델·시간표·정책 버전, 결과 유효기간을 남긴다. 평균 예측을 P80/P95로 표시하지 않는다. 구간 분위수 합을 전체 경로 도착확률로 해석하지 않는다. 조건부 10분 목표와 예측 오차/신뢰도는 별개다.
@@ -205,6 +306,20 @@ P가 과거이고 출발 확인이 없으면 P를 실행 가능한 추천으로 
 출발 후에는 과거 출발시각 변경 권고를 중단한다. 현재 위치·시각·탑승 상태에서 남은 여정을 평가한다. 권한 거절·오래된 위치면 정확한 우회 경로를 만들어 내지 않는다. 현재 `/departure`의 감시 중단만으로 이동 중 재탐색이 완성된 것은 아니다.
 
 동일 평가 재처리·동일 사건 재수집은 중복 알림을 만들지 않는다. 통제·정시 가능성 변화·출발 변경·경로 변경·확인된 해제를 구별한다. PREVIEW 운영 권고 제한을 이번 문서만으로 해제하지 않는다. 공식 통제 사실 전달은 예측 모델 승인과 별도로 검증할 수 있다.
+
+### 8.1 품질에 따른 기능 허용표
+
+| 결과 품질 | 화면 표시 | 추천 수락 | 원인 알림 |
+|---|---|---|---|
+| LIVE + 필수 매핑/범위 완전 | ETA·출발·근거 표시 | 정책·유효기간 통과 시 허용 | 직접 영향 사건만 허용 |
+| ESTIMATED | 추정 범위와 누락 표시 | 제품 정책이 허용한 fallback만 | 공식 사실과 추정을 분리 |
+| PROVIDER_TOTAL fallback | 카카오 원본 기준임을 표시 | 기존 허용 범위만 | 별도 계산값을 원인으로 사용 금지 |
+| PREVIEW | 비교용 결과 표시 | 차단 유지 | 공식 사건 자체의 사실 알림만 별도 가능 |
+| INSUFFICIENT/STALE | 마지막 결과와 최신성 표시 | 새 추천 수락 차단 | ‘확인 불가’ 외 구체 원인 단정 금지 |
+
+### 8.2 출발 전과 이동 중 상태 분리
+
+`NOT_STARTED`에서는 P 유지/앞당김과 경로 변경을 계산한다. 출발 확인으로 `IN_PROGRESS`가 되면 `plannedDepartAt`을 더 이상 바꾸지 않고 `actualDepartAt`과 마지막 유효 위치·탑승 상태에서 남은 timeline만 만든다. `ARRIVED` 또는 취소에서는 평가·알림 작업을 종료한다. 위치가 오래되거나 정확도가 부족하면 남은 경로를 정밀 계산하지 않고 상태 확인을 요청한다.
 
 ## 9. 손계산 검증 사례
 

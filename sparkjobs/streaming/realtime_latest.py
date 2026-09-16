@@ -1,4 +1,4 @@
-"""비기상 실시간 이벤트를 정규화한다. 버스 Silver는 HDFS와 Redis 양쪽에 저장한다.
+"""비기상 실시간 이벤트를 정규화한다. Redis 최신값은 메인 스트림이, 버스 Silver(HDFS 이력)는 별도 스트림이 저장한다.
 
 파이프라인 위치는 ``Collector → Kafka(transport.raw/city.raw) → 이 Spark 잡 → Redis``다.
 Kafka 원문은 별도 Archiver가 Parquet/HDFS에 보존하므로 이 잡은 서비스가 지금 필요한 작은
@@ -38,7 +38,7 @@ from common.redis_sink import (
     write_latest_with_row_ttl,
 )
 from common.settings import Settings
-from common.bus_stream_sink import output_uri, prepare_live, save_batch
+from common.bus_stream_sink import output_uri, prepare_live, write_bus_redis, write_bus_silver
 
 JOB_NAME = os.environ.get("SPARK_JOB_NAME", "realtime_latest")
 # Spark Kafka의 subscribe 옵션은 쉼표 구분 토픽을 지원한다. 하나의 checkpoint에 두 토픽의
@@ -386,22 +386,24 @@ def to_redis_rows(df: DataFrame) -> DataFrame:
     )
 
 
-def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crosswalk=None, bus_output=None) -> None:
-    """운영과 반복 부하 검증이 공유하는 한 배치 처리다.
+def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crosswalk=None) -> None:
+    """메인 스트림의 한 배치 처리다. 모든 이벤트의 Redis 최신값만 쓴다(HDFS는 별도 스트림).
 
     정적 crosswalk는 호출자가 전체 query 수명 동안 소유한다. 이 함수는 배치별 캐시만
-    소유하고 Redis 쓰기 실패를 상위로 전파해 checkpoint가 실패 배치를 건너뛰지 않게 한다.
+    소유한다. 버스는 Silver 정규화(prepare_live)로 만든 풍부한 형식으로 Redis에 쓰고,
+    지하철·도시·교통은 일반 경로로 쓴다. 어느 쪽이든 Redis 쓰기 실패는 상위로 전파해
+    checkpoint가 실패 배치를 건너뛰지 않게 한다. 버스 Silver(HDFS 이력)는 이 함수가 아니라
+    별도 버스 Silver 스트림이 담당한다.
     """
-    if bus_output is not None:
-        bus_events = batch_df.filter(F.col("eventType").isin("bus.position", "bus.arrival"))
-        if bus_events.limit(1).count():
-            silver = prepare_live(bus_events, transform(bus_events, crosswalk)).cache()
-            try:
-                count = save_batch(silver, batch_id, bus_output, settings)
-                log.info("batch=%d busSilverRows=%d busRedisKeys=%d busSilver=%s", batch_id, silver.count(), count, bus_output)
-            finally:
-                silver.unpersist()
-        batch_df = batch_df.filter(~F.col("eventType").isin("bus.position", "bus.arrival"))
+    bus_events = batch_df.filter(F.col("eventType").isin("bus.position", "bus.arrival"))
+    if bus_events.limit(1).count():
+        silver = prepare_live(bus_events, transform(bus_events, crosswalk)).cache()
+        try:
+            bus_keys = write_bus_redis(silver, settings)
+            log.info("batch=%d busRedisKeys=%d", batch_id, bus_keys)
+        finally:
+            silver.unpersist()
+    batch_df = batch_df.filter(~F.col("eventType").isin("bus.position", "bus.arrival"))
     normalized = transform(batch_df,crosswalk).cache()
     latest = None
     rows = None
@@ -440,8 +442,33 @@ def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crossw
         normalized.unpersist()
 
 
+def process_bus_silver(batch_df: DataFrame, batch_id: int, crosswalk, root: str) -> None:
+    """버스 Silver 스트림의 한 배치 처리다. 버스 이벤트를 HDFS Silver 이력으로만 쓴다.
+
+    Redis는 메인 스트림이 담당하므로 여기서는 쓰지 않는다. HDFS 쓰기 실패는 상위로 전파해
+    이 스트림의 checkpoint가 실패 배치를 건너뛰지 않게 한다. 그래서 HDFS가 회복되면 빠진
+    구간을 다시 쓴다. 이 실패는 메인 Redis 스트림과 분리돼 있어 서비스에는 영향이 없다.
+    """
+    bus_events = batch_df.filter(F.col("eventType").isin("bus.position", "bus.arrival"))
+    if not bus_events.limit(1).count():
+        return
+    silver = prepare_live(bus_events, transform(bus_events, crosswalk)).cache()
+    try:
+        rows = silver.count()
+        path = write_bus_silver(silver, batch_id, root)
+        silver.sparkSession.createDataFrame([(batch_id,)], "batchId long").write.mode("overwrite").json(path + "/complete")
+        log.info("busSilver batch=%d rows=%d out=%s", batch_id, rows, root)
+    finally:
+        silver.unpersist()
+
+
 def main() -> int:
-    """두 원본 토픽을 지속 소비하고 배치별 최신 상태를 Redis에 멱등 저장한다."""
+    """실시간 최신값을 Redis에 쓰는 메인 스트림과, 버스 Silver를 HDFS에 쓰는 스트림을 함께 돌린다.
+
+    메인 스트림은 서비스가 읽는 값이라 필수다. 실패하면 잡을 실패시켜 재시작·재처리를 유도한다.
+    버스 Silver 스트림은 이력 저장이라 선택이다. 실패하면 기록만 남기고 메인은 계속 진행한다.
+    이 구조는 weather_latest.py의 Redis·Silver 분리와 같다.
+    """
 
     logging.basicConfig(
         level=logging.INFO,
@@ -449,7 +476,8 @@ def main() -> int:
         stream=sys.stdout,
     )
     settings = Settings.from_env()
-    bus_output = output_uri(os.environ)
+    # 값이 비어 있으면 버스 Silver 스트림을 켜지 않는다. 형식이 틀리면 output_uri가 즉시 실패한다.
+    bus_silver_uri = os.environ.get("BUS_SILVER_OUTPUT_URI", "").strip()
     spark = (
         SparkSession.builder.appName(f"ddubi-{JOB_NAME}")
         .config("spark.sql.session.timeZone", "Asia/Seoul")
@@ -460,24 +488,45 @@ def main() -> int:
     crosswalk_path=os.environ.get("BUS_CROSSWALK_PATH")
     crosswalk=load_crosswalk(spark,crosswalk_path,os.environ.get("BUS_CROSSWALK_SHA256")) if crosswalk_path else None
 
-
     try:
         events = read_events_stream(spark, settings, TOPICS)
-        query = (
-            events.writeStream.foreachBatch(lambda frame, batch_id: process_batch(frame, batch_id, settings, crosswalk, bus_output))
+        main_query = (
+            events.writeStream.foreachBatch(lambda frame, batch_id: process_batch(frame, batch_id, settings, crosswalk))
             .option("checkpointLocation", settings.checkpoint_for(JOB_NAME))
             .trigger(processingTime=TRIGGER)
             .queryName(JOB_NAME)
             .start()
         )
-        log.info(
-            "started topics=%s checkpoint=%s redis=%s:%s",
-            TOPICS,
-            settings.checkpoint_for(JOB_NAME),
-            settings.redis_host,
-            settings.redis_port,
-        )
-        query.awaitTermination()
+        log.info("started main topics=%s checkpoint=%s redis=%s:%s",
+                 TOPICS, settings.checkpoint_for(JOB_NAME), settings.redis_host, settings.redis_port)
+
+        silver_query = None
+        if bus_silver_uri:
+            root = output_uri(os.environ)
+            silver_job = f"{JOB_NAME}_bus_silver"
+            bus_stream = read_events_stream(spark, settings, "transport.raw")
+            silver_query = (
+                bus_stream.writeStream.foreachBatch(lambda frame, batch_id: process_bus_silver(frame, batch_id, crosswalk, root))
+                .option("checkpointLocation", settings.checkpoint_for(silver_job))
+                .trigger(processingTime=TRIGGER)
+                .queryName(silver_job)
+                .start()
+            )
+            log.info("started bus silver topic=transport.raw checkpoint=%s out=%s startingOffsets=%s",
+                     settings.checkpoint_for(silver_job), root, settings.starting_offsets)
+        else:
+            log.info("bus silver stream disabled (BUS_SILVER_OUTPUT_URI 비어 있음)")
+
+        # 메인은 필수, 버스 Silver는 선택이다. 메인이 끝나면 잡을 끝내고, 버스 Silver가 죽으면 기록 후 메인만 이어 간다.
+        while True:
+            if main_query.awaitTermination(30):
+                error = main_query.exception()
+                if error is not None:
+                    raise RuntimeError("메인 Redis 스트림이 실패했다: %s" % error)
+                raise RuntimeError("메인 Redis 스트림이 예기치 않게 멈췄다")
+            if silver_query is not None and not silver_query.isActive:
+                log.error("버스 Silver 스트림이 멈췄다. 메인 Redis 스트림은 계속 진행한다: %s", silver_query.exception())
+                silver_query = None
     finally:
         # 정적 인덱스는 배치 종료마다 해제하지 않는다. 전체 query가 끝난 뒤에만 반환한다.
         if crosswalk is not None:

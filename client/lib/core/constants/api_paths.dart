@@ -44,5 +44,6 @@ class ApiPaths {
       '/recommendations/$recommendationId/explanation';
   static String route(String routeId) => '/routes/$routeId';
   static const String routeSearch = '/routes/search';
+  static const String routeEvaluate = '/routes/evaluate';
   static String routeMap(String routeId) => '${route(routeId)}/map';
 }

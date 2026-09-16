@@ -1,0 +1,95 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:ddubi/domain/schedule_evaluation.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+Future<ScheduleEvaluationV2> _fixture(String name) async {
+  final raw = await File('test/fixtures/schedule_evaluation_$name.json')
+      .readAsString();
+  return ScheduleEvaluationV2.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+}
+
+void main() {
+  test('공통 fixture의 상태와 결정을 typed enum으로 파싱한다', () async {
+    final cases = <String, DepartureDecision>{
+      'keep': DepartureDecision.keepDeparture,
+      'advance': DepartureDecision.advanceDeparture,
+      'margin': DepartureDecision.marginUnavailable,
+      'late': DepartureDecision.lateExpected,
+      'data': DepartureDecision.dataInsufficient,
+      'search': DepartureDecision.searchIncomplete,
+    };
+
+    for (final entry in cases.entries) {
+      final evaluation = await _fixture(entry.key);
+      expect(evaluation.state, EvaluationState.ready, reason: entry.key);
+      expect(evaluation.decision, entry.value, reason: entry.key);
+    }
+
+    final running = await _fixture('running');
+    expect(running.state, EvaluationState.running);
+    expect(running.decision, DepartureDecision.unknown);
+  });
+
+  test('알 수 없는 enum은 예외 없이 원문을 보존하고 수락을 차단한다', () async {
+    final evaluation = await _fixture('unknown');
+
+    expect(evaluation.state, EvaluationState.unknown);
+    expect(evaluation.stateRaw, 'QUEUED_BY_NEW_SERVER');
+    expect(evaluation.decision, DepartureDecision.unknown);
+    expect(evaluation.decisionRaw, 'NEW_DECISION');
+    expect(evaluation.legs.single.role, RouteLegRole.unknown);
+    expect(evaluation.legs.single.roleRaw, 'NEW_WALK_ROLE');
+    expect(evaluation.legs.single.durationSource, DurationSource.unknown);
+    expect(evaluation.legs.single.durationSourceRaw, 'NEW_SOURCE');
+    expect(evaluation.canAcceptAt(DateTime(2026, 9, 18)), isFalse);
+  });
+
+  test('Z와 +09:00 시각 및 날짜 경계를 같은 절대시각으로 보존한다', () async {
+    final evaluation = await _fixture('keep');
+
+    expect(evaluation.plannedDepartAt, DateTime.utc(2026, 9, 17, 14, 50));
+    expect(evaluation.arriveBy, DateTime.utc(2026, 9, 17, 15, 40));
+    expect(evaluation.computedAt, DateTime.utc(2026, 9, 17, 14, 45));
+  });
+
+  test('nullable ETA, 만료, PREVIEW와 production gate를 구분한다', () async {
+    final data = await _fixture('data');
+    final keep = await _fixture('keep');
+
+    expect(data.estimatedArrivalAt, isNull);
+    expect(data.quality.preview, isTrue);
+    expect(data.canAcceptAt(DateTime(2026, 9, 18)), isFalse);
+    expect(keep.canAcceptAt(DateTime(2026, 9, 18)), isTrue);
+    expect(keep.isExpiredAt(DateTime.utc(2100)), isTrue);
+    expect(keep.canAcceptAt(DateTime.utc(2100)), isFalse);
+  });
+
+  test('도보 역할, 계산 출처와 endpoint 검증 근거를 보존한다', () async {
+    final evaluation = await _fixture('keep');
+
+    expect(evaluation.legs.map((leg) => leg.role), [
+      RouteLegRole.accessWalk,
+      RouteLegRole.ride,
+      RouteLegRole.transferWalk,
+      RouteLegRole.egressWalk,
+    ]);
+    expect(
+      evaluation.legs.first.durationSource,
+      DurationSource.kakaoWalkingApi,
+    );
+    expect(evaluation.legs.first.endpointEvidence?.verified, isTrue);
+    expect(evaluation.quality.walkingApiCoverage, 'BOTH');
+  });
+
+  test('구버전 응답은 검증용 비운영 결과로 안전하게 변환한다', () async {
+    final evaluation = await _fixture('legacy');
+
+    expect(evaluation.isLegacy, isTrue);
+    expect(evaluation.state, EvaluationState.ready);
+    expect(evaluation.quality.preview, isTrue);
+    expect(evaluation.quality.productionEligible, isFalse);
+    expect(evaluation.canAcceptAt(DateTime(2026, 9, 18)), isFalse);
+  });
+}

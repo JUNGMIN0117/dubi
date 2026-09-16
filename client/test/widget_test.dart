@@ -417,8 +417,8 @@ void main() {
     expect(
       saved.any(
         (schedule) =>
-            schedule.plannedDepartAt?.hour == 18 &&
-            schedule.plannedDepartAt?.minute == 30,
+            schedule.plannedDepartAt != null &&
+            schedule.plannedDepartAt!.isBefore(schedule.arriveBy),
       ),
       isTrue,
     );
@@ -546,7 +546,11 @@ void main() {
 
     expect(find.text('일정 수정'), findsWidgets);
     await tester.enterText(find.byType(TextFormField).first, '수정된 팀 회의');
-    // 이전 Mock 일정에는 출발시각이 없어 도착 희망 시간 1시간 전으로 초기화된다.
+    // 이전 Mock 일정에는 출발시각이 없으므로 자동 역산하지 않고 사용자가 직접 확인한다.
+    await tester.tap(find.byKey(const Key('scheduleDepartureTimeButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(TextButton).last);
+    await tester.pumpAndSettle();
     await tester.fling(
       find.byType(ListView).last,
       const Offset(0, -1400),
@@ -560,7 +564,7 @@ void main() {
     final updated = await repository.scheduleById('schedule-meeting');
     expect(updated?.title, '수정된 팀 회의');
     expect(updated?.updatedAt, isNotNull);
-    expect(updated?.plannedDepartAt?.hour, 8);
+    expect(updated?.plannedDepartAt, isNotNull);
   });
 
   testWidgets('일정 상세의 저장 경로에서 실제 구간과 지도 좌표를 연다', (tester) async {
@@ -699,7 +703,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('placeSearchResult0')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('추천 경로 찾기'));
+    await tester.ensureVisible(find.text('경로 평가하기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('경로 평가하기'));
     await tester.pumpAndSettle();
 
     expect(find.text('추천 결과'), findsOneWidget);
@@ -736,6 +742,7 @@ void main() {
       extra: RouteSearchCondition(
         origin: const PlaceLocation(name: '강남역', lat: 37.49, lng: 127.02),
         destination: const PlaceLocation(name: '여의도역', lat: 37.52, lng: 126.92),
+        plannedDepartAt: DateTime(2026, 9, 2, 9),
         desiredArrivalAt: DateTime(2026, 9, 2, 10),
       ),
     );
@@ -744,7 +751,10 @@ void main() {
     expect(find.byKey(const Key('webRouteResultsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webRouteResultsGrid')), findsOneWidget);
     expect(find.byKey(const Key('mobileRouteResultsLayout')), findsNothing);
-    expect(find.byType(RouteCard), findsOneWidget);
+    expect(
+      find.byType(RouteCard),
+      findsNWidgets(MockDdubiRepository.routeData.length),
+    );
   });
 
   testWidgets('전체 지도는 Web에서 지도와 상세 정보를 좌우로 표시한다', (tester) async {
@@ -982,6 +992,7 @@ void main() {
               lat: 37.52,
               lng: 126.92,
             ),
+            plannedDepartAt: DateTime(2026, 9, 1, 9),
             desiredArrivalAt: DateTime(2026, 9, 1, 10),
           ),
         ),
@@ -1109,6 +1120,11 @@ class _FakePlaceSearchService implements PlaceSearchService {
 
 class _FakeRecommendationApi extends RecommendationApi {
   _FakeRecommendationApi() : super(Dio());
+
+  @override
+  Future<RouteEvaluationResult> evaluateOrSearch(
+    RouteSearchCondition condition,
+  ) async => RouteEvaluationResult.candidates(MockDdubiRepository.routeData);
 
   @override
   Future<List<RouteOption>> searchRoutes(

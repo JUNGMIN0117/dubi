@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../core/constants/layout_constants.dart';
 import '../core/theme.dart';
 import '../domain/models.dart';
+import '../domain/schedule_evaluation.dart';
 import '../presentation/screens.dart';
 import '../providers/app_providers.dart';
 
@@ -140,6 +141,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => NotificationDetailScreen(
                   api: notificationApi,
                   notificationId: state.pathParameters['id']!,
+                  evaluationRepository:
+                      scheduleRepository is ScheduleEvaluationRepository
+                      ? scheduleRepository as ScheduleEvaluationRepository
+                      : null,
                 ),
               ),
             ],

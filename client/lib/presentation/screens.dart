@@ -2751,6 +2751,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   late DateTime arrivalDate;
   late TimeOfDay departureTime;
   late TimeOfDay arrivalTime;
+  late bool departureConfirmed;
   final formKey = GlobalKey<FormState>();
   late final TextEditingController title;
   PlaceLocation? origin;
@@ -2772,7 +2773,8 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         );
     final departAt =
         schedule?.plannedDepartAt ??
-        arriveBy.subtract(const Duration(hours: 1));
+        DateTime.now().add(const Duration(minutes: 30));
+    departureConfirmed = schedule == null || schedule.plannedDepartAt != null;
     arrivalDate = arriveBy;
     arrivalTime = TimeOfDay.fromDateTime(arriveBy);
     departureDate = departAt;
@@ -2854,6 +2856,14 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                     onDatePressed: () => _pickDate(context, arrival: false),
                     onTimePressed: () => _pickTime(context, arrival: false),
                   ),
+                  if (!departureConfirmed)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        '기존 일정에 출발 예정시각이 없습니다. 날짜 또는 시간을 확인해 주세요.',
+                        style: TextStyle(color: DdubiColors.red, fontSize: 12),
+                      ),
+                    ),
                   const SizedBox(height: 15),
                   PlaceSearchField(
                     key: const Key('destinationPlaceField'),
@@ -3058,6 +3068,11 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   Future<void> _save() async {
     if (!(formKey.currentState?.validate() ?? false)) return;
     if (origin == null || destination == null) return;
+    if (!departureConfirmed) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('출발 예정시각을 직접 확인해 주세요.')));
+      return;
+    }
     final plannedDeparture = DateTime(
       departureDate.year,
       departureDate.month,
@@ -3132,6 +3147,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         arrivalDate = selected;
       } else {
         departureDate = selected;
+        departureConfirmed = true;
       }
     });
   }
@@ -3147,6 +3163,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
         arrivalTime = selected;
       } else {
         departureTime = selected;
+        departureConfirmed = true;
       }
     });
   }
@@ -4234,10 +4251,10 @@ class RouteResultsScreen extends StatelessWidget {
     index: go == null ? null : 1,
     onNav: go,
     actions: const [IconButton(onPressed: null, icon: Icon(Icons.refresh))],
-    child: FutureBuilder<List<RouteOption>>(
+    child: FutureBuilder<RouteEvaluationResult>(
       future: condition == null
-          ? repository.routes()
-          : api.searchRoutes(condition!),
+          ? repository.routes().then(RouteEvaluationResult.candidates)
+          : api.evaluateOrSearch(condition!),
       builder: (c, s) {
         if (s.hasError) {
           return const DataLoadError(message: '추천 경로를 불러오지 못했어요.');
@@ -4245,24 +4262,37 @@ class RouteResultsScreen extends StatelessWidget {
         if (!s.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        final route = _primaryRoute(s.data!);
-        if (route == null) {
-          return const Center(child: Text('표시할 추천 경로가 없어요.'));
+        final result = s.data!;
+        if (result.evaluation != null) {
+          return ListView(
+            padding: _pad,
+            children: [
+              if (condition != null) ...[
+                _RouteSearchSummary(condition: condition!),
+                const SizedBox(height: 12),
+              ],
+              ScheduleEvaluationSummary(evaluation: result.evaluation!),
+            ],
+          );
+        }
+        final routes = result.candidates;
+        if (routes.isEmpty) {
+          return const Center(child: Text('표시할 경로 후보가 없어요.'));
         }
         return LayoutBuilder(
           builder: (context, constraints) {
             final isWide =
                 constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
             return isWide
-                ? _webRouteResults(c, route)
-                : _mobileRouteResults(c, route);
+                ? _webRouteResults(c, routes)
+                : _mobileRouteResults(c, routes);
           },
         );
       },
     ),
   );
 
-  Widget _mobileRouteResults(BuildContext context, RouteOption route) =>
+  Widget _mobileRouteResults(BuildContext context, List<RouteOption> routes) =>
       ListView(
         key: const Key('mobileRouteResultsLayout'),
         padding: _pad,
@@ -4271,46 +4301,59 @@ class RouteResultsScreen extends StatelessWidget {
             _RouteSearchSummary(condition: condition!),
             const SizedBox(height: 12),
           ],
-          _routeGuide,
+          _candidateGuide,
           const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: RouteCard(route, onTap: () => _openRouteMap(context, route)),
-          ),
-          _recommendationReason(route),
+          for (final route in routes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: RouteCard(
+                route,
+                onTap: () => _openRouteMap(context, route),
+              ),
+            ),
+          _candidateNotice,
         ],
       );
 
-  Widget _webRouteResults(BuildContext context, RouteOption route) => ListView(
-    key: const Key('webRouteResultsLayout'),
-    padding: _pad,
-    children: [
-      if (condition != null) ...[
-        _RouteSearchSummary(condition: condition!),
-        const SizedBox(height: 16),
-      ],
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _webRouteResults(BuildContext context, List<RouteOption> routes) =>
+      ListView(
+        key: const Key('webRouteResultsLayout'),
+        padding: _pad,
         children: [
-          const Expanded(flex: 3, child: _routeGuide),
-          const SizedBox(width: 16),
-          Expanded(flex: 2, child: _recommendationReason(route)),
+          if (condition != null) ...[
+            _RouteSearchSummary(condition: condition!),
+            const SizedBox(height: 16),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(flex: 3, child: _candidateGuide),
+              const SizedBox(width: 16),
+              const Expanded(flex: 2, child: _candidateNotice),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text('경로 후보', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          Wrap(
+            key: const Key('webRouteResultsGrid'),
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final route in routes)
+                SizedBox(
+                  width: 320,
+                  child: RouteCard(
+                    route,
+                    compact: true,
+                    fillWidth: true,
+                    onTap: () => _openRouteMap(context, route),
+                  ),
+                ),
+            ],
+          ),
         ],
-      ),
-      const SizedBox(height: 20),
-      Text('추천 경로', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 12),
-      KeyedSubtree(
-        key: const Key('webRouteResultsGrid'),
-        child: RouteCard(
-          route,
-          compact: true,
-          fillWidth: true,
-          onTap: () => _openRouteMap(context, route),
-        ),
-      ),
-    ],
-  );
+      );
 
   void _openRouteMap(BuildContext context, RouteOption route) => _open(
     context,
@@ -4321,8 +4364,8 @@ class RouteResultsScreen extends StatelessWidget {
     ),
   );
 
-  static const _routeGuide = TtubeeGuideCard(
-    '이 경로가 지금 가장 안정적이에요!',
+  static const _candidateGuide = TtubeeGuideCard(
+    '서버 평가 기능이 준비 중이라 경로 후보만 보여드려요.',
     compact: true,
     character: TtubeeEntrance(
       asset: 'assets/images/ttubee/route-guide.png',
@@ -4332,21 +4375,18 @@ class RouteResultsScreen extends StatelessWidget {
     ),
   );
 
-  Widget _recommendationReason(RouteOption route) => InfoCard(
-    color: const Color(0xFFF4F8FF),
+  static const _candidateNotice = InfoCard(
+    color: Color(0xFFF4F8FF),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const StatusBadge(
-          '추천 이유',
+        StatusBadge(
+          '단순 경로 후보',
           tone: DdubiColors.blue,
           icon: Icons.lightbulb_outline,
         ),
-        const SizedBox(height: 10),
-        Text(
-          '${route.transport} 경로 중 예상 이동시간이 적합한 후보예요.\n'
-          '${route.detail} · ${route.margin} · ${route.fare}',
-        ),
+        SizedBox(height: 10),
+        Text('출발 추천과 예상 도착은 서버 평가 결과가 준비된 뒤 표시합니다.'),
       ],
     ),
   );
@@ -4370,19 +4410,24 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
   final _formKey = GlobalKey<FormState>();
   PlaceLocation? _origin;
   PlaceLocation? _destination;
+  late DateTime _plannedDepartAt;
   late DateTime _desiredArrivalAt;
+  late final TextEditingController _departure;
   late final TextEditingController _arrival;
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
+    _plannedDepartAt = now.add(const Duration(minutes: 30));
     _desiredArrivalAt = DateTime(now.year, now.month, now.day + 1, 10);
+    _departure = TextEditingController(text: _formatArrival(_plannedDepartAt));
     _arrival = TextEditingController(text: _formatArrival(_desiredArrivalAt));
   }
 
   @override
   void dispose() {
+    _departure.dispose();
     _arrival.dispose();
     super.dispose();
   }
@@ -4456,6 +4501,18 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
         ],
         const SizedBox(height: 12),
         TextFormField(
+          key: const Key('routeDepartureTimeField'),
+          controller: _departure,
+          readOnly: true,
+          onTap: _pickDeparture,
+          decoration: const InputDecoration(
+            labelText: '출발 예정시간',
+            prefixIcon: Icon(Icons.directions_walk_outlined),
+            suffixIcon: Icon(Icons.edit_calendar_outlined),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
           key: const Key('routeArrivalField'),
           controller: _arrival,
           readOnly: true,
@@ -4467,7 +4524,7 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        PrimaryButton('추천 경로 찾기', onPressed: _search),
+        PrimaryButton('경로 평가하기', onPressed: _search),
       ],
     ),
   );
@@ -4488,7 +4545,9 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
             onTap: () => setState(() {
               _origin = item.origin;
               _destination = item.destination;
+              _plannedDepartAt = item.plannedDepartAt;
               _desiredArrivalAt = item.desiredArrivalAt;
+              _departure.text = _formatArrival(_plannedDepartAt);
               _arrival.text = _formatArrival(_desiredArrivalAt);
             }),
           ),
@@ -4537,6 +4596,31 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
     });
   }
 
+  Future<void> _pickDeparture() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _plannedDepartAt,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_plannedDepartAt),
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      _plannedDepartAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      _departure.text = _formatArrival(_plannedDepartAt);
+    });
+  }
+
   void _search() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_origin == null || _destination == null) {
@@ -4544,9 +4628,16 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
           .showSnackBar(const SnackBar(content: Text('출발지와 도착지를 검색해 선택해주세요.')));
       return;
     }
+    if (!_plannedDepartAt.isBefore(_desiredArrivalAt)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('출발 예정시간은 도착 희망시간보다 앞서야 합니다.')),
+      );
+      return;
+    }
     final condition = RouteSearchCondition(
       origin: _origin!,
       destination: _destination!,
+      plannedDepartAt: _plannedDepartAt,
       desiredArrivalAt: _desiredArrivalAt,
     );
     setState(() => _RouteSearchHistory.add(condition));
@@ -4598,6 +4689,7 @@ class _RouteSearchSummary extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
+        Text('${_formatArrival(condition.plannedDepartAt)} 출발 예정'),
         Text('${_formatArrival(condition.desiredArrivalAt)}까지 도착'),
         Align(
           alignment: Alignment.centerRight,
@@ -5809,6 +5901,7 @@ class _RouteDeviationBanner extends StatelessWidget {
 }
 
 Color _routeTone(RouteKind kind) => switch (kind) {
+  RouteKind.candidate => DdubiColors.blue,
   RouteKind.recommended => DdubiColors.green,
   RouteKind.fastest => DdubiColors.blue,
   RouteKind.safest => const Color(0xFF7257E8),
@@ -5855,6 +5948,7 @@ class _MapPainter extends CustomPainter {
     required bool selected,
   }) {
     final offset = switch (kind) {
+      RouteKind.candidate => 0.0,
       RouteKind.recommended => 0.0,
       RouteKind.fastest => -18.0,
       RouteKind.safest => 18.0,
@@ -6696,10 +6790,12 @@ class NotificationDetailScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.notificationId,
+    this.evaluationRepository,
   });
 
   final NotificationApi api;
   final String notificationId;
+  final ScheduleEvaluationRepository? evaluationRepository;
 
   @override
   State<NotificationDetailScreen> createState() =>
@@ -6707,20 +6803,30 @@ class NotificationDetailScreen extends StatefulWidget {
 }
 
 class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
-  late final Future<AppNotification> notification = _load();
+  late final Future<_NotificationDetailData> notification = _load();
 
-  Future<AppNotification> _load() async {
+  Future<_NotificationDetailData> _load() async {
     final item = await widget.api.getNotification(widget.notificationId);
     if (item.isUnread) {
       await widget.api.markRead(item.id);
     }
-    return item;
+    ScheduleEvaluationV2? latest;
+    if (item.scheduleId != null && widget.evaluationRepository != null) {
+      try {
+        latest = await widget.evaluationRepository!.latestEvaluation(
+          item.scheduleId!,
+        );
+      } on Object {
+        latest = null;
+      }
+    }
+    return _NotificationDetailData(item: item, latest: latest);
   }
 
   @override
   Widget build(BuildContext context) => AppPage(
     title: '알림 상세',
-    child: FutureBuilder<AppNotification>(
+    child: FutureBuilder<_NotificationDetailData>(
       future: notification,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -6730,13 +6836,30 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final item = snapshot.data!;
+        final data = snapshot.data!;
+        final item = data.item;
+        final isCurrent =
+            item.evaluationId != null &&
+            data.latest?.evaluationId == item.evaluationId;
         return ListView(
           padding: _pad,
           children: [
             Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(item.body),
+            if (item.decision != null) ...[
+              const SizedBox(height: 12),
+              Text('알림 판단: ${item.decision}'),
+            ],
+            if (item.evaluationId != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                isCurrent
+                    ? '현재 최신 평가와 같은 알림입니다.'
+                    : '이 알림 이후 추천이 변경됐을 수 있습니다. 연결된 일정에서 최신 결과를 확인해 주세요.',
+                key: const Key('notificationEvaluationFreshness'),
+              ),
+            ],
             const SizedBox(height: 20),
             if (item.scheduleId != null)
               FilledButton.icon(
@@ -6749,6 +6872,13 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
       },
     ),
   );
+}
+
+class _NotificationDetailData {
+  const _NotificationDetailData({required this.item, this.latest});
+
+  final AppNotification item;
+  final ScheduleEvaluationV2? latest;
 }
 
 class AccountManagementScreen extends StatefulWidget {

@@ -1,4 +1,4 @@
-enum RouteKind { recommended, fastest, safest }
+enum RouteKind { candidate, recommended, fastest, safest }
 
 enum ScheduleImportance {
   normal('NORMAL'),
@@ -101,11 +101,13 @@ class RouteSearchCondition {
   const RouteSearchCondition({
     required this.origin,
     required this.destination,
+    required this.plannedDepartAt,
     required this.desiredArrivalAt,
   });
 
   final PlaceLocation origin;
   final PlaceLocation destination;
+  final DateTime plannedDepartAt;
   final DateTime desiredArrivalAt;
 
   String get departurePlace => origin.name;
@@ -354,11 +356,15 @@ class AppNotification {
     required this.status,
     required this.createdAt,
     this.scheduleId,
+    this.evaluationId,
+    this.decision,
     this.readAt,
   });
 
   final String id;
   final String? scheduleId;
+  final String? evaluationId;
+  final String? decision;
   final String type;
   final String title;
   final String body;
@@ -372,6 +378,8 @@ class AppNotification {
       AppNotification(
         id: json['id'].toString(),
         scheduleId: json['scheduleId']?.toString(),
+        evaluationId: json['evaluationId']?.toString(),
+        decision: json['decision']?.toString(),
         type: json['type'] as String? ?? 'INFO',
         title: json['title'] as String? ?? '',
         body: json['body'] as String? ?? '',

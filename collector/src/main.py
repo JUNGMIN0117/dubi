@@ -23,6 +23,7 @@ from publisher import Publisher
 from sources.base import SourceSpec, now_kst
 from sources.subway_schedule import pause_until, SkippedNonService
 from request_budget import RetryScheduled, RetryWait, RequestBudget
+from notice_dedup import NoticeDedup, publish_notices
 
 log = logging.getLogger("collector")
 
@@ -52,9 +53,14 @@ def fetch_with_retry(spec: SourceSpec, settings: Settings, client: httpx.Client)
     return spec.fetch(settings, client)
 
 
-def run_cycle(spec: SourceSpec, settings: Settings, client: httpx.Client, publisher: Publisher) -> int:
+def run_cycle(spec: SourceSpec, settings: Settings, client: httpx.Client, publisher: Publisher, notice_gate=None) -> int:
     records = fetch_with_retry(spec, settings, client)
     collected_at = now_kst()
+    if settings.source == "topis_notice":
+        gate = notice_gate or NoticeDedup(settings.extra.get("TOPIS_NOTICE_DEDUP_PATH", str(Path(__file__).resolve().parents[1] / "data" / "topis_notice_dedup.sqlite3")), spec.topic)
+        stats = publish_notices(records, gate, publisher, lambda record: build_event(spec, record, collected_at))
+        log.info("topis dedup fetched=%d new=%d changed=%d unchanged=%d pending=%d missingId=%d", *stats.values())
+        return stats["new"] + stats["changed"]
     for record in records:
         event = build_event(spec, record, collected_at)
         publisher.publish(spec.topic, record.key, event)
@@ -91,6 +97,7 @@ def main() -> int:
         signal.signal(sig, lambda *_: stop.set())
 
     publisher = Publisher(settings.kafka_bootstrap_servers, client_id=f"collector-{settings.source}")
+    notice_gate = NoticeDedup(settings.extra.get("TOPIS_NOTICE_DEDUP_PATH", str(Path(__file__).resolve().parents[1] / "data" / "topis_notice_dedup.sqlite3")), spec.topic) if settings.source == "topis_notice" else None
     # 재부팅 직후 Kafka 가 늦게 뜨는 경우를 위해 첫 사이클 전에 브로커를 기다린다 (최대 5분)
     publisher.wait_ready(timeout_seconds=300)
     exit_code = 0
@@ -99,7 +106,7 @@ def main() -> int:
             wait_seconds = interval
             waiting_for_retry = False
             try:
-                count = run_cycle(spec, settings, client, publisher)
+                count = run_cycle(spec, settings, client, publisher, notice_gate)
                 # 사이클마다 전송 확인을 기다려 sent/failed 가 이 사이클의 실제 결과를 반영하게 한다.
                 # pending 은 브로커 응답을 아직 못 받은 건수(큐에서 재시도 중) — 유실이 아니다
                 pending = publisher.flush(timeout_seconds=10.0)

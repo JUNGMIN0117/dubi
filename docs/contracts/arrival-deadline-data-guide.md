@@ -12,6 +12,7 @@
 |---|---|---|---|
 | S01 | 사용자 출발 예정 P·일정 시작 D·출발지·목적지 | Client → Backend | 일정 DB → 조건부 출발 정책 |
 | S02 | [카카오 대중교통 경로](https://developers.kakao.com/docs/ko/kakaomap/rest-api) | Backend PublicTransitRouteClient | 후보·WALK·총시간·geometry → 매핑·여정 평가 |
+| S02-W | [카카오모빌리티 제휴용 도보 길찾기](https://developers.kakaomobility.com/affiliate/walking/directions.html) | Backend WalkingRouteClient 추가 | ACCESS_WALK·EGRESS_WALK 거리/시간/geometry. 제휴 권한 필요 |
 | S03 | [서울 버스 도착정보](https://www.data.go.kr/data/15000314/openapi.do) | Collector bus_arrival | transport.raw → 최신 도착 → 버스 대기 |
 | S04 | 서울 버스 위치 API `getBusPosByRtid` | Collector bus_location | transport.raw → 최신 위치 → 탑승 가능성 보조 |
 | S05 | [서울교통공사 열차운행시각표](https://www.data.go.kr/data/15098251/fileData.do) | Backend 시간표 도구 | 버전 지정 JSON artifact → 시간표 서비스 |
@@ -82,6 +83,57 @@ S04의 현재 호출 주소·필드는 [bus_location.py](../../collector/src/sou
 | 전체시간 − step시간 합 | unassignedDurationSeconds | number, 초 | 의미 미확정 잔여. 대기로 단정 금지 |
 
 응답 DTO의 실제 nesting은 `PublicTransitRouteClient`와 fixture를 기준으로 한다. 여기서 `route`는 routes 배열의 한 원소다. 이름만으로 canonical ID를 발급하지 않는다. `MasterDataTransitMappingResolver`의 EXACT 결과와 공식 인접 edge를 이용한다. PARTIAL/AMBIGUOUS/UNMAPPED는 이유를 남기고 API fallback으로 제한한다. WALK segmentId는 현재 계약대로 null이다.
+
+### 3.3 step 역할 분류와 승·하차 좌표
+
+대중교통 응답을 받은 다음 후보마다 아래 값을 만든다.
+
+| 내부 필드 | 타입/nullable | 산출 규칙 |
+|---|---|---|
+| `legRole` | ACCESS_WALK/TRANSFER_WALK/EGRESS_WALK/RIDE | WALK의 앞·뒤에 존재하는 BUS/SUBWAY index로 분류. BUS/SUBWAY는 RIDE |
+| `boardingCoordinateCandidate` | Coordinate nullable | 첫 BUS/SUBWAY step `path.points[0]` |
+| `alightingCoordinateCandidate` | Coordinate nullable | 마지막 BUS/SUBWAY step `path.points[last]` |
+| `mappedBoardingCoordinate` | Coordinate nullable | 첫 transit step의 EXACT 마스터 승차 node 좌표 |
+| `mappedAlightingCoordinate` | Coordinate nullable | 마지막 transit step의 EXACT 마스터 하차 node 좌표 |
+| `boardingCoordinate` / `alightingCoordinate` | Coordinate nullable | 카카오 후보와 마스터 좌표가 정책 허용 오차 안에서 유일하게 일치한 endpoint |
+| `coordinateEvidence` | object | provider point, master ID/version, 거리 차이 m, 정책 버전, 판정 |
+
+현재 `KakaoPublicTransitResponse.Stop` DTO는 `name`만 받고 실제 fixture도 stop 좌표를 제공하지 않는다. 따라서 stop 객체에 존재한다고 가정해 x/y 필드를 만들지 않는다. `path.points`의 첫·끝도 노선 polyline endpoint일 뿐 승강장 출입구 보증이 없으므로 EXACT 마스터 좌표와 검증한다. 지하철 마스터가 역 중심점만 제공해 출입구가 확인되지 않으면 `STATION_CENTER_ONLY`로 품질을 낮추고 도보 API endpoint 정확성을 보장하지 않는다.
+
+좌표 검증 임계값은 실제 corpus로 정해 `walking-endpoint-policy-v1`에 둔다. 문서 단계에서 임의 50m 등을 확정하지 않는다. 거리 계산은 WGS84 geodesic/Haversine m 단위이며 경도·위도 순서를 바꾸지 않는다. 하나의 step에 차량 대안이 여러 개면 선택한 EXACT 대안의 좌표를 사용하고 서로 다른 대안 좌표를 섞지 않는다.
+
+### 3.4 S02-W 카카오 제휴 도보 API
+
+공식 호출 규격은 다음과 같다.
+
+- `GET https://apis-navi.kakaomobility.com/affiliate/walking/v1/directions`
+- Header: `Authorization: KakaoAK ${REST_API_KEY}`, `service: {제휴 등록 서비스 식별자}`, `Content-Type: application/json`.
+- Query: `origin={longitude},{latitude}`, `destination={longitude},{latitude}`, `priority=DISTANCE`, `summary=false`. `waypoints`는 접근·이탈 기본 호출에서는 사용하지 않는다.
+- `default_speed=0`이면 공식 문서상 4km/h 기준 ETA다. 사용자 보행속도 정책을 도입하기 전에는 값을 임의 변경하지 않는다.
+- 이 API는 제휴 파트너 전용이므로 별도 계약·권한·쿼터 확인을 배포 선행 조건으로 둔다. 일반 카카오맵 REST API 권한과 동일하다고 가정하지 않는다.
+
+후보마다 최대 두 번 호출한다.
+
+| 호출 | origin | destination | 결과 역할 |
+|---|---|---|---|
+| 접근 | 사용자 일정의 출발 좌표 | 검증된 첫 승차 좌표 | ACCESS_WALK |
+| 이탈 | 검증된 마지막 하차 좌표 | 사용자 일정의 목적지 좌표 | EGRESS_WALK |
+
+도보 응답 DTO는 공식 응답의 route summary와 sections/roads/guides 전체를 원문 fixture로 먼저 검증한 다음 필요한 값을 `distanceMeters`, `durationSeconds`, `geometry`, `guides`, `providerRouteIndex`로 정규화한다. 응답 스키마를 확인하지 않고 자동차 길찾기의 필드 구조를 복사하지 않는다. 시간·거리 음수, 빈 route, 시작/종료 endpoint가 요청 좌표와 크게 다른 응답은 거부한다.
+
+캐시 키는 `walkingApiVersion + endpointPolicyVersion + roundedOrigin + roundedDestination + priority + defaultSpeed`를 제안한다. 좌표 반올림 정밀도와 TTL은 정확도·호출 예산 실측으로 정하며 서로 다른 정류장/출입구가 합쳐지지 않게 한다. API 키·사용자 일정 제목·원문 개인정보를 캐시 키나 로그에 넣지 않는다.
+
+fallback 순서는 `검증된 별도 도보 API → 동일 역할의 카카오 대중교통 WALK → provider 전체시간 + DATA_INSUFFICIENT`다. 직선거리/고정 보행속도로 확정 시간을 만들지 않는다. 대중교통 응답에 ACCESS/EGRESS WALK가 없고 별도 도보 API도 실패하면 0초로 두지 않는다.
+
+### 3.5 비용 범위와 중복 방지
+
+`providerTotalSeconds`에는 step 밖 접근·대기·환승 시간이 포함될 수 있다. 별도 도보 API의 duration을 무조건 더하면 중복될 수 있다.
+
+1. 원본 step별 `legRole`, 시간, 거리와 별도 WALK를 후보 snapshot에 모두 보존한다.
+2. 대중교통 ACCESS/EGRESS WALK가 있으면 동일 역할의 별도 결과로 교체하며 두 값을 더하지 않는다.
+3. 해당 WALK step이 없으면 `unassignedDurationSeconds`에 도보가 포함되지 않았다는 검증 전에는 provider 총시간에 추가하지 않는다.
+4. WAIT/RIDE/TRANSFER/ACCESS/EGRESS의 비용 범위가 완전히 검증된 후보만 componentized ETA를 만든다.
+5. 불완전한 후보는 provider 전체시간 fallback과 별도 도보 정보의 미적용 이유를 반환한다. 일부만 합친 ETA를 운영 추천으로 사용하지 않는다.
 
 ## 4. S03·S04: 버스 도착·위치
 
@@ -439,3 +491,152 @@ Backend `BaselineSnapshot`은 현재 P50 중심이며 key에 날씨·품질 정�
 | 모델 운영 승인·시간 분해 검증 | ML·Backend 담당: 평가 보고/검증 corpus | PREVIEW 유지, 운영 수락 차단 |
 
 이 표는 ‘나중에 정한다’로 숨긴 빈칸이 아니라 담당자가 확보해야 할 산출물과, 실패했을 때 차단할 기능의 인수 조건이다. 확보하지 못한 값을 추측하여 컬럼을 채우지 않는다.
+
+## 13. 파트 간 표준 레코드와 생성 방법
+
+원천별 raw DTO를 Backend가 직접 읽지 않는다. Collector/Spark가 아래 표준 레코드로 정규화하고, Backend는 snapshot에 필요한 필드만 읽는다. 필드가 없으면 0·빈 문자열·현재시각으로 채우지 않고 nullable 또는 명시 상태를 사용한다.
+
+### 13.1 SourcePollStatus
+
+| 컬럼 | 타입 | 생성 규칙 |
+|---|---|---|
+| `source`, `scopeKey` | string | 예: `seoul.bus.arrival`, `route:100100609`. 사용자 ID 미포함 |
+| `pollId` | string | 한 poll/페이지 묶음의 안정적 ID |
+| `startedAt`, `finishedAt` | timestamp | Collector clock, Asia/Seoul offset 포함 |
+| `sourceGeneratedAt` | timestamp nullable | 원천이 제공한 가장 최근 발생시각. 없으면 null |
+| `status` | enum | SUCCESS/EMPTY_COMPLETE/PARTIAL/FAILED/RATE_LIMITED/SCHEDULED_SKIP |
+| `pagesExpected`, `pagesReceived` | int nullable | 전체 목록 해제 판단에 필요한 완전성 |
+| `recordCount`, `invalidCount` | int | 파싱 전 total과 혼동하지 않음 |
+| `nextAllowedAt` | timestamp nullable | 쿼터/429 backoff 시각 |
+| `errorCode` | string nullable | 키·본문을 제외한 정규화 코드 |
+
+`EMPTY_COMPLETE`만 ‘정상적으로 조회했으나 현재 항목 없음’이다. PARTIAL/FAILED의 빈 목록으로 기존 incident를 종료하지 않는다. 이 레코드는 원천 최신성 표시와 incident lifecycle의 완전 스냅샷 판단에 함께 사용한다.
+
+### 13.2 BusArrivalPrediction
+
+| 컬럼 | 타입/단위 | raw → 생성 |
+|---|---|---|
+| `providerNamespace` | string | 서울 버스 원천 고정 namespace |
+| `routeId`, `stopId` | string | 원천 route/station ID를 문자열 보존 |
+| `vehicleId` | string nullable | 원천 차량 ID. 없으면 차량을 합성하지 않음 |
+| `predictionRank` | int | 첫째/둘째 제공 순서 |
+| `sourceGeneratedAt` | timestamp | `mkTm` 또는 원천 생성시각 |
+| `arrivalInSeconds` | int | `exps`/`exps2`, 0 이상 검증 |
+| `predictedArriveAt` | timestamp | `sourceGeneratedAt + arrivalInSeconds` |
+| `routeType`, `messageCode`, `occupancyCode` | string nullable | 탑승 가능/운행 상태 판정 원본 코드 보존 |
+| `observedAt`, `validUntil` | timestamp | 수집 관측과 사용 기한 분리 |
+| `eventId`, `rawRef` | string | 중복 제거와 원본 추적 |
+
+같은 vehicleId/rank에서 새 sourceGeneratedAt이 이전보다 오래되면 latest를 되돌리지 않는다. Backend는 플랫폼 도착시각 이후이고 validUntil 안인 예측만 사용한다. 첫째가 이미 지났거나 탑승 불가이면 둘째를 검토하며, `arrivalInSeconds + collectedAt`으로 ETA를 다시 만들지 않는다.
+
+### 13.3 BusVehicleObservation
+
+`routeId, vehicleId, stopId, stopSequence/sectionOrder, sourceGeneratedAt, coordinates(nullable), operationStatus, observedAt, validUntil, eventId`를 보존한다. 위치가 정류장 통과를 뜻하는 원천 코드와 순서가 확인될 때만 뒤 단계에서 ACTUAL_TRAVERSAL 후보가 된다. GPS 좌표 두 점만으로 정류장 통과 완료를 만들지 않는다.
+
+### 13.4 TripStopPrediction
+
+| 컬럼 | 타입 | 생성·조인 키 |
+|---|---|---|
+| `providerNamespace` | string | 운영자/원천 구분 |
+| `serviceDate` | date | 운행 시작일. 자정 뒤 25시 정차도 같은 날짜 |
+| `staticTripKey` | string | 시간표 artifact의 운행 키 |
+| `providerTrainId` | string nullable | EXACT crosswalk일 때만 연결 |
+| `lineId`, `direction`, `destinationCode` | string | 이름 대신 마스터 코드 사용 |
+| `stopId`, `stopSequence` | string/int | 같은 이름 역의 노선/순서 구별 |
+| `scheduledArriveAt`, `scheduledDepartAt` | timestamp | 24시 초과를 절대시각으로 변환 |
+| `predictedArriveAt`, `predictedDepartAt` | timestamp nullable | 원천이 제공하고 운행 대응이 확인된 범위만 |
+| `operationStatus` | enum | NORMAL/DELAYED/CANCELED/SKIP/UNKNOWN |
+| `mappingStatus` | enum | EXACT/PARTIAL/AMBIGUOUS/UNMAPPED |
+| `sourceGeneratedAt`, `observedAt`, `validUntil` | timestamp | 원천·수집·유효성 구별 |
+| `sourceEventIds` | string[] | 위치/도착/공지 결합 추적 |
+
+Spark는 `(serviceDate, staticTripKey, stopSequence)` 정적 행을 기준으로 EXACT crosswalk 실시간 행을 left join한다. 하차역 예측이 없으면 null을 유지한다. 승차역 한 건의 `delaySeconds`를 같은 열차의 모든 이후 역에 무조건 복제하지 않는다.
+
+### 13.5 NormalizedIncident와 Impact
+
+`NormalizedIncident`는 사건 사실이고 `RouteImpact`는 마스터와 결합한 영향이다.
+
+| 구분 | 핵심 컬럼 | 생성 시점 |
+|---|---|---|
+| 사건 | incidentKey, revision, kind, restriction, lifecycle, affectedModes, start/end, sourceGeneratedAt, observedAt, validUntil, rawRef | Collector raw를 Spark가 코드·시간 단위로 정규화 |
+| 영향 | incidentKey/revision, segmentId 또는 trip/stop, occurrence, direction, mappingVersion, matchStatus, overlap policy, evidenceRef | 검증된 마스터와 join |
+
+`incidentKey`는 같은 사건의 수정에도 유지되고 `revision`만 바뀐다. 원천 incident ID가 안정적이면 source+ID를 사용한다. 제목·좌표 반올림 hash만으로 다른 사건을 무리하게 합치지 않는다. 동일 사건이 여러 원천에서 오면 source event를 보존한 cluster ID를 별도로 만들며, 확정 병합 전에는 각각 추적한다.
+
+### 13.6 SegmentObservation·Baseline·Status
+
+```text
+BusVehicleObservation 또는 검증된 실제 운행기록
+  → 동일 vehicle/trip의 인접 stop 통과 두 건 검증
+  → durationSeconds = nextPassedAt - currentPassedAt
+  → SegmentObservation(ACTUAL_TRAVERSAL)
+  → Parquet fact dedup(eventId)
+  → segmentId×dow×hourSlot×weatherBucket 분위수
+  → Spring 내부 API upload(dataVersion)
+  → 전량 검증 후 activate
+```
+
+Baseline row는 `segmentId,dow,hourSlot,weatherBucket,p50,p80,p95,sampleCount,sampleFrom,sampleTo,computedAt,dataVersion`을 갖는다. Backend는 평가 시작 때 active dataVersion을 한 번 읽고 모든 후보에 같은 버전을 사용한다.
+
+SegmentStatus는 최근 ACTUAL_TRAVERSAL window와 같은 조건의 baseline을 비교한다. `status,delaySeconds,confidence` 외에 `sampleCount,currentWindowFrom/currentWindowTo,baselineVersion,sourceEventIds,causes,computedAt,validUntil`을 보존한다. 표본 부족·baseline 없음·stale이면 `unknown`; 정상이라고 채우지 않는다.
+
+### 13.7 EvaluationSnapshot
+
+Backend가 계산기에 전달할 snapshot은 다음 묶음의 불변 복사다.
+
+| 묶음 | 포함 필드 |
+|---|---|
+| identity | scheduleId, inputRevision, asOf, snapshotId/hash |
+| candidate | provider response hash, candidate IDs, fetchedAt, validUntil |
+| master | transit/road/timetable version과 SHA |
+| walking | endpoint evidence, API/fallback source, duration/distance/geometry ref |
+| bus | 사용 scope의 BusArrivalPrediction/VehicleObservation과 poll status |
+| subway | TripStopPrediction과 timetable/crosswalk version |
+| incident | 사용한 revision, lifecycle, impact mapping, poll completeness |
+| baseline/status | active baseline version, Redis value와 sourceGeneratedAt/validUntil |
+| model | modelVersion, supported range, production flags, feature snapshot |
+| policy | conditional departure, search, freshness, notification policy version |
+
+snapshot hash는 비밀키·사용자 제목·raw 전체 본문을 포함하지 않는다. 같은 hash는 같은 계산 입력을 뜻해야 하며, Redis 현재값을 가리키는 키만 저장하고 내용은 보존하지 않는 방식은 Replay 요구를 충족하지 못한다.
+
+## 14. source별 조인·fallback 실행표
+
+| 계산 단계 | 1순위 조인/값 | 검증 실패 시 | 사용자 결과에 남길 코드 |
+|---|---|---|---|
+| 승·하차 node | 카카오 step + 공식 마스터 EXACT | provider step 좌표/시간을 fallback 범위로만 유지 | TRANSIT_MAPPING_PARTIAL/UNMAPPED |
+| 접근·이탈 도보 | 검증 node 좌표 + 카카오 제휴 도보 | 같은 역할의 카카오 대중교통 WALK | WALK_API_UNAVAILABLE/ENDPOINT_UNVERIFIED |
+| 버스 대기 | route+stop+차량의 fresh ETA | 검증 배차/카카오 BUS 전체 fallback | BUS_REALTIME_STALE/NO_BOARDABLE_VEHICLE |
+| 버스 이동 | 모든 인접 edge 운영 모델 | 동일 BUS step 전체 provider/baseline 정책 | MODEL_PREVIEW/PARTIAL_EDGE_COVERAGE |
+| 지하철 | serviceDate+trip+stop realtime | 정적 시간표와 ESTIMATED | TRAIN_CROSSWALK_UNRESOLVED/ALIGHT_PREDICTION_MISSING |
+| 도로 통제 | incident+EXACT edge+방향+시간 | 영향 가능성만 표시, 차단 금지 | ROAD_IMPACT_PARTIAL/UNVERIFIED |
+| 기준선 | 같은 active version+dow/hour/weather | provider fallback 또는 unknown | BASELINE_MISSING/STALE |
+| 실시간 상태 | validUntil 안 Redis + 계약 schema | baseline/fallback, confidence 저하 | SEGMENT_STATUS_MISSING/STALE |
+
+fallback은 성공값처럼 덮어쓰지 않는다. 최종 v2 결과의 `qualityReasons`에 위 코드를 모으고 각 timeline leg의 `durationSource`에도 실제 사용한 값을 기록한다.
+
+## 15. as-of join과 Replay 구현 기준
+
+평가시각 `asOf` 이후에 발생하거나 수집된 정보는 해당 평가에 넣지 않는다. 원천이 늦게 도착한 경우 `sourceGeneratedAt<=asOf`이더라도 당시 시스템에서 관측하지 못했다면 과거 온라인 결과 재현에서는 `observedAt<=asOf`도 만족해야 한다. 사후 분석은 두 모드를 구별한다.
+
+- `ONLINE_REPLAY`: 당시 observedAt 기준으로 사용 가능했던 정보만 재현한다.
+- `EVENT_TIME_ANALYSIS`: 늦게 도착한 원천까지 포함하여 실제 사건시각 기준 정확도를 분석한다.
+
+정적 마스터·시간표·모델·정책은 asOf에 활성화돼 있던 버전을 manifest에서 읽는다. 현재 최신 artifact로 과거 결과를 다시 계산한 값을 동일 Replay라고 부르지 않는다. Kafka 중복은 eventId로 제거하고 같은 identity의 새 revision은 원천시각과 revision 순서 규칙으로 선택한다.
+
+Replay 결과에는 `inputManifestHash, outputHash, decision, ETA, proposedDepartAt, cause revisions, qualityReasons`를 기록한다. output이 달라지면 원천, artifact, 정책, 비결정적 연산 중 어느 축이 달랐는지 diff를 낼 수 있어야 한다.
+
+## 16. 데이터 담당 완료 체크리스트
+
+source 또는 계산 데이터 하나를 완료하려면 다음이 모두 있어야 한다.
+
+- 공식 출처 URL·확인일·제공 범위·호출 제한과 키 그룹
+- 실제 raw 필드명, 코드표, ID namespace, 시간 의미와 단위
+- 정상/빈/부분/오류/stale/순서역전 fixture
+- 정규화 schema와 raw→컬럼 변환 테스트
+- 매핑 artifact version/SHA/coverage와 rejected 이유 통계
+- eventId/revision/dedup/watermark/state/TTL/validUntil 정책
+- Redis/Kafka/Parquet/Internal API 예제와 소비자 contract test
+- fallback 시 사용할 값과 사용자 결과의 qualityReason
+- 동일 manifest Replay 결과와 운영 freshness/lag 지표
+
+원천 호출에 성공했다는 사실만으로 완료하지 않는다. Backend가 특정 후보의 특정 leg에 안전하게 연결하고, 연결 실패를 정상값으로 숨기지 않으며, 같은 입력을 다시 계산할 수 있어야 완료다.

@@ -89,6 +89,19 @@ API/도메인 모델은 초와 m를 사용한다. 현재 DB의 `base_duration_mi
 7. 지하철 별칭은 `transit_alias.verified=true`인 canonical ID 후보를 사용한다. 버스 수동 대응은 수도권 artifact의 검토일·전체 요청 해시·출처 경로 범위에 한정하며 과거 전역 BUS 별칭은 사용하지 않는다.
 8. BUS `vehicles[]`는 독립 `busAlternatives[]`로 보존한다. 여러 차량 또는 여러 출처 후보는 상위 PARTIAL로 남기고 선택한 VERIFIED 경로의 edge만 사용한다.
 
+## 접근·이탈 도보 API 보강 목표
+
+대중교통 응답 파싱과 BUS/SUBWAY 마스터 매핑 뒤 다음 두 구간은 카카오모빌리티 제휴용 도보 길찾기로 보강한다.
+
+- 사용자 출발 좌표 → 첫 BUS/SUBWAY의 검증된 승차 좌표: `ACCESS_WALK`.
+- 마지막 BUS/SUBWAY의 검증된 하차 좌표 → 사용자 목적지 좌표: `EGRESS_WALK`.
+
+공식 endpoint는 `GET https://apis-navi.kakaomobility.com/affiliate/walking/v1/directions`이고 `origin`, `destination`은 `경도,위도` 순서다. 이 API는 제휴 파트너 전용이므로 별도 계약·권한과 `service` 헤더가 필요하다. 현재 `KakaoPublicTransitClient`만 존재하며 도보 Client는 구현 전이다.
+
+현재 카카오 대중교통 stop DTO는 이름만 제공한다. 첫/마지막 transit step의 `path.points` endpoint를 후보로 추출하되 EXACT 마스터 정류장·역 좌표와 검증한다. 모호하거나 불일치하면 별도 도보 호출을 하지 않는다. 지하철 역 중심 좌표를 출입구 좌표라고 부르지 않는다.
+
+대중교통 사이 WALK는 `TRANSFER_WALK`이며 접근·이탈 도보 호출로 대체하지 않는다. 기존 응답 WALK와 별도 API 결과를 동시에 더하지 않고 역할별로 교체한다. step에 없는 접근·이탈 시간이 `totalTime-step합`에 포함됐을 가능성을 검증하기 전에는 별도 결과를 totalTime에 가산하지 않는다. 상세 계약은 [조건부 출발 데이터 가이드](arrival-deadline-data-guide.md)를 따른다.
+
 지하철은 하나의 호선·방향에도 본선, 지선, 단축운행이 존재하므로 현재 운행시각표의 일반 열차
 역 순서를 `service_pattern_id`별로 보존한다. 서로 다른 패턴이 동일한 승차~하차 역 경로를
 제공하면 하나로 보지만, 실제 중간역 경로가 다르면 `AMBIGUOUS`로 남긴다. 급행 정차역만

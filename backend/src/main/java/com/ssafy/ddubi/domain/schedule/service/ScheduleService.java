@@ -41,10 +41,11 @@ public class ScheduleService {
 
     private final ScheduleRepository scheduleRepository;
     private final UserRepository userRepository;
+    private final org.springframework.context.ApplicationEventPublisher events;
 
-    public ScheduleService(ScheduleRepository scheduleRepository, UserRepository userRepository) {
+    public ScheduleService(ScheduleRepository scheduleRepository, UserRepository userRepository, org.springframework.context.ApplicationEventPublisher events) {
         this.scheduleRepository = scheduleRepository;
-        this.userRepository = userRepository;
+        this.userRepository = userRepository; this.events=events;
     }
 
     // ------------------------------------------------------------------
@@ -87,6 +88,7 @@ public class ScheduleService {
                 .build());
         schedule.changePlannedDepartAt(BusinessTime.normalize(request.plannedDepartAt()));
         scheduleRepository.flush();
+        events.publishEvent(new com.ssafy.ddubi.domain.recommendation.service.ScheduleInputChanged(schedule.getId()));
         return ScheduleResponse.of(schedule, LocalDateTime.now(), RECOMMENDATION_PENDING);
     }
 
@@ -153,11 +155,13 @@ public class ScheduleService {
         schedule.markCustomizedIfRepeatInstance();
 
         if (request.isPlannedDepartAtPresent()) {
+            requireNotNull(request.getPlannedDepartAt(), "plannedDepartAt");
             schedule.changePlannedDepartAt(BusinessTime.normalize(request.getPlannedDepartAt()));
         }
         validateDeparture(schedule.getPlannedDepartAt(), schedule.getArriveBy());
 
         scheduleRepository.flush();
+        events.publishEvent(new com.ssafy.ddubi.domain.recommendation.service.ScheduleInputChanged(schedule.getId()));
         return ScheduleResponse.of(schedule, LocalDateTime.now(), RECOMMENDATION_PENDING);
     }
 

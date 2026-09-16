@@ -22,15 +22,17 @@ public class ScheduleEvaluationWorkflow {
     private final ScheduleEvaluationStore store;
     private final PublicTransitRouteClient routes;
     private final RouteEvidenceAssembler evidence;
-    private final MlRoutePreview previews;
+    private final ConditionalDepartureEvaluator conditional;
     private final EvaluationNotificationPlanner notifications;
     private final ScheduleMonitoringPolicy monitoring;
+    private final com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking;
 
     public ScheduleEvaluationWorkflow(ScheduleEvaluationStore store, PublicTransitRouteClient routes,
-            RouteEvidenceAssembler evidence, MlRoutePreview previews, EvaluationNotificationPlanner notifications,
+            RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
+            com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking,
             @Value("${ddubi.recommendation.candidate-ttl-seconds:900}") int candidateTtl) {
-        this.store = store; this.routes = routes; this.evidence = evidence; this.previews = previews;
-        this.notifications = notifications;
+        this.store = store; this.routes = routes; this.evidence = evidence; this.conditional = conditional;
+        this.notifications = notifications; this.walking=walking;
         // 초기 실험 주기이며 검증된 도착 보장 임계값이 아니다. 여유시간으로 가산하지 않는다.
         monitoring = new ScheduleMonitoringPolicy(Duration.ofHours(1), Duration.ofMinutes(30), Duration.ofMinutes(10),
                 Duration.ofMinutes(10), Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofSeconds(candidateTtl));
@@ -75,22 +77,31 @@ public class ScheduleEvaluationWorkflow {
     /**
      * 계산 시각의 입력·후보·증거를 보존한다. 내부 Instant는 절대시각이고 프론트는 KST로 표시한다.
      * selected는 기존 선택 경로, preview.fastest는 같은 출발의 최소시간 검증 후보다.
-     * suggestion.proposed는 응답 호환용 동일 후보이며 PREVIEW는 수락을 허용하지 않는다.
+     * suggestion.proposed는 조건부 탐색 제안이며 PREVIEW는 수락을 허용하지 않는다.
      * recommendationId·persistence는 저장 결과이며 store가 채운다.
      */
     public record Outcome(String evaluationId, long scheduleId, Long recommendationId, Instant plannedDepartAt,
             Instant arriveBy, Instant checkedAt, String selectedKey, Result selected,
             DepartureSuggestionService.Suggestion suggestion, List<CandidateInfo> candidates,
             RouteEvidenceAssembler.Snapshot evidence, TriggerType trigger, String policyVersion, long eventRevision,
-            MlRoutePreview.Comparison preview, Persistence persistence) {
+            MlRoutePreview.Comparison preview, Persistence persistence, ConditionalDepartureEvaluator.Evaluation conditional) {
         public Outcome { candidates = List.copyOf(candidates); }
+        /** v1 저장 JSON/내부 호출을 읽는 호환 생성자. 신규 계산만 conditional을 가진다. */
+        public Outcome(String evaluationId, long scheduleId, Long recommendationId, Instant plannedDepartAt,
+                Instant arriveBy, Instant checkedAt, String selectedKey, Result selected,
+                DepartureSuggestionService.Suggestion suggestion, List<CandidateInfo> candidates,
+                RouteEvidenceAssembler.Snapshot evidence, TriggerType trigger, String policyVersion, long eventRevision,
+                MlRoutePreview.Comparison preview, Persistence persistence) {
+            this(evaluationId,scheduleId,recommendationId,plannedDepartAt,arriveBy,checkedAt,selectedKey,selected,
+                    suggestion,candidates,evidence,trigger,policyVersion,eventRevision,preview,persistence,null);
+        }
         public Outcome withRecommendationId(Long id) {
             return new Outcome(evaluationId, scheduleId, id, plannedDepartAt, arriveBy, checkedAt, selectedKey,
-                    selected, suggestion, candidates, evidence, trigger, policyVersion, eventRevision, preview, persistence);
+                    selected, suggestion, candidates, evidence, trigger, policyVersion, eventRevision, preview, persistence, conditional);
         }
         public Outcome withPersistence(Persistence value) {
             return new Outcome(evaluationId, scheduleId, recommendationId, plannedDepartAt, arriveBy, checkedAt,
-                    selectedKey, selected, suggestion, candidates, evidence, trigger, policyVersion, eventRevision, preview, value);
+                    selectedKey, selected, suggestion, candidates, evidence, trigger, policyVersion, eventRevision, preview, value, conditional);
         }
     }
 
@@ -101,11 +112,13 @@ public class ScheduleEvaluationWorkflow {
             var cache = job.cache();
             boolean refresh = monitoring.refreshCandidates(now, cache == null ? null : cache.search().fetchedAt(), false);
             RouteSearchResult search = refresh ? routes.search(new RouteSearchQuery(job.origin(), job.destination())) : cache.search();
-            if (search.candidates().isEmpty()) throw new BusinessException(ErrorCode.ROUTE_NOT_AVAILABLE);
+
             var snapshot = evidence.read(search.candidates(), now);
             Instant departure = job.departure().isBefore(now) ? now : job.departure();
-            var comparison = previews.compare(search.candidates(), snapshot, now, departure, job.arriveBy());
-            var suggestion = suggestion(comparison);
+            var enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now);
+            var calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
+            var comparison = calculation.proposedComparison();
+            var suggestion = calculation.suggestion();
             String selectedKey = selectedKey(job, search);
             Result selected = selected(suggestion, selectedKey);
 
@@ -119,33 +132,37 @@ public class ScheduleEvaluationWorkflow {
                     || previous.selected().reasons().stream().anyMatch(r -> r.startsWith("ROAD_POTENTIAL_IMPACT:")));
             if (!refresh && newlyAtRisk && !previousAtRisk) {
                 search = routes.search(new RouteSearchQuery(job.origin(), job.destination()));
-                if (search.candidates().isEmpty()) throw new BusinessException(ErrorCode.ROUTE_NOT_AVAILABLE);
+
                 snapshot = evidence.read(search.candidates(), now);
-                comparison = previews.compare(search.candidates(), snapshot, now, departure, job.arriveBy());
-                suggestion = suggestion(comparison);
+                enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now);
+                calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
+                comparison = calculation.proposedComparison();
+                suggestion = calculation.suggestion();
                 selectedKey = selectedKey(job, search); selected = selected(suggestion, selectedKey); refresh = true;
             }
             var info = new ArrayList<CandidateInfo>();
             for (RouteCandidate c : search.candidates()) info.add(new CandidateInfo(RouteEvidenceAssembler.key(c), evidence.riskReasons(c, snapshot), c.segments().stream().map(s -> new RouteStep(s.mode().name(), s.fromName(), s.toName(), s.vehicles().stream().map(v -> v.name()).toList())).toList()));
             var result = new Outcome(job.token(), scheduleId, null, job.departure(), job.arriveBy(), now,
-                    selectedKey, selected, suggestion, info, snapshot, trigger, "ml-prev-v1", job.eventRevision(), comparison, null);
+                    selectedKey, selected, suggestion, info, snapshot, trigger, "cdep-v1", job.eventRevision(), comparison, null, calculation);
             // 출발 변경(accept)은 계속 막는다 — 미승인 모델 값으로 사용자의 일정을 바꾸지 않는다.
             // 알림은 설정으로 연다(기본 꺼짐). 보낼 것이 없으면 두 값이 null 이고,
             // 그때 dispatcher 는 아무것도 하지 않는다. EvaluationNotificationPlanner 참고.
             var planned = notifications.plan(job, result);
             Instant proposed = suggestion.proposed() == null ? null : suggestion.proposed().departureAt();
-            return store.complete(job, search, refresh, result, monitoring.nextEvaluation(now, job.departure(), proposed),
+            return store.complete(job, search, refresh, result, monitoring.nextEvaluation(now, job.arriveBy(), proposed),
                     planned.map(p -> store.write(p.command())).orElse(null),
                     planned.map(EvaluationNotificationPlanner.Planned::key).orElse(null),
                     Instant.now());
         } catch (RuntimeException failure) {
-            String reason = failure instanceof BusinessException ? "EVALUATION_UNAVAILABLE" : "EVALUATION_FAILED";
+            String reason = failure instanceof BusinessException be && be.errorCode()==ErrorCode.STALE_RECOMMENDATION ? "STALE_RECOMMENDATION" : failure instanceof BusinessException ? "EVALUATION_UNAVAILABLE" : "EVALUATION_FAILED";
             store.fail(job, reason, now);
             throw failure;
         }
     }
 
     private Result selected(DepartureSuggestionService.Suggestion suggestion, String key) {
+        if (suggestion.originalCandidates().isEmpty()) return new Result("unavailable", Instant.EPOCH, null,
+                Assessment.BLOCKED, true, List.of(), List.of("ROUTE_UNAVAILABLE"), "cdep-v1");
         if ("previous-unavailable".equals(key)) {
             return new Result(key, suggestion.originalCandidates().get(0).departureAt(), null, Assessment.BLOCKED,
                     true, List.of(), List.of("SELECTED_ROUTE_UNAVAILABLE"), "timeline-v1");
@@ -165,7 +182,7 @@ public class ScheduleEvaluationWorkflow {
             }
             return "previous-unavailable";
         }
-        return RouteEvidenceAssembler.key(search.candidates().get(0));
+        return search.candidates().isEmpty() ? "previous-unavailable" : RouteEvidenceAssembler.key(search.candidates().get(0));
     }
 
     private String signature(RouteCandidate candidate) {
@@ -173,10 +190,4 @@ public class ScheduleEvaluationWorkflow {
                 s.fromName(), s.toName(), s.stopNames(), s.vehicles(), s.geometry())).toList());
     }
 
-    /** 같은 출발시각의 최소시간 결과다. 검증용 단계에서는 조기 출발을 역산하지 않는다. */
-    private DepartureSuggestionService.Suggestion suggestion(MlRoutePreview.Comparison comparison) {
-        var results = comparison.candidates().stream().map(MlRoutePreview.Candidate::result).toList();
-        return new DepartureSuggestionService.Suggestion(results, comparison.fastest(), comparison.fastest(),
-                results.size(), comparison.budgetExhausted());
-    }
 }

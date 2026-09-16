@@ -132,6 +132,44 @@ public class NotificationService {
         return notification;
     }
 
+    /** DB 준비 결과. FCM에 필요한 기기 스냅샷만 트랜잭션 밖으로 전달한다. */
+    public record Prepared(Notification notification, NotificationCommand command, List<DeviceToken> devices) { }
+
+    /** outbox 발송의 DB 단계다. 사용자 설정과 소유권을 확인하고 notificationId를 먼저 확정한다. */
+    @Transactional
+    public Prepared prepareForOutbox(NotificationCommand command,Long existingId) {
+        User user=userRepository.findById(command.userId()).orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        Schedule schedule=ownedSchedule(command,user);
+        List<DeviceToken> devices=deviceTokenRepository.findAllByUserIdAndValidIsTrue(user.getId());
+        SuppressReason reason=!user.isAlarm()?SuppressReason.ALARM_OFF:devices.isEmpty()?SuppressReason.NO_VALID_DEVICE:null;
+        // outbox의 DB unique dedup와 lease가 중복을 관리한다. Redis 선점 뒤 crash로 정상 재시도가
+        // DUPLICATE 억제로 사라지는 것을 방지하기 위해 이 경로에서는 Redis suppress를 선점하지 않는다.
+        Notification notification=existingId==null?save(command,user,schedule,reason):notificationRepository.findById(existingId).orElseThrow();
+        if(!notification.isOwnedBy(user.getId()) || !java.util.Objects.equals(notification.scheduleId(),command.scheduleId()))
+            throw new BusinessException(ErrorCode.FORBIDDEN_RESOURCE);
+        if(notification.getStatus()==NotificationStatus.SENT) return new Prepared(notification,command,List.of());
+        notificationRepository.flush();
+        return new Prepared(notification,command,reason==null?List.copyOf(devices):List.of());
+    }
+
+    /**
+     * FCM 호출은 반드시 DB 트랜잭션 밖에서 한다. 전송 후 각 repository의 짧은 트랜잭션으로 ack한다.
+     * 전송 성공과 DB ack 사이 crash는 재전송 가능성이 있으므로 exactly-once가 아니다.
+     */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public Notification sendPrepared(Prepared prepared) {
+        Notification notification=prepared.notification();
+        if(prepared.devices().isEmpty()) return notification;
+        boolean sent=false;
+        try { sent=dispatch(notification,prepared.command(),prepared.devices()); }
+        finally {
+            if(sent) notification.markSent(BusinessTime.now()); else notification.markFailed();
+            deviceTokenRepository.saveAll(prepared.devices());
+            notificationRepository.saveAndFlush(notification);
+        }
+        return notification;
+    }
+
     /**
      * 사용자의 모든 유효 기기로 보낸다. 기기 하나만 성공해도 발송으로 친다 —
      * 폰과 태블릿을 함께 쓰는데 태블릿이 죽었다고 알림을 실패로 볼 이유가 없다.

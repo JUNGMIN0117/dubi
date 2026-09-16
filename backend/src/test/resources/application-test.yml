@@ -15,6 +15,7 @@ spring:
 ddubi:
   recommendation:
     monitor-enabled: false
+    commit-wakeup-enabled: false
     kafka-enabled: false
   jwt:
     secret: ddubi-integration-test-secret-key-32-bytes-min

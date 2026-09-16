@@ -36,16 +36,18 @@ public class RecommendationController {
     public record AcceptRequest(@NotBlank String evaluationId) { }
 
     @PostMapping("/schedules/{scheduleId}/recommendations")
-    public ApiResponse<ScheduleEvaluationWorkflow.Outcome> evaluate(@LoginUserId Long userId, @PathVariable long scheduleId,
-            @RequestBody(required=false) RefreshRequest request) {
+    public ApiResponse<?> evaluate(@LoginUserId Long userId, @PathVariable long scheduleId,
+            @RequestBody(required=false) RefreshRequest request,
+            @RequestParam(defaultValue="2") int version) {
         var result = workflow.evaluate(scheduleId, userId, request == null || request.trigger() == null ? TriggerType.REFRESH : request.trigger(), Instant.now());
         // 평가 성공 응답을 알림 서버 실패로 뒤집지 않는다. dispatcher는 scheduler가 재시도한다.
-        return ApiResponse.success(result);
+        return ApiResponse.success(version==1?result:store.response(result,userId));
     }
 
     @GetMapping("/schedules/{scheduleId}/recommendations/latest")
-    public ApiResponse<Map<String,Object>> latest(@LoginUserId Long userId, @PathVariable long scheduleId) {
-        return ApiResponse.success(store.latest(scheduleId, userId));
+    public ApiResponse<?> latest(@LoginUserId Long userId, @PathVariable long scheduleId,
+            @RequestParam(defaultValue="2") int version) {
+        return ApiResponse.success(version==1?store.latest(scheduleId,userId):store.latestV2(scheduleId,userId));
     }
 
     @PostMapping("/schedules/{scheduleId}/recommendations/accept")

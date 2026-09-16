@@ -13,6 +13,7 @@ from bus_crosswalk import BusCrosswalk, POLICY as BUS_ID_POLICY
 from config import Settings
 from request_budget import RequestBudget
 from sources.base import KST, Record, SourceSpec, now_kst
+from sources.subway_schedule import pause_until, SkippedNonService
 
 log = logging.getLogger(__name__)
 DEFAULT_BUS_ROUTE_LIMIT = 100
@@ -127,6 +128,11 @@ def to_record(name, raw, context="", crosswalk=None):
 
 
 def collect(name, settings: Settings, client):
+    now = now_kst()
+    resume_at = pause_until(name, settings.extra, now)
+    if resume_at is not None:
+        # Before key lookup, budget reservation or HTTP calls.
+        raise SkippedNonService(resume_at, now)
     crosswalk=_crosswalk(settings.extra.get("BUS_CROSSWALK_PATH"),settings.extra.get("BUS_CROSSWALK_SHA256")) if name.startswith("bus_") else None
     module = importlib.import_module(f"sources.{name}")
     key_name, _, default_interval, _ = POLICIES[name]
@@ -164,9 +170,13 @@ def collect(name, settings: Settings, client):
                     for row in _rows(response.get("msgBody", {}).get("itemList"))]
         if name == "subway_arrival":
             result = module.fetch_all_subway_arrivals(key, client=client)
+            if result["receivedCount"] == 0:
+                log.info("source=subway_arrival status=EMPTY reason=NO_DATA")
             return [to_record(name, row) for row in result["response"]["realtimeArrivalList"]]
         if name == "subway_location":
             result = module.fetch_all_subway_locations(key, targets, client=client, requests_per_second=1)
+            if result["emptyLines"]:
+                log.info("source=subway_location emptyLines=%s status=%s", result["emptyLines"], "EMPTY" if result["positionCount"] == 0 else "PARTIAL_EMPTY")
             return [to_record(name, row, line) for line, response in result["lineResults"].items()
                     for row in response["response"].get("realtimePositionList", [])]
         if name == "city_realtime":
@@ -182,6 +192,11 @@ def collect(name, settings: Settings, client):
             log.warning("source=%s response may have more rows; first 1000 only", name)
         return [to_record(name, row) for row in result["items"]]
     except Exception as exc:
+        if name in ("subway_location", "subway_arrival"):
+            from sources.subway_location import SubwayLocationError
+            from sources.subway_arrival import SubwayArrivalError
+            if isinstance(exc, (SubwayLocationError, SubwayArrivalError)):
+                raise RuntimeError(f"source={name} collection failed: {exc}") from None
         # chained HTTP exceptions contain secret URL paths. Never propagate their traceback.
         raise RuntimeError(f"source={name} collection failed ({type(exc).__name__})") from None
     finally:

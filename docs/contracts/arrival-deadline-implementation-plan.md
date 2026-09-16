@@ -8,6 +8,18 @@
 - 아래 **현재**는 확인한 코드, **목표/추가**는 구현할 계약이다. 신규 파일명·컬럼은 팀이 그대로 작업을 나눌 수 있도록 제안한 명세이며 이미 존재한다는 뜻이 아니다.
 - 이전 계획의 출발 입력 제거, `DEPARTURE_REQUIRED` 삭제, `planned_depart_at` 폐기 제안은 철회한다.
 
+## 문서 탐색 — 세 파트 기준
+
+착수 순서는 [팀 실행 가이드](arrival-deadline-team-guide.md), 공통 입출력·명칭·상태 기준은 [통합 계약](arrival-deadline-integrated-contract.md)을 먼저 읽는다. 아래 기존 작업 ID는 상세 설계를 추적하기 위해 유지한다.
+
+| 담당 파트 | 상세 작업 문서 | 관련 작업 |
+|---|---|---|
+| BE/ML | [BE/ML 작업 가이드](arrival-deadline-be-ml-work-guide.md) | B01/B02/B02-W/M01/B03/N01, J01 서버 |
+| FE | [FE 작업 가이드](arrival-deadline-fe-work-guide.md) | F01, J01 앱 |
+| DATA | [DATA 작업 가이드](arrival-deadline-data-work-guide.md) | D01/D02/D03, O01 원본·Replay |
+
+각 가이드는 목적·수정 파일·선행 데이터/출처·처리 순서·실패 대응·시험·인계를 포함한다. 공개 필드 이름은 통합 계약의 명칭 대응표를 따른다. 내부 예시 DTO를 별도 공개 계약처럼 구현하지 않는다.
+
 ## 0. 구현 전에 데이터부터 확보한다
 
 **수집기·매핑기·모델 코드가 존재해도 실제 데이터를 보유하거나 운영에 사용할 수 있다는 뜻이 아니다.** 이 계획의 snapshot, crosswalk, 실측, 기준선 입력을 이미 준비된 데이터로 가정하지 않는다. [데이터 가이드 0절](arrival-deadline-data-guide.md#0-먼저-확인할-데이터-확보-현황과-확보-작업)의 실시간/정적/미확정 데이터 목록을 선행 작업으로 수행한다. 원천별 공식 출처·필요 필드·신청/확보 방법·현재 증거·미확보 시 제한을 그 표에 모았다.
@@ -647,7 +659,7 @@ cause에는 `incidentKey,revision,source,officialNoticeAt,affectedSegmentIds,evi
 - Collector `collector/tests`, Spark `sparkjobs/tests`, ML `ml-serving/tests`, Client `client/test`에 위 담당별 fixture와 contract test.
 - 원천 예제는 비밀키·사용자 정보 없이 저장하고 기계 schema에 통과시킨다. 실제 값과 합성 값을 manifest로 구별한다.
 
-실제 구현 시 Backend는 Gradle 관련 테스트, Client는 `flutter test`, Python 파트는 해당 디렉터리에서 `python -m pytest -q`를 실행한다. 실시간 전체 흐름은 테스트 Kafka/Redis/DB와 고정 clock으로 검증한다. 성능 검증은 고정 입력량·worker 수·원천 호출 예산을 기록하고 정확도 시험과 따로 보고한다.
+실제 구현 시 Backend는 저장소 pom.xml에 맞춘 Maven 관련 테스트, Client는 `flutter test`, Python 파트는 해당 디렉터리에서 `python -m pytest -q`를 실행한다. 실시간 전체 흐름은 테스트 Kafka/Redis/DB와 고정 clock으로 검증한다. 성능 검증은 고정 입력량·worker 수·원천 호출 예산을 기록하고 정확도 시험과 따로 보고한다.
 
 **이번 문서 수정의 검증 범위는 참조 경로·링크·JSON 예제·조건부 수식·diff다. 위 구현 테스트를 이미 통과했다는 의미가 아니다.**
 

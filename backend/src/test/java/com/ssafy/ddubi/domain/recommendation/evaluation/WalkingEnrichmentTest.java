@@ -32,7 +32,7 @@ class WalkingEnrichmentTest {
         assertThat(seen).hasSize(2);assertThat(seen.get(0).origin()).isEqualTo(origin);assertThat(seen.get(0).destination()).isEqualTo(board);
         assertThat(seen.get(1).origin()).isEqualTo(alight);assertThat(seen.get(1).destination()).isEqualTo(destination);
         assertThat(output.candidates().get(0).totalDurationSeconds()).isEqualTo(840);
-        assertThat(output.evidence().legs()).extracting(WalkingEnrichmentService.Leg::legRole).containsExactly("ACCESS","RIDE","EGRESS");
+        assertThat(output.evidence().legs()).extracting(WalkingEnrichmentService.Leg::legRole).containsExactly("ACCESS_WALK","RIDE","EGRESS_WALK");
     }
     @Test void unknownCostCoverageDoesNotCallOrAddToProviderTotal() {
         var output=service(r->{throw new AssertionError("호출 금지");}).prepare(List.of(route(30)),origin,destination,now,points("BUS_STOP"));
@@ -57,6 +57,22 @@ class WalkingEnrichmentTest {
     }
     @Test void middleWalkRemainsTransfer() {
         var steps=List.of(route(0).segments().get(1),walk(4),new RouteSegment(5,TransportMode.SUBWAY,null,null,null,"B","C",100,60,List.of(),List.of(),List.of(),null));
-        assertThat(new RouteLegRoleClassifier().classify(steps).get(4)).isEqualTo(RouteLegRoleClassifier.Role.TRANSFER);
+        assertThat(new RouteLegRoleClassifier().classify(steps).get(4)).isEqualTo(RouteLegRoleClassifier.Role.TRANSFER_WALK);
+    }
+    @Test void walkingEvidenceExpiryLimitsResultAndStaleResponseFallsBack() {
+        var good=service(r->new WalkingRouteClient.Evidence(120L,now.plusSeconds(12),"fixture",null))
+                .prepare(List.of(route(0)),origin,destination,now,points("BUS_STOP"));
+        var f=new ConditionalDepartureEvaluatorTest();
+        var evaluated=f.engine(256).evaluate(1,now,f.p,f.d,List.of(),at->f.comparison(at,at.plusSeconds(840))).withWalking(good.evidence());
+        assertThat(ScheduleEvaluationV2.validity(evaluated,null,now,null)).isEqualTo(now.plusSeconds(12));
+        var stale=service(r->new WalkingRouteClient.Evidence(120L,now,"fixture",null))
+                .prepare(List.of(route(0)),origin,destination,now,points("BUS_STOP"));
+        assertThat(stale.candidates().get(0).totalDurationSeconds()).isEqualTo(720);
+        assertThat(stale.evidence().validUntil()).isNull();
+    }
+
+    @Test void missingCoordinateMeaningCannotCrashOrCallProvider() {
+        var output=service(r->{throw new AssertionError("호출 금지");}).prepare(List.of(route(0)),origin,destination,now,points(null));
+        assertThat(output.evidence().fallbackReasons()).contains("WALK_ENDPOINT_UNVERIFIED");
     }
 }

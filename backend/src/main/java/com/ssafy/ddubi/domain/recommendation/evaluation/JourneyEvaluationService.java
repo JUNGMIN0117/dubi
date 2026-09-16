@@ -44,11 +44,14 @@ public class JourneyEvaluationService {
         final Map<BusPreviewClient.Input, BusPreviewClient.Estimate> cache = new HashMap<>();
         final SubwayTimingService.Session subway = new SubwayTimingService.Session();
         final BusWaitingService.Session bus = new BusWaitingService.Session();
-        final long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        final long deadline;
         String modelVersion;
         boolean mixedModel;
+        Session(long maxMillis) { deadline=System.nanoTime()+Duration.ofMillis(maxMillis).toNanos(); }
     }
-    public Session newSession() { return new Session(); }
+    public Session newSession() { return new Session(20000); }
+    /** 조건부 탐색과 ML 호출이 같은 예산을 공유한다. 진행 중 HTTP 한 건은 클라이언트 timeout까지 걸릴 수 있다. */
+    public Session newSession(long maxMillis) { return new Session(maxMillis); }
 
     /** 출발시각마다 차량과 환승을 재선택하되 동일 입력 조회는 세션 안에서 고정한다. */
     public Comparison compare(List<RouteCandidate> routes, RouteEvidenceAssembler.Snapshot snapshot,
@@ -100,7 +103,8 @@ public class JourneyEvaluationService {
                                 } else {
                                     estimate = client.predict(input);
                                     if (estimate.seconds() != null) {
-                                        if (session.modelVersion == null) session.modelVersion = estimate.modelVersion();
+                                        if (estimate.modelVersion()==null || estimate.modelVersion().isBlank()) session.mixedModel=true;
+                                        else if (session.modelVersion == null) session.modelVersion = estimate.modelVersion();
                                         else if (!Objects.equals(session.modelVersion, estimate.modelVersion())) session.mixedModel = true;
                                     }
                                     cache.put(input, estimate);
@@ -198,7 +202,16 @@ public class JourneyEvaluationService {
         Result fastest = results.stream().map(Candidate::result)
                 .filter(r -> r.estimatedArrivalAt() != null && (r.assessment() == Assessment.ON_TIME_ESTIMATE || r.assessment() == Assessment.LATE_ESTIMATE))
                 .min(Comparator.comparing(Result::estimatedArrivalAt).thenComparing(Result::journeyKey)).orElse(null);
-        return new Comparison("PREVIEW", false, fastest, results, predictions, exhausted, subwayPredictions, waitPredictions);
+        return new Comparison("PREVIEW", false, fastest, results, predictions, exhausted || System.nanoTime()>=deadline, subwayPredictions, waitPredictions);
+    }
+
+    /** 서로 다른 모델의 예측을 합친 평가에서는 ETA와 실제 적용 표시를 모두 제거한다. */
+    public static Comparison rejectMixedModel(Comparison value) {
+        return new Comparison("PREVIEW",false,null,value.candidates().stream().map(c -> new Candidate(
+                new Result(c.result().journeyKey(),c.result().departureAt(),null,Assessment.INSUFFICIENT_DATA,true,
+                        List.of(),List.of("ML_MODEL_VERSION_MISMATCH"),"cdep-v1"),"UNAVAILABLE",0,0,0,0)).toList(),
+                value.predictions().stream().map(p -> new Prediction(p.candidateKey(),p.stepKey(),p.segmentId(),
+                        p.enteredAt(),p.input(),p.estimate(),false)).toList(),value.budgetExhausted(),List.of(),List.of());
     }
 
     private boolean supported(List<MappedTransitSegment> edges) {

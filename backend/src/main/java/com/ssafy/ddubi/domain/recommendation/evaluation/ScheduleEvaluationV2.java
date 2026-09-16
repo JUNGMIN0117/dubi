@@ -7,6 +7,7 @@ import java.util.*;
  * FE 공통 schedule-evaluation-v2 DTO. 조회 전용 variant에서는 scheduleId/inputVersion/DB routeId가 null이다.
  * source가 미확보된 버전은 추측하지 않고 missingInputs에 보존한다. preview는 저장 가능하지만 수락 불가다.
  */
+@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
 public record ScheduleEvaluationV2(String schemaVersion, String variant, String evaluationId, Long scheduleId,
         Long inputVersion, long eventRevision, String state, String decision, String triggerReason,
         Instant userInputDepartAt, Instant plannedDepartAt, Instant effectiveDepartAt, Instant arriveBy,
@@ -21,6 +22,19 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
     public record Cause(String eventId,String source,List<String> segmentIds,String effect,boolean confirmed) { }
     public record Quality(boolean preview, boolean productionEligible, boolean realtimeApplied, boolean walkingApiApplied,
             String walkingApiCoverage, String costCoverage, List<String> missingInputs, List<String> fallbackReasons) { }
+
+    /** 응답/DB/outbox가 동일한 증거 만료를 공유한다. 원천 TTL을 결과 기본 60초로 연장하지 않는다. */
+    public static Instant validity(ConditionalDepartureEvaluator.Evaluation e,RouteEvidenceAssembler.Snapshot snapshot,
+                                   Instant asOf,Instant nextAt) {
+        Instant until=asOf.plusSeconds(60);
+        if(snapshot!=null) for(var state:snapshot.states().values()) {
+            try { Instant expires=Instant.parse(state.path("validUntil").asText()); if(expires.isBefore(until)) until=expires; }
+            catch(RuntimeException invalid) { until=asOf; }
+        }
+        if(e!=null && e.walking()!=null && e.walking().validUntil()!=null && e.walking().validUntil().isBefore(until)) until=e.walking().validUntil();
+        if(nextAt!=null && nextAt.isBefore(until)) until=nextAt;
+        return until;
+    }
 
     /** 평가의 실제 적용 근거에서 품질을 만든다. 도보 API 미확보는 성공으로 표시하지 않는다. */
     public static ScheduleEvaluationV2 from(ConditionalDepartureEvaluator.Evaluation e, String id, Long schedule,
@@ -37,24 +51,42 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
         if(e.walking()!=null) reasons.addAll(e.walking().fallbackReasons());
         var legs=e.walking()==null||p==null?List.<com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService.Leg>of():
                 e.walking().legs().stream().filter(l->l.candidateKey().equals(p.journeyKey())).toList();
-        boolean access=legs.stream().anyMatch(l->l.legRole().equals("ACCESS")&&l.durationSource().equals("KAKAO_AFFILIATE_WALKING"));
-        boolean egress=legs.stream().anyMatch(l->l.legRole().equals("EGRESS")&&l.durationSource().equals("KAKAO_AFFILIATE_WALKING"));
-        boolean realtime=comparison.waitPredictions().stream().anyMatch(w -> w.applied() && w.eventId()!=null)
-                || comparison.subwayPredictions().stream().anyMatch(s -> s.applied() && s.estimate().arrivalEventId()!=null);
+        boolean access=eta!=null && legs.stream().anyMatch(l->l.legRole().equals("ACCESS_WALK")&&appliedWalk(l,p));
+        boolean egress=eta!=null && legs.stream().anyMatch(l->l.legRole().equals("EGRESS_WALK")&&appliedWalk(l,p));
+        String costCoverage=p==null || p.steps().stream().anyMatch(x->x.key().equals("provider-total"))?"UNKNOWN":
+                routes!=null && routes.stream().filter(r->("candidate-"+r.providerCandidateIndex()).equals(p.journeyKey()))
+                        .anyMatch(r->r.unassignedDurationSeconds()==0 && r.totalDurationSeconds()==r.segments().stream().mapToLong(com.ssafy.ddubi.domain.route.model.RouteSegment::durationSeconds).sum())?"COMPLETE":"PARTIAL";
+        boolean realtime=p!=null && eta!=null && (comparison.waitPredictions().stream().anyMatch(w -> w.candidateKey().equals(p.journeyKey()) && w.applied() && w.eventId()!=null)
+                || comparison.subwayPredictions().stream().anyMatch(s -> s.candidateKey().equals(p.journeyKey()) && s.applied() && s.estimate().arrivalEventId()!=null));
         var causes=new ArrayList<Cause>();
-        var checked=e.originalComparison().candidates().stream().map(MlRoutePreview.Candidate::result).toList();
+        var checked=e.originalComparison().candidates().stream().map(MlRoutePreview.Candidate::result)
+                .filter(r->p==null || r.journeyKey().equals(p.journeyKey()) || e.original()!=null && r.journeyKey().equals(e.original().journeyKey())).toList();
         var impacted=new HashSet<String>();
         checked.forEach(r->r.reasons().stream().filter(x->x.startsWith("CLOSURE:")).forEach(x->impacted.add(x.substring(8))));
         if(snapshot!=null) snapshot.states().forEach((segment,node)->{
             String event=node.path("eventId").asText();
             if(!event.isBlank()&&impacted.contains(event)&&!node.path("source").asText().isBlank())
                 causes.add(new Cause(event,node.path("source").asText(),List.of(segment),"BLOCKED",true));
+            // segment.status 정식 계약은 원본 사건을 causes[]로 제공한다. 내부 closure 그룹 ID를
+            // 공식 사건 ID처럼 노출하지 않고, 판정에 실제 연결된 원본 출처만 전달한다.
+            if(impacted.contains(event.isBlank()?segment+":"+Instant.parse(node.path("computedAt").asText()):event))
+                for(var cause:node.path("causes")) {
+                    String originalId=cause.path("eventId").asText(),source=cause.path("source").asText();
+                    if(!originalId.isBlank() && !source.isBlank()) causes.add(new Cause(originalId,source,List.of(segment),"BLOCKED",true));
+                }
         });
         if(snapshot!=null) for(var info:snapshot.roads().values()) for(var path:info.path("paths")) for(var event:path.path("events")) {
             String idValue=event.path("eventId").asText();
             if(!idValue.isBlank()&&checked.stream().anyMatch(r->r.reasons().contains("ROAD_POTENTIAL_IMPACT:"+idValue))
                     && causes.stream().noneMatch(c->c.eventId().equals(idValue)))
-                causes.add(new Cause(idValue,event.path("source").asText("ROAD_FEED"),List.of(info.path("segmentId").asText()),"POTENTIAL_IMPACT",false));
+                causes.add(new Cause(idValue,event.path("source").asText("UNKNOWN"),List.of(info.path("segmentId").asText()),"POTENTIAL_IMPACT",false));
+        }
+        var groupedCauses=new LinkedHashMap<String,Cause>();
+        for(var cause:causes) {
+            String key=cause.eventId()+":"+cause.source()+":"+cause.effect();
+            Cause previous=groupedCauses.get(key);
+            var segments=new TreeSet<String>(cause.segmentIds()); if(previous!=null) segments.addAll(previous.segmentIds());
+            groupedCauses.put(key,new Cause(cause.eventId(),cause.source(),List.copyOf(segments),cause.effect(),cause.confirmed()));
         }
         var versions=new LinkedHashMap<String,String>(); versions.put("policy",ConditionalDeparturePolicy.VERSION);
         if(routes!=null) routes.stream().flatMap(r->r.segments().stream()).map(x->x.mapping()).filter(Objects::nonNull)
@@ -67,11 +99,18 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
                 .reduce((a,b)->a.equals(b)?a:"MIXED_REJECTED").ifPresent(v->versions.put("timetable",v));
         return new ScheduleEvaluationV2("schedule-evaluation-v2",schedule==null?"READ_ONLY":"SCHEDULE",id,schedule,
                 revision,eventRevision,"READY",e.decision().name(),trigger,userInput,planned,planned.isBefore(now)?now:planned,
-                deadline,e.original()==null?null:e.original().estimatedArrivalAt(),e.targetArriveAt(),e.appliedBufferSeconds(),
+                deadline,e.original()==null?null:e.original().estimatedArrivalAt(),e.targetArriveAt()==null?deadline:e.targetArriveAt(),e.appliedBufferSeconds(),
                 p==null?null:p.departureAt(),eta,eta==null?null:Duration.between(p.departureAt(),eta).getSeconds(),
                 eta==null?null:Math.max(0,Duration.between(deadline,eta).getSeconds()),eta==null?null:eta.isBefore(deadline),
                 e.targetArriveAt()==null||eta==null?null:!eta.isAfter(e.targetArriveAt()),e.departureMissed(),selectedRouteId,proposedRouteId,
-                new Quality(true,false,realtime,access||egress,access&&egress?"BOTH":access?"ACCESS_ONLY":egress?"EGRESS_ONLY":"NONE",p==null||p.steps().stream().anyMatch(x->x.key().equals("provider-total"))?"UNKNOWN":"PARTIAL",List.copyOf(absent),reasons.stream().distinct().toList()),
-                e.search(),e.bestKnownDecision()==null?null:e.bestKnownDecision().name(),List.copyOf(causes),now,now,validUntil,nextAt,Map.copyOf(versions),legs);
+                new Quality(true,false,realtime,access||egress,access&&egress?"BOTH":access?"ACCESS_ONLY":egress?"EGRESS_ONLY":"NONE",costCoverage,List.copyOf(absent),reasons.stream().distinct().toList()),
+                e.search(),e.bestKnownDecision()==null?null:e.bestKnownDecision().name(),List.copyOf(groupedCauses.values()),now,now,validUntil,nextAt,Map.copyOf(versions),legs);
+    }
+    /** 호출 성공만으로 applied를 만들지 않는다. 최종 타임라인에 해당 WALK와 교체 시간이 실제 남아 있어야 한다. */
+    private static boolean appliedWalk(com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService.Leg leg,
+                                       RouteTimelineEvaluator.Result result) {
+        return leg.durationSource().equals("KAKAO_AFFILIATE_WALKING") && result.steps().stream()
+                .anyMatch(step->step.key().equals("step-"+leg.sequence()) && step.exitedAt()!=null
+                        && Duration.between(step.enteredAt(),step.exitedAt()).getSeconds()==leg.durationSeconds());
     }
 }

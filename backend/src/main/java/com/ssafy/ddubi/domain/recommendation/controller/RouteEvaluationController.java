@@ -59,7 +59,7 @@ public class RouteEvaluationController {
         var enriched=walking.prepare(search.candidates(),request.origin(),request.destination(),now);
         var result=evaluator.evaluate(enriched.candidates(),snapshot,now,p,d).withWalking(enriched.evidence());
         return ApiResponse.success(ScheduleEvaluationV2.from(result,UUID.randomUUID().toString(),null,null,0,"READ_ONLY",
-                p,p,d,now,now.plusSeconds(60),null,null,null,snapshot.reasons(),snapshot,search.candidates()));
+                p,p,d,now,ScheduleEvaluationV2.validity(result,snapshot,now,null),null,null,null,snapshot.reasons(),snapshot,search.candidates()));
     }
     private void validate(Coordinate point) {
         if(!Double.isFinite(point.longitude())||!Double.isFinite(point.latitude())||Math.abs(point.longitude())>180||Math.abs(point.latitude())>90)

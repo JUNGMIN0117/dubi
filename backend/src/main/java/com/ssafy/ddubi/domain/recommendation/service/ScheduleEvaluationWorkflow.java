@@ -115,7 +115,7 @@ public class ScheduleEvaluationWorkflow {
 
             var snapshot = evidence.read(search.candidates(), now);
             Instant departure = job.departure().isBefore(now) ? now : job.departure();
-            var enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now);
+            var enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now,selectedKey(job,search));
             var calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
             var comparison = calculation.proposedComparison();
             var suggestion = calculation.suggestion();
@@ -134,7 +134,7 @@ public class ScheduleEvaluationWorkflow {
                 search = routes.search(new RouteSearchQuery(job.origin(), job.destination()));
 
                 snapshot = evidence.read(search.candidates(), now);
-                enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now);
+                enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now,selectedKey(job,search));
                 calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
                 comparison = calculation.proposedComparison();
                 suggestion = calculation.suggestion();

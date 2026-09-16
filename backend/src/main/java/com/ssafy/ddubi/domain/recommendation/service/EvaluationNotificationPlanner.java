@@ -21,11 +21,9 @@ import java.util.Optional;
  * 환경에서만 켜고, 발표 전에는 설정 한 줄로 되돌린다. 코드를 고쳐야 끌 수 있으면 급할 때
  * 못 끈다.
  *
- * <h3>왜 두 가지뿐인가</h3>
- * legacy 평가기는 같은 출발시각의 최소시간만 계산한다. v2 조건부 탐색 결과는 운영 승인 전 자동 발송하지 않는다
- * ({@code suggestion.proposed() == comparison.fastest()}). 그래서 "N분 일찍 나가세요"
- * (EARLY_DEPART)는 지금 만들 수 없다 — 없는 근거로 시각을 지어내면 사용자가 그걸 믿고
- * 일찍 나간다. 출발 역산이 붙으면 그때 추가한다.
+ * <h3>조건부 탐색과 기존 경로 안내</h3>
+ * ADVANCE는 재평가로 확인한 출발·도착시각을 EARLY_DEPART에 사용한다. 나머지는 아래 기존 안내를
+ * 유지한다. v2 PREVIEW는 shadow 설정을 명시적으로 켠 검증 환경에서만 발송하며 본문에 검증용을 표시한다.
  *
  * <pre>
  * 선택 경로가 LATE_ESTIMATE/BLOCKED   → ON_TIME_UNLIKELY

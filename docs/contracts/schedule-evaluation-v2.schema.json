@@ -366,9 +366,9 @@
               },
               "legRole": {
                 "enum": [
-                  "ACCESS",
-                  "TRANSFER",
-                  "EGRESS",
+                  "ACCESS_WALK",
+                  "TRANSFER_WALK",
+                  "EGRESS_WALK",
                   "RIDE",
                   "WALK_ONLY"
                 ]

@@ -13,7 +13,17 @@ public final class WalkingEndpointResolver {
         var mapping=transit.mapping();
         var edges=com.ssafy.ddubi.domain.recommendation.evaluation.RouteEvidenceAssembler.edges(transit);
         if (mapping==null || !"EXACT".equals(mapping.status().name()) || edges.isEmpty() || transit.geometry().isEmpty()
+                || mapping.candidateCount()!=1 || mapping.masterDataVersion()==null
                 || !Double.isFinite(maxMeters) || maxMeters<=0) return new Endpoint(null,"WALK_ENDPOINT_UNVERIFIED",false);
+        // EXACT 문자열만 믿지 않는다. provider step의 인접 edge가 같은 노선·방향으로 이어지는지 재확인한다.
+        for(int i=0;i<edges.size();i++) {
+            var edge=edges.get(i);
+            if(edge.sequence()!=i+1 || edge.mode()!=transit.mode() || edge.toOrder()!=edge.fromOrder()+1
+                    || !Objects.equals(edge.direction(),mapping.direction())
+                    || i>0 && (!Objects.equals(edges.get(i-1).routeId(),edge.routeId())
+                    || !Objects.equals(edges.get(i-1).toNodeId(),edge.fromNodeId()) || edges.get(i-1).toOrder()!=edge.fromOrder()))
+                return new Endpoint(null,"WALK_ENDPOINT_UNVERIFIED",false);
+        }
         String id=boarding?edges.get(0).fromNodeId():edges.get(edges.size()-1).toNodeId();
         var matches=points.stream().filter(p -> Objects.equals(p.nodeId(),id)
                 && Objects.equals(p.masterVersion(),mapping.masterDataVersion())).toList();
@@ -21,7 +31,7 @@ public final class WalkingEndpointResolver {
         var point=matches.get(0);
         if("STATION_CENTER".equals(point.meaning())) return new Endpoint(null,"STATION_CENTER_ONLY",false);
         Coordinate path=boarding?transit.geometry().get(0):transit.geometry().get(transit.geometry().size()-1);
-        if(point.source()==null || point.source().isBlank() || !Set.of("BUS_STOP","STATION_ENTRANCE").contains(point.meaning())
+        if(point.source()==null || point.source().isBlank() || point.meaning()==null || !Set.of("BUS_STOP","STATION_ENTRANCE").contains(point.meaning())
                 || !valid(path) || !valid(point.coordinate()) || distance(path,point.coordinate())>maxMeters)
             return new Endpoint(null,"WALK_ENDPOINT_UNVERIFIED",false);
         return new Endpoint(point.coordinate(),"EXACT:"+point.source()+":"+point.masterVersion()+":"+point.meaning(),true);

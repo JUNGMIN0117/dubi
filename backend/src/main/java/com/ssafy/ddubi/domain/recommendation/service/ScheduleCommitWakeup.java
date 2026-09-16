@@ -17,12 +17,20 @@ public class ScheduleCommitWakeup {
     private final ScheduleEvaluationWorkflow workflow;
     private final boolean enabled;
     private final ThreadPoolExecutor executor;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     public ScheduleCommitWakeup(ScheduleEvaluationWorkflow workflow,
+            org.springframework.jdbc.core.JdbcTemplate jdbc,
             @Value("${ddubi.recommendation.commit-wakeup-enabled:true}") boolean enabled) {
-        this.workflow=workflow;this.enabled=enabled;
+        this.workflow=workflow;this.enabled=enabled;this.jdbc=jdbc;
         executor=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<>(20),
                 runnable->{Thread t=new Thread(runnable,"schedule-commit-evaluation");t.setDaemon(true);return t;},
                 new ThreadPoolExecutor.AbortPolicy());
+    }
+    /** 입력 변경과 오래된 발송 취소를 같은 commit에 묶는다. worker 활성화 여부와 관계없이 실행한다. */
+    @TransactionalEventListener(phase=TransactionPhase.BEFORE_COMMIT)
+    public void invalidate(ScheduleInputChanged change) {
+        jdbc.update("UPDATE evaluation_notification_outbox SET status='CANCELED',lease_token=NULL,lease_until=NULL WHERE schedule_id=? AND status IN ('PENDING','SENDING')",change.scheduleId());
+        jdbc.update("UPDATE schedule_evaluation SET next_check_at=?,last_error=NULL,failure_count=0,retry_exhausted=false WHERE schedule_id=?",ScheduleEvaluationStore.ts(Instant.now()),change.scheduleId());
     }
     @TransactionalEventListener(phase=TransactionPhase.AFTER_COMMIT)
     public void committed(ScheduleInputChanged change) {

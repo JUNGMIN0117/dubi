@@ -37,12 +37,21 @@ public class WalkingEnrichmentService {
         } catch(Exception invalid) { loaded=List.of(); }
         points=List.copyOf(loaded);
     }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
     public record Leg(String candidateKey,int sequence,String legRole,long durationSeconds,String durationSource,String endpointEvidence) { }
-    public record Evidence(List<Leg> legs,List<String> fallbackReasons,int apiCalls) { }
+    /** validUntil은 실제 교체한 도보 응답 중 가장 빠른 만료다. 미적용/legacy 값은 null이다. */
+    public record Evidence(List<Leg> legs,List<String> fallbackReasons,int apiCalls,Instant validUntil) { }
     public record Prepared(List<RouteCandidate> candidates,Evidence evidence) { }
 
     public Prepared prepare(List<RouteCandidate> routes,Coordinate origin,Coordinate destination,Instant asOf) {
         return prepare(routes,origin,destination,asOf,points);
+    }
+    /** 선택 후보를 먼저, 나머지는 provider 예상시간 순서로 보강한다. candidate key와 원본 비용은 보존한다. */
+    public Prepared prepare(List<RouteCandidate> routes,Coordinate origin,Coordinate destination,Instant asOf,String selectedKey) {
+        var prioritized=routes.stream().sorted(Comparator
+                .comparing((RouteCandidate r)->!Objects.equals("candidate-"+r.providerCandidateIndex(),selectedKey))
+                .thenComparingLong(RouteCandidate::totalDurationSeconds)).toList();
+        return prepare(prioritized,origin,destination,asOf,points);
     }
     /** fake fixture도 운영과 같은 EXACT·비용 검사 경로를 통과한다. API 장애는 후보별로 격리한다. */
     public Prepared prepare(List<RouteCandidate> routes,Coordinate origin,Coordinate destination,Instant asOf,
@@ -50,6 +59,7 @@ public class WalkingEnrichmentService {
         var output=new ArrayList<RouteCandidate>();var metadata=new ArrayList<Leg>();var reasons=new LinkedHashSet<String>();
         var cache=new HashMap<WalkingRouteClient.Request,WalkingRouteClient.Evidence>();
         int calls=0;
+        Instant validUntil=null;
         for(var route:routes) {
             var roles=new RouteLegRoleClassifier().classify(route.segments());
             var transit=route.segments().stream().filter(s->s.mode()!=TransportMode.WALK).toList();
@@ -57,8 +67,8 @@ public class WalkingEnrichmentService {
             long delta=0;var steps=new ArrayList<RouteSegment>();
             for(var step:route.segments()) {
                 Role role=roles.get(step.sequence());long seconds=step.durationSeconds();String source="KAKAO_TRANSIT";String endpoint=null;
-                if(role==Role.ACCESS||role==Role.EGRESS) {
-                    boolean access=role==Role.ACCESS;
+                if(role==Role.ACCESS_WALK||role==Role.EGRESS_WALK) {
+                    boolean access=role==Role.ACCESS_WALK;
                     if(!enabled) endpoint="WALK_DISABLED";
                     else if(!complete||roles.values().stream().filter(r->r==role).count()!=1) endpoint="WALK_COST_COVERAGE_UNRESOLVED";
                     else {
@@ -77,6 +87,7 @@ public class WalkingEnrichmentService {
                             if(found!=null && found.seconds()!=null && found.seconds()>0 && found.seconds()<=86400
                                     && found.validUntil()!=null && found.validUntil().isAfter(asOf)) {
                                 seconds=found.seconds();source="KAKAO_AFFILIATE_WALKING";
+                                if(validUntil==null || found.validUntil().isBefore(validUntil)) validUntil=found.validUntil();
                             } else endpoint=found==null?"WALK_CALL_BUDGET_EXHAUSTED":found.reason()==null?"WALK_INVALID_RESPONSE":found.reason();
                         }
                     }
@@ -89,6 +100,6 @@ public class WalkingEnrichmentService {
             output.add(new RouteCandidate(route.providerCandidateIndex(),route.type(),route.totalDistanceMeters(),route.totalDurationSeconds()+delta,
                     route.transfers(),route.fare(),route.unassignedDistanceMeters(),route.unassignedDurationSeconds(),steps));
         }
-        return new Prepared(List.copyOf(output),new Evidence(List.copyOf(metadata),List.copyOf(reasons),calls));
+        return new Prepared(List.copyOf(output),new Evidence(List.copyOf(metadata),List.copyOf(reasons),calls,validUntil));
     }
 }

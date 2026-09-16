@@ -148,6 +148,7 @@ public class NotificationService {
         if(!notification.isOwnedBy(user.getId()) || !java.util.Objects.equals(notification.scheduleId(),command.scheduleId()))
             throw new BusinessException(ErrorCode.FORBIDDEN_RESOURCE);
         if(notification.getStatus()==NotificationStatus.SENT) return new Prepared(notification,command,List.of());
+        if(reason!=null) notification.markSuppressed(reason);
         notificationRepository.flush();
         return new Prepared(notification,command,reason==null?List.copyOf(devices):List.of());
     }

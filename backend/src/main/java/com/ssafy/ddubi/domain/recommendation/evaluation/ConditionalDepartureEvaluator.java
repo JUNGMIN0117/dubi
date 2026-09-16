@@ -50,7 +50,7 @@ public class ConditionalDepartureEvaluator {
     /** 원천은 평가 시작 시 고정하고 이후 출발 후보에서는 API 경로 재검색/증거 재수집을 하지 않는다. */
     public Evaluation evaluate(List<RouteCandidate> candidates, RouteEvidenceAssembler.Snapshot snapshot,
                                Instant asOf, Instant planned, Instant deadline) {
-        var session = journeys.newSession();
+        var session = journeys.newSession(maxMillis);
         var boundaries = new TreeSet<Instant>();
         // 운행표 경계 외에도 시간대·통제 적용 경계를 포함한다. 접근시간 때문에 경계만으로
         // 최적 출발을 증명할 수 없으므로 제한 격자라는 한계를 응답에 유지한다.
@@ -60,8 +60,19 @@ public class ConditionalDepartureEvaluator {
         for (var row : snapshot.states().values()) for (String field : List.of("computedAt", "validUntil")) {
             try { boundaries.add(Instant.parse(row.path(field).asText())); } catch (RuntimeException ignored) { /* 선택 필드 결측 */ }
         }
-        return evaluate(candidates.size(), asOf, planned, deadline, boundaries,
+        // 서울 시간대도 정각 경계가 UTC 정각과 일치한다. 시간대별 ML 입력 변경을 격자 사이에서 누락하지 않는다.
+        Instant upper=planned.isBefore(deadline.minusSeconds(600))?planned:deadline.minusSeconds(600);
+        Instant hour=upper.truncatedTo(java.time.temporal.ChronoUnit.HOURS);
+        for(int i=0;i<=maxEvaluations && !hour.isBefore(asOf);i++,hour=hour.minusSeconds(3600)) boundaries.add(hour);
+        var evaluated = evaluate(candidates.size(), asOf, planned, deadline, boundaries,
                 at -> journeys.compare(candidates, snapshot, asOf, at, deadline, session));
+        // 탐색 도중 모델이 교체되면 이전 출발 후보의 숫자도 비교 근거를 잃는다.
+        // 마지막 batch만 무효화하면 앞 batch의 ETA가 최선으로 살아남으므로 평가 전체를 폐기한다.
+        if (session.mixedModel) return new Evaluation(Decision.DATA_INSUFFICIENT,null,evaluated.targetArriveAt(),
+                evaluated.appliedBufferSeconds(),evaluated.departureMissed(),null,null,
+                JourneyEvaluationService.rejectMixedModel(evaluated.originalComparison()),
+                JourneyEvaluationService.rejectMixedModel(evaluated.proposedComparison()),evaluated.search(),null);
+        return evaluated;
     }
 
     /** 고정시각 fixture와 Replay를 위한 함수 경계. 전 시각의 duration을 빼는 역산은 사용하지 않는다. */
@@ -74,7 +85,7 @@ public class ConditionalDepartureEvaluator {
                 .map(MlRoutePreview.Candidate::result).toList(), planned, deadline, asOf);
         int count = candidateCount;
         if (!policy.searchRequired()) return result(policy.departureMissed() ? Decision.DEPART_NOW : Decision.KEEP_DEPARTURE,
-                policy, initial, initial, policy.best(), count, !initial.budgetExhausted());
+                policy, initial, initial, policy.best(), count, !initial.budgetExhausted() && count<=maxEvaluations && System.nanoTime()<budgetEnd);
 
         if(candidateCount==0) return result(Decision.ROUTE_UNAVAILABLE,policy,initial,initial,null,0,true);
         Instant upper = planned.isBefore(policy.target()) ? planned : policy.target();
@@ -86,7 +97,14 @@ public class ConditionalDepartureEvaluator {
             for (Instant t : boundaries) if (!t.isBefore(asOf) && !t.isAfter(upper)) {
                 times.add(t); if (times.size()>maxEvaluations+2) { times.pollLast(); truncated=true; }
             }
-            for (Instant t=upper; !t.isBefore(asOf) && times.size()<=maxEvaluations+2; t=t.minusSeconds(gridSeconds)) times.add(t);
+            // 경계가 먼저 cap을 채워도 그 사이의 더 늦은 격자 후보를 빠뜨리지 않는다.
+            // 전체 합집합의 최신 K개만 보존하므로 평가 순서가 항상 내림차순이다.
+            Instant t=upper;
+            for (int i=0; i<=maxEvaluations+2 && !t.isBefore(asOf); i++,t=t.minusSeconds(gridSeconds)) {
+                times.add(t);
+                if(times.size()>maxEvaluations+2) { times.pollLast(); truncated=true; }
+            }
+            if(!t.isBefore(asOf)) truncated=true;
         }
         Result best = policy.best();
         MlRoutePreview.Comparison bestComparison=initial;
@@ -95,7 +113,7 @@ public class ConditionalDepartureEvaluator {
             if (at.equals(effective)) continue;
             if (count+candidateCount>maxEvaluations || System.nanoTime()>=budgetEnd) { complete=false; break; }
             var batch=forward.apply(at); count+=candidateCount;
-            if (batch.budgetExhausted()) complete=false;
+            if (batch.budgetExhausted() || System.nanoTime()>=budgetEnd) complete=false;
             Result current=ConditionalDeparturePolicy.best(batch.candidates().stream().map(MlRoutePreview.Candidate::result).toList());
             if (current!=null && (best==null || current.estimatedArrivalAt().isBefore(best.estimatedArrivalAt()))) {
                 best=current; bestComparison=batch;

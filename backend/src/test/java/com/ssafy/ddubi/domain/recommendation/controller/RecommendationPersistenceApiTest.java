@@ -85,7 +85,7 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
     @Test
     @DisplayName("추천 생성 → 저장 → recommendationId → 최신 추천 · 근거 조회가 HTTP로 이어진다")
     void frontendCanFollowTheWholeChainOverHttp() throws Exception {
-        String evaluated = http.perform(post("/api/v1/schedules/{id}/recommendations", scheduleId)
+        String evaluated = http.perform(post("/api/v1/schedules/{id}/recommendations", scheduleId).param("version","1")
                         .header("Authorization", bearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.recommendationId").isNumber())
@@ -101,7 +101,7 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
         assertThat(recommendationId).isPositive();
 
         // 최신 추천 — 화면을 다시 그릴 때 같은 ID와 같은 표시가 나와야 한다.
-        http.perform(get("/api/v1/schedules/{id}/recommendations/latest", scheduleId).header("Authorization", bearer))
+        http.perform(get("/api/v1/schedules/{id}/recommendations/latest", scheduleId).param("version","1").header("Authorization", bearer))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.state").value("READY"))
                 .andExpect(jsonPath("$.data.result.recommendationId").value(recommendationId))
@@ -127,7 +127,7 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
     @Test
     @DisplayName("저장은 되어도 수락과 자동 알림은 여전히 막혀 있다")
     void storingDoesNotUnblockAcceptOrNotification() throws Exception {
-        String evaluated = http.perform(post("/api/v1/schedules/{id}/recommendations", scheduleId)
+        String evaluated = http.perform(post("/api/v1/schedules/{id}/recommendations", scheduleId).param("version","1")
                 .header("Authorization", bearer)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String evaluationId = json.readTree(evaluated).path("data").path("evaluationId").asText();
 
@@ -149,7 +149,7 @@ class RecommendationPersistenceApiTest extends IntegrationTestSupport {
     @Test
     @DisplayName("남의 추천 근거는 볼 수 없다 — 추천 ID는 순번이라 찍어 볼 수 있다")
     void explanationIsOwnedByTheScheduleOwner() throws Exception {
-        String evaluated = http.perform(post("/api/v1/schedules/{id}/recommendations", scheduleId)
+        String evaluated = http.perform(post("/api/v1/schedules/{id}/recommendations", scheduleId).param("version","1")
                 .header("Authorization", bearer)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         long recommendationId = json.readTree(evaluated).path("data").path("recommendationId").asLong();
 

@@ -56,4 +56,12 @@ class ConditionalDepartureEvaluatorTest {
         assertThat(result.proposed().departureAt()).isEqualTo(p.minusSeconds(90));
         assertThat(seen).containsExactly(p,p.minusSeconds(60),p.minusSeconds(90));
     }
+    @Test void denseSourceBoundariesCannotDisplaceLaterGridDepartures() {
+        var boundaries=new ArrayList<Instant>();
+        for(int i=1;i<20;i++) boundaries.add(now.plusSeconds(i));
+        var seen=new ArrayList<Instant>();
+        var result=engine(4).evaluate(1,now,p,d,boundaries,at->{seen.add(at);return comparison(at,at.equals(p.minusSeconds(60))?d.minusSeconds(600):d);});
+        assertThat(seen).containsExactly(p,p.minusSeconds(60));
+        assertThat(result.proposed().departureAt()).isEqualTo(p.minusSeconds(60));
+    }
 }

@@ -30,10 +30,10 @@ public class EvaluationNotificationDispatcher {
             var original=store.read(delivery.json(),NotificationCommand.class);
             var command=new NotificationCommand(original.userId(),original.scheduleId(),original.recommendationId(),
                     original.type(),original.title(),original.body(),delivery.dedup());
-            if(!outbox.current(id,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
+            if(!outbox.current(delivery,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
             var prepared=notifications.prepareForOutbox(command,delivery.notificationId());
             if(!outbox.attach(delivery,prepared.notification().getId())) return;
-            if(!outbox.current(id,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
+            if(!outbox.current(delivery,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
             var result=notifications.sendPrepared(prepared);
             String status=result.getStatus().name();
             outbox.finish(delivery,"SENT".equals(status)?"SENT":"SUPPRESSED".equals(status)?"CANCELED":"PUSH_FAILED",

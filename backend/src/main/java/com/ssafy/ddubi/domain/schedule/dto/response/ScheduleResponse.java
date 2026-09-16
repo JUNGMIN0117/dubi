@@ -28,7 +28,12 @@ public record ScheduleResponse(
         String recommendationStatus,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        LocalDateTime plannedDepartAt
+        LocalDateTime plannedDepartAt,
+        LocalDateTime userInputDepartAt,
+        String planSource,
+        LocalDateTime actualDepartAt,
+        String journeyState,
+        long inputRevision
 ) {
 
     public static ScheduleResponse from(Schedule schedule, LocalDateTime now) {
@@ -50,7 +55,8 @@ public record ScheduleResponse(
                 displayState(schedule, now),
                 recommendationStatus,
                 schedule.getCreatedAt(),
-                schedule.getUpdatedAt(), schedule.getPlannedDepartAt());
+                schedule.getUpdatedAt(), schedule.getPlannedDepartAt(),schedule.getUserInputDepartAt(),
+                schedule.getPlanSource(),schedule.getActualDepartAt(),schedule.getJourneyState(),schedule.getInputRevision());
     }
 
     private static String displayState(Schedule schedule, LocalDateTime now) {

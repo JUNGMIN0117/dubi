@@ -111,7 +111,7 @@ public class ScheduleService {
         if (request.hasNoChanges()) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "수정할 필드가 없습니다.");
         }
-        Schedule schedule = findOwned(userId, scheduleId);
+        Schedule schedule = findOwnedForUpdate(userId, scheduleId);
         schedule.requireEditable();
 
         // 규칙 12: 조회 시점의 updatedAt 과 다르면 그 사이 다른 기기가 수정한 것이다.
@@ -171,8 +171,10 @@ public class ScheduleService {
 
     @Transactional
     public void cancel(Long userId, Long scheduleId) {
-        Schedule schedule = findOwned(userId, scheduleId);
+        Schedule schedule = findOwnedForUpdate(userId, scheduleId);
         schedule.cancel();
+        scheduleRepository.flush();
+        events.publishEvent(new com.ssafy.ddubi.domain.recommendation.service.ScheduleInputChanged(scheduleId));
         log.info("일정 취소 — scheduleId={}", scheduleId);
     }
 
@@ -184,6 +186,13 @@ public class ScheduleService {
         if (!schedule.isOwnedBy(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN_RESOURCE);
         }
+        return schedule;
+    }
+
+    /** 일정 행을 먼저 잠그는 순서를 evaluation claim/complete와 맞춰 입력 변경 사이 덮어쓰기를 막는다. */
+    private Schedule findOwnedForUpdate(Long userId,Long scheduleId) {
+        Schedule schedule=scheduleRepository.findForUpdate(scheduleId).orElseThrow(()->new BusinessException(ErrorCode.SCHEDULE_NOT_FOUND));
+        if(!schedule.isOwnedBy(userId)) throw new BusinessException(ErrorCode.FORBIDDEN_RESOURCE);
         return schedule;
     }
 

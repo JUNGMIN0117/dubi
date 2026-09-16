@@ -54,9 +54,11 @@ t_{i+1}=t_i+C_i(t_i),\qquad T_{route}(t_0)=t_n-t_0
 
 ### 3.1 카카오 도보 경로를 선택한 이유
 
-대중교통 전체시간에서 탑승·환승 시간을 빼 남은 시간을 얻더라도 출발지→승차지와 하차지→목적지의 비중은 확정할 수 없다. 첫 승차지 도착시각을 계산하려면 접근 도보를 따로 알아야 한다. 카카오 도보 응답은 경로점·거리·step 시간·횡단보도 안내를 제공하는 입력 후보다. [카카오 도보 REST 문서](https://developers.kakao.com/docs/ko/kakaomap/rest-api#walking)
+대중교통 전체시간에서 탑승·환승 시간을 빼 남은 시간을 얻더라도 출발지→승차지와 하차지→목적지의 비중은 확정할 수 없다. 첫 승차지 도착시각을 계산하려면 접근 도보를 따로 알아야 한다. 목표 원천은 [카카오모빌리티 제휴용 도보 길찾기](https://developers.kakaomobility.com/affiliate/walking/directions.html)다. 이 API는 일반 카카오맵 REST 기능이 아니라 사전 제휴 계약이 필요한 파트너 전용 API다.
 
-현재 기준 코드의 [RouteEvidenceAssembler](../../backend/src/main/java/com/ssafy/ddubi/domain/recommendation/evaluation/RouteEvidenceAssembler.java)는 WALK의 `durationSeconds`를 유지한다. 별도 도보 API 호출과 횡단보도 보정은 구현 완료 항목이 아니다. 거리/1.2m/s를 일반 도보의 확정 계산식으로 추가하지 않는다.
+현재 기준 코드의 [RouteEvidenceAssembler](../../backend/src/main/java/com/ssafy/ddubi/domain/recommendation/evaluation/RouteEvidenceAssembler.java)는 WALK의 `durationSeconds`를 유지한다. 별도 도보 API 호출은 구현 전이며 [조건부 출발 구현 계획](arrival-deadline-implementation-plan.md)에 ACCESS/TRANSFER/EGRESS 분류, 승·하차 좌표 검증, 제휴 도보 Client, fallback·중복 방지 작업을 추가했다. 거리/1.2m/s를 일반 도보의 확정 계산식으로 추가하지 않는다.
+
+목표 흐름은 `대중교통 JSON 파싱 → BUS/SUBWAY 마스터 매핑 → 승·하차 좌표 검증 → 접근·이탈 도보 API → 전체 여정 조립`이다. 카카오 path endpoint는 후보일 뿐이며 EXACT 마스터 좌표와 검증한다. 대중교통 사이 WALK는 환승으로 유지한다. 별도 접근·이탈 시간이 기존 WALK 또는 unassigned duration과 겹치는지 확인하지 않고 더하지 않는다.
 
 ### 3.2 길이 기반 경험식을 만든 과정
 

@@ -12,7 +12,7 @@ from bus_crosswalk import BusCrosswalk, POLICY as BUS_ID_POLICY
 
 from config import Settings
 from request_budget import RequestBudget, RetryScheduled
-from sources.base import KST, Record, SourceSpec, now_kst
+from sources.base import KST, PollBatch, Record, SourceSpec, now_kst
 from sources.subway_schedule import pause_until, SkippedNonService
 
 log = logging.getLogger(__name__)
@@ -156,32 +156,52 @@ def collect(name, settings: Settings, client):
     interval = max(default_interval, settings.interval_seconds or 0)
     if not budget.claim_cycle(name, interval, expected, allow_retry=name == "bus_location"):
         log.info("source=%s cooldown active; no API request", name)
-        return []
+        return PollBatch(status="RATE_LIMITED", scope_key=name, error_code="POLL_COOLDOWN")
     hook = budget.before_request
     client.event_hooks["request"].append(hook)
     try:
         if name == "bus_arrival":
             result = module.fetch_all_bus_arrivals(key, targets, client=client, requests_per_second=1)
-            return [to_record(name, row, route, crosswalk) for route, response in result["routeResults"].items()
-                    for row in _rows(response.get("msgBody", {}).get("itemList"))]
+            return PollBatch(
+                [to_record(name, row, route, crosswalk) for route, response in result["routeResults"].items()
+                 for row in _rows(response.get("msgBody", {}).get("itemList"))],
+                complete_snapshot=result["routeCount"] == len(targets), page_count=result["routeCount"],
+                scope_key="configured-routes",
+            )
         if name == "bus_location":
             result = module.fetch_all_bus_locations(key, targets, client=client, requests_per_second=1)
-            return [to_record(name, row, route, crosswalk) for route, response in result["routeResults"].items()
-                    for row in _rows(response.get("msgBody", {}).get("itemList"))]
+            return PollBatch(
+                [to_record(name, row, route, crosswalk) for route, response in result["routeResults"].items()
+                 for row in _rows(response.get("msgBody", {}).get("itemList"))],
+                complete_snapshot=result["routeCount"] == len(targets), page_count=result["routeCount"],
+                scope_key="configured-routes",
+            )
         if name == "subway_arrival":
             result = module.fetch_all_subway_arrivals(key, client=client)
             if result["receivedCount"] == 0:
                 log.info("source=subway_arrival status=EMPTY reason=NO_DATA")
-            return [to_record(name, row) for row in result["response"]["realtimeArrivalList"]]
+            return PollBatch(
+                [to_record(name, row) for row in result["response"]["realtimeArrivalList"]],
+                complete_snapshot=bool(result.get("isComplete")), page_count=1,
+                scope_key="metropolitan-all-stations",
+            )
         if name == "subway_location":
             result = module.fetch_all_subway_locations(key, targets, client=client, requests_per_second=1)
             if result["emptyLines"]:
                 log.info("source=subway_location emptyLines=%s status=%s", result["emptyLines"], "EMPTY" if result["positionCount"] == 0 else "PARTIAL_EMPTY")
-            return [to_record(name, row, line) for line, response in result["lineResults"].items()
-                    for row in response["response"].get("realtimePositionList", [])]
+            return PollBatch(
+                [to_record(name, row, line) for line, response in result["lineResults"].items()
+                 for row in response["response"].get("realtimePositionList", [])],
+                complete_snapshot=result["lineCount"] == len(targets), page_count=result["lineCount"],
+                scope_key="configured-lines",
+            )
         if name == "city_realtime":
             result = module.fetch_city_areas(key, targets, client=client, requests_per_second=1)
-            return [to_record(name, area["response"]["CITYDATA"]) for area in result["areaResults"].values()]
+            return PollBatch(
+                [to_record(name, area["response"]["CITYDATA"]) for area in result["areaResults"].values()],
+                complete_snapshot=bool(result["isComplete"]), page_count=result["receivedAreaCount"],
+                scope_key="configured-areas",
+            )
         if name == "subway_alert":
             result = module.fetch_alerts(key, page_size=1000, client=client)
         elif name == "topis_notice":
@@ -190,7 +210,17 @@ def collect(name, settings: Settings, client):
             result = module.fetch_incidents(key, page_size=1000, fetch_all=True, client=client)
         if result.get("hasMore"):
             log.warning("source=%s response may have more rows; first 1000 only", name)
-        return [to_record(name, row) for row in result["items"]]
+        reported_complete = result.get("isComplete")
+        complete = not bool(result.get("hasMore")) and (
+            reported_complete is not False or name == "topis_notice"
+        )
+        status = "SUCCESS" if complete else "PARTIAL"
+        return PollBatch(
+            [to_record(name, row) for row in result["items"]],
+            status=status, complete_snapshot=complete,
+            page_count=int(result.get("requestCount") or 1), scope_key="all-current",
+            error_code=None if complete else "PAGE_SCOPE_PARTIAL",
+        )
     except Exception as exc:
         if name == "bus_location":
             from sources.bus_location import BusLocationError

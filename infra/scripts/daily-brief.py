@@ -123,6 +123,8 @@ echo "@@archiver_started"; docker inspect archiver --format '{{.State.StartedAt}
 echo "@@kafka"; docker exec kafka du -s --block-size=1 /var/lib/kafka/data 2>/dev/null | cut -f1   # 실제 디스크 사용량(희소 인덱스 파일 제외)
 echo "@@deploy"; cd ~/S15P21E202 && git log -1 --format='%h %cd' --date=format:'%m-%d %H:%M' && stat -c %y .git/FETCH_HEAD 2>/dev/null | cut -c1-16
 echo "@@nn_backup"; tail -n 1 ~/backups/hdfs-name/backup.log 2>/dev/null || echo "로그 없음"
+echo "@@spark_started"; docker inspect spark-streaming-realtime spark-streaming-weather --format '{{.Name}} {{.State.StartedAt}}' 2>/dev/null
+echo "@@sparkjobs_commit"; cd ~/S15P21E202 && git log -1 --format=%ct -- sparkjobs
 """
 
 
@@ -140,15 +142,17 @@ def collect_remote():
 
 
 def collect_local():
-    """서버2 로컬: 재시작·backend 오류 로그·배포 커밋·Redis TTL 없는 키·인증서 만료."""
+    """서버2 로컬: 재시작·backend 오류 로그·배포 커밋·Redis TTL 없는 키·인증서 만료.
+    TTL 없는 키는 키마다 따로 묻지 않고 한 연결로 한꺼번에 묻는다(파이프라인). 키마다 묻던 방식은 키가 17,000개가 되자
+    40초를 넘겨 서버2 조회 전체가 실패로 처리됐다(9/15 17:00 브리핑). 지금 방식은 0.1초 안에 끝난다. 제한은 안전하게 60초."""
     out = _run(["bash", "-c", r"""
 echo "@@restarts"; docker ps -a --filter label=com.docker.compose.project=ddubi --format '{{.Names}}' | xargs -r -I{} docker inspect {} --format '{{.Name}} {{.RestartCount}} {{.State.Status}}'
 echo "@@errors"; printf "backend %s
 " "$(docker logs backend --since %(h)dh 2>&1 | grep -cE ' ERROR ')"
 echo "@@deploy"; cd ~/S15P21E202 && git log -1 --format='%h %cd' --date=format:'%m-%d %H:%M' && stat -c %y .git/FETCH_HEAD 2>/dev/null | cut -c1-16
-echo "@@redis_nottl"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | while read k; do [ "$(redis-cli -a "$REDIS_PASSWORD" --no-auth-warning TTL "$k")" = "-1" ] && echo "$k"; done | wc -l'
+echo "@@redis_nottl"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | awk "{print \"TTL \" \$0}" | redis-cli -a "$REDIS_PASSWORD" --no-auth-warning | grep -c "^-1$"'
 echo "@@cert"; echo | openssl s_client -connect localhost:443 -servername j15e202.p.ssafy.io 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2
-""".replace("%(h)d", str(WINDOW_H))])
+""".replace("%(h)d", str(WINDOW_H))], timeout=60)
     return _split_sections(out or "")
 
 
@@ -233,6 +237,31 @@ def last_backup():
         return "로그 없음"
 
 
+def _docker_ts(text):
+    """도커의 StartedAt(예 2026-09-15T04:53:18.123456789Z)을 epoch 초로. 나노초 자리는 버린다. 못 읽으면 None."""
+    m = re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", text.strip())
+    if not m:
+        return None
+    return datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+
+
+def _stale_spark_jobs(rem):
+    """sparkjobs 마지막 커밋보다 먼저 시작된 Spark 스트리밍 잡 이름 목록. 자료가 없거나 이상하면 빈 목록(조용히 넘어가지 않도록 호출 쪽에서 조회 실패는 따로 표시)."""
+    try:
+        commit_ts = int((rem.get("sparkjobs_commit") or [""])[0].strip())
+    except (ValueError, AttributeError):
+        return []
+    stale = []
+    for line in rem.get("spark_started") or []:
+        parts = line.strip().split()
+        if len(parts) != 2:
+            continue
+        started = _docker_ts(parts[1])
+        if started is not None and started < commit_ts:
+            stale.append(parts[0].lstrip("/"))
+    return stale
+
+
 def build(env):
     now = datetime.now(KST)
     label = "아침" if now.hour < 12 else "오후"
@@ -256,6 +285,8 @@ def build(env):
 
     # --- 서비스 ---
     backend_up = scalar('up{job="backend"}')
+    # ml-serving 은 blackbox-exporter 가 /health/ready 를 확인한 결과(1 준비, 0 죽음·미준비). 지표가 없으면 ? 로 둔다
+    ml_up = scalar('probe_success{job="ml-serving"}')
     mysql_conn = scalar("mysql_global_status_threads_connected")
     mysql_max = scalar("mysql_global_variables_max_connections")
     redis_pct = scalar("redis_memory_used_bytes / redis_memory_max_bytes * 100")
@@ -265,6 +296,9 @@ def build(env):
     http_all = scalar(f'sum(increase(http_server_requests_seconds_count{{uri!~"/actuator.*"}}[{WINDOW_H}h]))') or 0
     if backend_up is not None and backend_up < 1:
         w("서비스", "backend 다운")
+    # "다운" 이라는 말은 light() 가 빨간불로 올리므로 쓰지 않는다. ML 은 보조 축이라 노란불이 맞다
+    if ml_up is not None and ml_up < 1:
+        w("서비스", "ML 예측 미동작(카카오 값으로 대체 중)")
     if http_5xx > 0:
         w("서비스", f"5xx {int(http_5xx)}건")
 
@@ -398,6 +432,11 @@ def build(env):
     nn_backup = (rem.get("nn_backup") or ["로그 없음"])[0].strip() if rem else None
     if nn_backup is not None and ("OK" not in nn_backup or "WARN" in nn_backup):
         w("운영", "네임노드 백업 확인 필요" if "WARN" not in nn_backup else "네임노드 fsimage 오래됨")
+    # Spark 스트리밍 잡은 켜질 때 코드를 읽어 두기 때문에, sparkjobs 코드가 배포돼도 잡을 다시 켜지 않으면 옛 코드로 계속 돈다.
+    # 9/15 에 dt 가 올린 Redis TTL 이 나흘 동안 적용되지 않은 채 발견됐다. 잡 시작 시각이 sparkjobs 마지막 커밋 시각보다 앞서면 알린다.
+    stale_jobs = _stale_spark_jobs(rem) if rem else []
+    if stale_jobs:
+        w("데이터", "Spark 잡 재시작 필요(" + ", ".join(stale_jobs) + " — sparkjobs 코드 변경 뒤 미재시작)")
 
     def light(area):
         return "🔴" if any(k in " ".join(warns[area]) for k in ("다운", "Missing", "부족", "유입 0", "조회 실패")) else ("🟡" if warns[area] else "🟢")
@@ -418,7 +457,7 @@ def build(env):
     backup_txt = backup.split(" OK: ")[-1].split("/")[-1] if " OK: " in backup else backup
 
     rows = [
-        ("서비스", f"backend {'✓' if backend_up == 1 else '✗'} · MySQL 연결 {fmt(mysql_conn)}/{fmt(mysql_max)} · Redis {fmt(redis_pct, 1, '%')} (키 {fmt(redis_keys)}, TTL 없는 키 {fmt(redis_nottl)}) · 요청 {fmt(http_all)} / 5xx {fmt(http_5xx)}"),
+        ("서비스", f"backend {'✓' if backend_up == 1 else '✗'} · ML {'✓' if ml_up == 1 else ('✗' if ml_up is not None else '?')} · MySQL 연결 {fmt(mysql_conn)}/{fmt(mysql_max)} · Redis {fmt(redis_pct, 1, '%')} (키 {fmt(redis_keys)}, TTL 없는 키 {fmt(redis_nottl)}) · 요청 {fmt(http_all)} / 5xx {fmt(http_5xx)}"),
         ("데이터", f"유입 {intake_txt} · 아카이버 랙 {fmt(lag)} · Spark 잡 {fmt(spark_apps)}/2 worker {fmt(spark_workers)}/2 · 배치 지연 {latency_txt}"),
         ("저장", f"HDFS Live {fmt(hdfs_live)} · Under-rep {fmt(hdfs_under)} · Missing {fmt(hdfs_missing)} · 사용 {human(hdfs_used)} · 아카이브 새 파일 {fmt(new_files)} · Kafka {human(kafka_bytes)}"),
         ("자원", f"디스크 서버1/2 {disk_txt} · 메모리 서버1/2 {mem_txt}"),

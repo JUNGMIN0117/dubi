@@ -128,6 +128,17 @@ curl -s -o /dev/null -w "%{http_code}\n" https://j15e202.p.ssafy.io/api/health  
 ```
 덤프에 `flyway_schema_history` 가 포함되어 있어 복구 뒤 backend 의 Flyway 검증이 그대로 통과합니다. 백업 시점 이후의 변경은 사라진다는 점을 팀에 알립니다.
 
+**볼륨을 새로 만들어 복구했을 때 한 가지 더** — 덤프에는 `ddubi` 데이터베이스만 들어 있고 MySQL 계정은 들어 있지 않습니다. 볼륨을 지우고 다시 만들면 compose 가 `MYSQL_USER` 계정은 다시 만들지만, 감시용 `exporter` 계정(2026-09-08 손으로 만든 것)은 없어져 Grafana 의 MySQL 지표가 끊기고 "MySQL 다운" 알림이 뜹니다. 복구 뒤 아래를 한 번 실행합니다(비밀번호는 서버2 `.env` 의 `MYSQL_EXPORTER_PASSWORD` 값).
+```
+docker exec -i mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' <<'SQL'
+CREATE USER IF NOT EXISTS 'exporter'@'%' IDENTIFIED BY '<MYSQL_EXPORTER_PASSWORD 값>' WITH MAX_USER_CONNECTIONS 3;
+GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'exporter'@'%';
+GRANT SELECT ON performance_schema.* TO 'exporter'@'%';
+FLUSH PRIVILEGES;
+SQL
+docker restart mysqld-exporter
+```
+
 **HDFS 네임노드 메타데이터** (2026-09-14 도입) — HDFS 의 블록(데이터 본체)은 쓰는 순간 두 서버에 함께 저장되지만, "어느 블록이 어느 파일인지" 적힌 네임노드 메타데이터는 서버1 볼륨 한 곳에만 있었습니다. 서버1 디스크를 잃으면 서버2 에 블록이 다 있어도 읽을 수 없는 구조였습니다. 서버가 2대라 네임노드 자동 이중화(저널노드·ZooKeeper 3대의 다수결)는 만들 수 없어, 대신 아래 두 겹으로 보호합니다.
 1. **서버2 세컨더리 네임노드**(`hdfs-secondarynamenode`, hdfs2 프로필, 항상 켜져 있음)가 매시간 서버1 네임노드의 fsimage·edits 를 받아 합친 새 fsimage 를 서버2 볼륨에 두고 서버1 에도 되돌려 줍니다. 사람이 할 일은 없습니다. 3시간 넘게 사본이 안 만들어지면 Grafana 알림 "HDFS 체크포인트 멈춤" 이 뜹니다.
 2. **서버1 일일 tar 백업** — `infra/scripts/backup-namenode.sh` 가 매일 04:20(KST, 크론 UTC 19:20) 네임노드 컨테이너의 `current/` 를 서버1 `~/backups/hdfs-name/namenode-<날짜>.tar.gz` 로 묶어 7일 보존합니다(16MB 안팎). 결과는 같은 폴더 `backup.log` 에 한 줄씩 남고, 가장 새 fsimage 가 26시간을 넘으면 WARN 을 함께 적습니다.

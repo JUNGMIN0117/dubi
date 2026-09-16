@@ -40,7 +40,7 @@
 | `spark` | spark-master, spark-worker-1/2, spark-streaming-weather, spark-streaming-realtime | |
 | `batch` | spark-batch | 일회성 실행기. `run --rm`으로만 쓴다 |
 | `archive` | archiver | |
-| `monitoring` | prometheus, grafana, node-exporter, redis-exporter·mysqld-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter |
+| `monitoring` | prometheus, grafana, node-exporter, redis-exporter·mysqld-exporter, blackbox-exporter | 서버2 몫. 스크랩 대상: 양 서버 node + 서버1 kafka-exporter. blackbox-exporter 는 ml-serving 의 /health/ready 를 대신 찔러 probe_success 지표로 바꾼다(2026-09-15) |
 | `exporters` | node-exporter, kafka-exporter, hdfs-exporter | 서버1 몫 (kafka-exporter 는 Kafka 옆에 있어야 함) |
 
 ## 새 PC에서 처음 시작하기 (로컬 개발)

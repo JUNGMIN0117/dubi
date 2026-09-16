@@ -570,7 +570,9 @@ services:
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       # 같은 표준 DataFrame을 Redis 최신값과 HDFS Silver에 각각 쓴다.
-      SILVER_OUTPUT_URI: ${SILVER_OUTPUT_URI:-}
+      # 기존 운영 .env에 새 변수가 없어도 Silver를 켠다. 명시적 빈 값은 필수 검증에서 실패한다.
+      SILVER_OUTPUT_URI: ${SILVER_OUTPUT_URI-hdfs://hdfs-namenode:9000/ddubi/silver}
+      WEATHER_REQUIRE_SILVER: ${WEATHER_REQUIRE_SILVER:-true}
       WEATHER_SILVER_TRIGGER: ${WEATHER_SILVER_TRIGGER:-10 minutes}
       WEATHER_SILVER_WATERMARK: ${WEATHER_SILVER_WATERMARK:-2 days}
     volumes:

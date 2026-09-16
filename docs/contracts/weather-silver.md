@@ -84,7 +84,10 @@ WEATHER_SILVER_TRIGGER=10 minutes
 WEATHER_SILVER_WATERMARK=2 days
 ```
 
-`SILVER_OUTPUT_URI`가 비어 있으면 안전하게 Redis만 계속 쓰고 HDFS Silver query는 시작하지 않는다.
+운영 Compose는 `SILVER_OUTPUT_URI`가 미설정이면 위 기본 HDFS 경로를 사용하고 `WEATHER_REQUIRE_SILVER=true`로 실행한다.
+명시적으로 URI가 비어 있으면 정상처럼 Redis만 실행하지 않고 오류를 낸다.
+실험·로컬 Redis 전용 실행은 `WEATHER_REQUIRE_SILVER=false`와 빈 URI로 Silver를 끌 수 있다.
+설정 누락/잡 정지 조사와 아카이브 복구는 [날씨 Silver 복구 안내](../runbooks/weather-silver-missing.md)를 따른다.
 
 ```text
 /ddubi/silver/weather/
@@ -102,7 +105,7 @@ WEATHER_SILVER_WATERMARK=2 days
 ## 아직 하지 않은 것
 
 - 운영 서버 배포 및 실제 Kafka→HDFS Streaming 검증
-- Streaming 시작 전에 Archive에만 쌓인 과거 데이터 backfill
+- 새 `batch/weather_silver_backfill.py`의 운영 실행 검증 (과거 원본을 별도 버전 경로로 복구하는 코드는 추가됨)
 - `segmentId → (nx, ny)` 대응표 생성
 - 서울 14개 외 경기·인천 격자 수집
 - Redis 소비자의 새 `features` 전환

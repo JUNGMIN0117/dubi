@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:ddubi/domain/schedule_evaluation.dart';
 import 'package:ddubi/presentation/schedule_evaluation_card.dart';
@@ -72,6 +73,33 @@ class _FailOnceEvaluationRepository implements ScheduleEvaluationRepository {
   Future<void> refreshEvaluation(String id) async {}
 }
 
+class _ControlledAcceptRepository implements ScheduleEvaluationRepository {
+  _ControlledAcceptRepository(this.evaluation);
+
+  final ScheduleEvaluationV2 evaluation;
+  final acceptCompleter = Completer<void>();
+  var acceptCalls = 0;
+  var latestCalls = 0;
+
+  @override
+  Future<ScheduleEvaluationV2> latestEvaluation(String scheduleId) async {
+    latestCalls++;
+    return evaluation;
+  }
+
+  @override
+  Future<void> acceptEvaluation(String id, String evaluationId) {
+    acceptCalls++;
+    return acceptCompleter.future;
+  }
+
+  @override
+  Future<void> confirmDeparture(String id) async {}
+
+  @override
+  Future<void> refreshEvaluation(String id) async {}
+}
+
 void main() {
   late Map<String, ScheduleEvaluationV2> fixtures;
 
@@ -84,6 +112,13 @@ void main() {
         'late',
         'data',
         'search',
+        'pending',
+        'running',
+        'failed',
+        'stopped',
+        'departure_required',
+        'stale',
+        'walking_fallback',
       ])
         name: await _fixture(name),
     };
@@ -112,6 +147,53 @@ void main() {
     expect(find.textContaining('접근 도보 · 집 → 정류장'), findsOneWidget);
     expect(find.textContaining('환승 도보 · 환승역 → 승강장'), findsOneWidget);
     expect(find.textContaining('이탈 도보 · 도착역 → 회사'), findsOneWidget);
+    expect(find.textContaining('접근 도보 · 집 → 정류장 · 6분'), findsOneWidget);
+  });
+
+  testWidgets('제안 경로가 바뀌면 새 경로 구간을 표시한다', (tester) async {
+    final evaluation = fixtures['advance']!;
+    expect(evaluation.selectedRouteId, 'route-old');
+    expect(evaluation.proposedRouteId, 'route-new');
+
+    await tester.pumpWidget(_summary(evaluation));
+
+    expect(find.text('경로 구간'), findsOneWidget);
+    expect(find.textContaining('버스 탑승 · 새 출발 정류장 → 새 도착 정류장'), findsOneWidget);
+  });
+
+  testWidgets('부분 도보 API 적용과 원본 경로 fallback을 함께 표시한다', (tester) async {
+    await tester.pumpWidget(_summary(fixtures['walking_fallback']!));
+
+    expect(find.textContaining('접근 도보 경로만 반영'), findsOneWidget);
+    expect(find.textContaining('이탈 도보 · 도착역 → 회사'), findsOneWidget);
+    expect(find.textContaining('원본 경로 기준'), findsOneWidget);
+    expect(find.textContaining('이탈 도보는 기존 경로 정보 사용'), findsOneWidget);
+    expect(find.text('전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'), findsOneWidget);
+  });
+
+  testWidgets('실행 상태와 stale 상태를 각각 다른 문구와 배지로 표시한다', (tester) async {
+    final cases = <String, String>{
+      'pending': '예측을 준비하고 있습니다.',
+      'running': '최신 경로와 도착시각을 계산하고 있습니다.',
+      'failed': '최신 예측을 계산하지 못했습니다.',
+      'stopped': '이 일정의 출발 전 감시가 종료됐습니다.',
+      'departure_required': '일정 수정에서 출발 예정시각을 입력해 주세요.',
+      'stale': '이전 결과입니다. 최신 결과를 다시 확인해 주세요.',
+    };
+
+    for (final entry in cases.entries) {
+      await tester.pumpWidget(_summary(fixtures[entry.key]!));
+      expect(find.text(entry.value), findsOneWidget, reason: entry.key);
+    }
+    expect(find.text('갱신 필요'), findsOneWidget);
+  });
+
+  testWidgets('null ETA와 경로가 없어도 사고 원인을 추측하지 않는다', (tester) async {
+    await tester.pumpWidget(_summary(fixtures['data']!));
+
+    expect(find.text('예상 도착: 확인 불가'), findsOneWidget);
+    expect(find.text('경로 구간'), findsNothing);
+    expect(find.textContaining('사고'), findsNothing);
   });
 
   testWidgets('PREVIEW 결과는 표시하되 제안 적용을 비활성화한다', (tester) async {
@@ -191,6 +273,80 @@ void main() {
     await tester.pump();
     expect(repository.latestCalls, 2);
     expect(find.text('평가가 완료됐습니다.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('STOPPED와 출발시각 입력 필요 상태에서는 polling을 중단한다', (tester) async {
+    for (final name in ['stopped', 'departure_required']) {
+      final repository = _FakeEvaluationRepository([fixtures[name]!]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ScheduleEvaluationCard(
+              repository: repository,
+              scheduleId: 'schedule-1',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(minutes: 3));
+      expect(repository.latestCalls, 1, reason: name);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('백그라운드에서는 멈추고 복귀할 때 최신 평가를 즉시 조회한다', (tester) async {
+    final repository = _FakeEvaluationRepository([
+      fixtures['running']!,
+      fixtures['running']!,
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEvaluationCard(
+            repository: repository,
+            scheduleId: 'schedule-1',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.latestCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump(const Duration(minutes: 2));
+    expect(repository.latestCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(repository.latestCalls, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('제안 적용을 연속으로 눌러도 요청은 한 번만 전송한다', (tester) async {
+    final repository = _ControlledAcceptRepository(fixtures['keep']!);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEvaluationCard(
+            repository: repository,
+            scheduleId: 'schedule-1',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(const Key('acceptEvaluationButton'));
+    await tester.tap(button);
+    await tester.pump();
+    await tester.tap(button, warnIfMissed: false);
+    expect(repository.acceptCalls, 1);
+
+    repository.acceptCompleter.complete();
+    await tester.pumpAndSettle();
+    expect(repository.acceptCalls, 1);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

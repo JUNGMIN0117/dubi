@@ -46,6 +46,39 @@ RouteOption? _primaryRoute(List<RouteOption> routes) {
   );
 }
 
+RouteOption? _routeFromEvaluation(
+  ScheduleEvaluationV2 evaluation,
+  Schedule schedule,
+) {
+  final departure = evaluation.proposedDepartAt;
+  final arrival = evaluation.estimatedArrivalAt;
+  if (evaluation.state != EvaluationState.ready ||
+      departure == null ||
+      arrival == null) {
+    return null;
+  }
+  String clock(DateTime value) {
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  return RouteOption(
+    kind: evaluation.quality.preview || !evaluation.quality.productionEligible
+        ? RouteKind.candidate
+        : RouteKind.recommended,
+    label: evaluation.quality.preview ? '최신 평가 · 검증용' : '최신 평가',
+    transport: '${schedule.departurePlace} → ${schedule.place}',
+    departure: clock(departure),
+    arrival: clock(arrival),
+    margin: evaluation.canAcceptAt(DateTime.now()) ? '서버 평가 완료' : '확인 필요',
+    detail: evaluation.durationSeconds == null
+        ? '서버 평가 결과'
+        : '약 ${(evaluation.durationSeconds! / 60).ceil()}분',
+    fare: '요금 정보 없음',
+  );
+}
+
 class ScheduleDetailArguments {
   const ScheduleDetailArguments({
     required this.schedule,
@@ -1187,17 +1220,26 @@ class HomeScreen extends StatelessWidget {
     super.key,
     required this.homeApi,
     this.recommendationApi,
+    this.evaluationRepository,
     this.go,
   });
   final HomeApi homeApi;
   final RecommendationApi? recommendationApi;
+  final ScheduleEvaluationRepository? evaluationRepository;
   final ValueChanged<int>? go;
 
   Future<_HomeData> _load() async {
     final summary = await homeApi.getSummary();
     RecommendationOverview? recommendation;
+    ScheduleEvaluationV2? evaluation;
     final schedule = summary.nextSchedule;
-    if (schedule != null && recommendationApi != null) {
+    if (schedule != null && evaluationRepository != null) {
+      try {
+        evaluation = await evaluationRepository!.latestEvaluation(schedule.id);
+      } on Object {
+        evaluation = null;
+      }
+    } else if (schedule != null && recommendationApi != null) {
       try {
         recommendation = await recommendationApi!.getLatestOverview(
           schedule.id,
@@ -1206,7 +1248,11 @@ class HomeScreen extends StatelessWidget {
         recommendation = null;
       }
     }
-    return _HomeData(summary: summary, recommendation: recommendation);
+    return _HomeData(
+      summary: summary,
+      recommendation: recommendation,
+      evaluation: evaluation,
+    );
   }
 
   @override
@@ -1240,8 +1286,9 @@ class HomeScreen extends StatelessWidget {
         }
         final data = snapshot.data!;
         final schedule = data.summary.nextSchedule;
-        final routes =
-            schedule != null && data.recommendation?.hasEstimate == true
+        final routes = schedule != null && data.evaluation != null
+            ? [?_routeFromEvaluation(data.evaluation!, schedule)]
+            : schedule != null && data.recommendation?.hasEstimate == true
             ? [data.recommendation!.toRouteOption(schedule)]
             : const <RouteOption>[];
         return LayoutBuilder(
@@ -1249,10 +1296,15 @@ class HomeScreen extends StatelessWidget {
             final isWide =
                 constraints.maxWidth >= LayoutConstants.wideScreenBreakpoint;
             return isWide
-                ? _WebHomeContent(routes: routes, summary: data.summary)
+                ? _WebHomeContent(
+                    routes: routes,
+                    summary: data.summary,
+                    evaluation: data.evaluation,
+                  )
                 : _MobileHomeContent(
                     schedules: data.summary.todaySchedules,
                     routes: routes,
+                    evaluation: data.evaluation,
                   );
           },
         );
@@ -1262,17 +1314,27 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _HomeData {
-  const _HomeData({required this.summary, this.recommendation});
+  const _HomeData({
+    required this.summary,
+    this.recommendation,
+    this.evaluation,
+  });
 
   final HomeSummary summary;
   final RecommendationOverview? recommendation;
+  final ScheduleEvaluationV2? evaluation;
 }
 
 class _MobileHomeContent extends StatelessWidget {
-  const _MobileHomeContent({required this.schedules, required this.routes});
+  const _MobileHomeContent({
+    required this.schedules,
+    required this.routes,
+    this.evaluation,
+  });
 
   final List<Schedule> schedules;
   final List<RouteOption> routes;
+  final ScheduleEvaluationV2? evaluation;
 
   @override
   Widget build(BuildContext context) {
@@ -1329,6 +1391,10 @@ class _MobileHomeContent extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          if (evaluation != null) ...[
+            InfoCard(child: ScheduleEvaluationSummary(evaluation: evaluation!)),
+            const SizedBox(height: 16),
+          ],
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1786,10 +1852,15 @@ void _showHomeRouteDetails(BuildContext context, List<RouteOption> routes) {
 }
 
 class _WebHomeContent extends StatelessWidget {
-  const _WebHomeContent({required this.routes, required this.summary});
+  const _WebHomeContent({
+    required this.routes,
+    required this.summary,
+    this.evaluation,
+  });
 
   final List<RouteOption> routes;
   final HomeSummary summary;
+  final ScheduleEvaluationV2? evaluation;
 
   @override
   Widget build(BuildContext context) => ListView(
@@ -1840,6 +1911,10 @@ class _WebHomeContent extends StatelessWidget {
         ],
       ),
       const SizedBox(height: 20),
+      if (evaluation != null) ...[
+        InfoCard(child: ScheduleEvaluationSummary(evaluation: evaluation!)),
+        const SizedBox(height: 20),
+      ],
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -6838,9 +6913,15 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
 
         final data = snapshot.data!;
         final item = data.item;
+        final latest = data.latest;
+        final expired =
+            latest != null &&
+            (latest.state == EvaluationState.stale ||
+                latest.isExpiredAt(DateTime.now()));
         final isCurrent =
             item.evaluationId != null &&
-            data.latest?.evaluationId == item.evaluationId;
+            latest?.evaluationId == item.evaluationId &&
+            !expired;
         return ListView(
           padding: _pad,
           children: [
@@ -6854,7 +6935,9 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
             if (item.evaluationId != null) ...[
               const SizedBox(height: 12),
               Text(
-                isCurrent
+                expired
+                    ? '이 알림의 평가는 만료됐습니다. 연결된 일정에서 최신 결과를 확인해 주세요.'
+                    : isCurrent
                     ? '현재 최신 평가와 같은 알림입니다.'
                     : '이 알림 이후 추천이 변경됐을 수 있습니다. 연결된 일정에서 최신 결과를 확인해 주세요.',
                 key: const Key('notificationEvaluationFreshness'),

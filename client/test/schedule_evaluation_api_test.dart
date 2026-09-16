@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:ddubi/domain/models.dart';
+import 'package:ddubi/domain/schedule_evaluation.dart';
 import 'package:ddubi/services/api_schedule_repository.dart';
 import 'package:ddubi/services/recommendation_api.dart';
 import 'package:ddubi/services/schedule_api.dart';
@@ -171,5 +175,49 @@ void main() {
 
     expect(captured.path, '/schedules/schedule-1/recommendations/accept');
     expect(captured.data, {'evaluationId': 'eval-1'});
+  });
+
+  test('409/422/503 오류를 화면이 구분할 수 있는 실패 종류로 변환한다', () async {
+    final cases = <int, EvaluationFailureKind>{
+      409: EvaluationFailureKind.staleEvaluation,
+      422: EvaluationFailureKind.validation,
+      503: EvaluationFailureKind.dependencyUnavailable,
+    };
+
+    for (final entry in cases.entries) {
+      final raw = jsonDecode(
+        await File('test/fixtures/schedule_evaluation_error_${entry.key}.json')
+            .readAsString(),
+      ) as Map<String, dynamic>;
+      final dio = Dio(BaseOptions(baseUrl: 'https://example.test/api/v1'))
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) => handler.reject(
+              DioException(
+                requestOptions: options,
+                response: Response<Map<String, dynamic>>(
+                  requestOptions: options,
+                  statusCode: entry.key,
+                  data: raw,
+                ),
+                type: DioExceptionType.badResponse,
+              ),
+            ),
+          ),
+        );
+
+      await expectLater(
+        ScheduleApi(dio).latestEvaluation('schedule-1'),
+        throwsA(
+          isA<ScheduleEvaluationFailure>()
+              .having((failure) => failure.kind, 'kind', entry.value)
+              .having(
+                (failure) => failure.code,
+                'code',
+                (raw['error'] as Map)['code'],
+              ),
+        ),
+      );
+    }
   });
 }

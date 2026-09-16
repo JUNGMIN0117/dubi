@@ -344,6 +344,8 @@ class ScheduleEvaluationV2 {
       !quality.preview &&
       quality.productionEligible &&
       !isExpiredAt(now) &&
+      actualDepartAt == null &&
+      !departureMissed &&
       proposedDepartAt != null;
 
   factory ScheduleEvaluationV2.fromJson(Map<String, dynamic> json) {

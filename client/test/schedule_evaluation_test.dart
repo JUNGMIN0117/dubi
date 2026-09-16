@@ -30,6 +30,17 @@ void main() {
     final running = await _fixture('running');
     expect(running.state, EvaluationState.running);
     expect(running.decision, DepartureDecision.unknown);
+
+    final states = <String, EvaluationState>{
+      'pending': EvaluationState.pending,
+      'failed': EvaluationState.failed,
+      'stopped': EvaluationState.stopped,
+      'departure_required': EvaluationState.departureRequired,
+      'stale': EvaluationState.stale,
+    };
+    for (final entry in states.entries) {
+      expect((await _fixture(entry.key)).state, entry.value, reason: entry.key);
+    }
   });
 
   test('알 수 없는 enum은 예외 없이 원문을 보존하고 수락을 차단한다', () async {
@@ -64,6 +75,10 @@ void main() {
     expect(keep.canAcceptAt(DateTime(2026, 9, 18)), isTrue);
     expect(keep.isExpiredAt(DateTime.utc(2100)), isTrue);
     expect(keep.canAcceptAt(DateTime.utc(2100)), isFalse);
+    expect(
+      (await _fixture('departed')).canAcceptAt(DateTime(2026, 9, 18)),
+      isFalse,
+    );
   });
 
   test('도보 역할, 계산 출처와 endpoint 검증 근거를 보존한다', () async {
@@ -81,6 +96,20 @@ void main() {
     );
     expect(evaluation.legs.first.endpointEvidence?.verified, isTrue);
     expect(evaluation.quality.walkingApiCoverage, 'BOTH');
+    expect(evaluation.legs.first.durationSeconds, 305);
+    expect(evaluation.durationSeconds, 2100);
+  });
+
+  test('endpoint 미검증 도보는 원본 경로 fallback 근거를 보존한다', () async {
+    final evaluation = await _fixture('walking_fallback');
+    final egress = evaluation.legs.last;
+
+    expect(evaluation.quality.walkingApiCoverage, 'ACCESS_ONLY');
+    expect(evaluation.quality.costCoverage, 'PARTIAL');
+    expect(egress.role, RouteLegRole.egressWalk);
+    expect(egress.durationSource, DurationSource.publicTransitStep);
+    expect(egress.endpointEvidence?.verified, isFalse);
+    expect(egress.endpointEvidence?.reason, 'ENDPOINT_UNVERIFIED');
   });
 
   test('구버전 응답은 검증용 비운영 결과로 안전하게 변환한다', () async {

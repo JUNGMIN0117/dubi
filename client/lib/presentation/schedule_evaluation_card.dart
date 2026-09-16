@@ -300,9 +300,15 @@ class ScheduleEvaluationSummary extends StatelessWidget {
         if (evaluation.quality.costCoverage != 'COMPLETE')
           const Text('전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'),
         if (evaluation.quality.missingInputs.isNotEmpty)
-          Text('부족한 정보: ${evaluation.quality.missingInputs.join(', ')}'),
+          Text(
+            '부족한 정보: '
+            '${evaluation.quality.missingInputs.map(_inputLabel).join(', ')}',
+          ),
         if (evaluation.quality.fallbackReasons.isNotEmpty)
-          Text('대체 계산 사용: ${evaluation.quality.fallbackReasons.join(', ')}'),
+          Text(
+            '대체 계산 사용: '
+            '${evaluation.quality.fallbackReasons.map(_fallbackLabel).join(', ')}',
+          ),
         if (evaluation.decision == DepartureDecision.searchIncomplete &&
             evaluation.bestKnownDecision != null)
           Text(
@@ -375,6 +381,20 @@ class ScheduleEvaluationSummary extends StatelessWidget {
     final realtime = quality.realtimeApplied ? '일부 실시간 정보 반영' : '실시간 정보 미적용';
     return '$walking · $realtime';
   }
+
+  static String _inputLabel(String value) => switch (value) {
+    'PLANNED_DEPART_AT' => '출발 예정시각',
+    'BUS_ARRIVAL' => '버스 도착 정보',
+    'ROUTE_PROVIDER' => '경로 정보',
+    _ => value,
+  };
+
+  static String _fallbackLabel(String value) => switch (value) {
+    'EGRESS_ENDPOINT_UNVERIFIED' ||
+    'EGRESS_WALK_FALLBACK' => '이탈 도보는 기존 경로 정보 사용',
+    'MODEL_VALIDATION_ONLY' || 'VALIDATION_ONLY' => '검증 중인 모델 결과',
+    _ => value,
+  };
 
   static String _legLabel(EvaluationRouteLeg leg) {
     final role = switch (leg.role) {

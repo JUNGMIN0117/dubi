@@ -12,6 +12,7 @@
 |---|---|---|---|
 | S01 | 사용자 출발 예정 P·일정 시작 D·출발지·목적지 | Client → Backend | 일정 DB → 조건부 출발 정책 |
 | S02 | [카카오 대중교통 경로](https://developers.kakao.com/docs/ko/kakaomap/rest-api) | Backend PublicTransitRouteClient | 후보·WALK·총시간·geometry → 매핑·여정 평가 |
+| S02-W | [카카오모빌리티 제휴용 도보 길찾기](https://developers.kakaomobility.com/affiliate/walking/directions.html) | Backend WalkingRouteClient 추가 | ACCESS_WALK·EGRESS_WALK 거리/시간/geometry. 제휴 권한 필요 |
 | S03 | [서울 버스 도착정보](https://www.data.go.kr/data/15000314/openapi.do) | Collector bus_arrival | transport.raw → 최신 도착 → 버스 대기 |
 | S04 | 서울 버스 위치 API `getBusPosByRtid` | Collector bus_location | transport.raw → 최신 위치 → 탑승 가능성 보조 |
 | S05 | [서울교통공사 열차운행시각표](https://www.data.go.kr/data/15098251/fileData.do) | Backend 시간표 도구 | 버전 지정 JSON artifact → 시간표 서비스 |
@@ -82,6 +83,57 @@ S04의 현재 호출 주소·필드는 [bus_location.py](../../collector/src/sou
 | 전체시간 − step시간 합 | unassignedDurationSeconds | number, 초 | 의미 미확정 잔여. 대기로 단정 금지 |
 
 응답 DTO의 실제 nesting은 `PublicTransitRouteClient`와 fixture를 기준으로 한다. 여기서 `route`는 routes 배열의 한 원소다. 이름만으로 canonical ID를 발급하지 않는다. `MasterDataTransitMappingResolver`의 EXACT 결과와 공식 인접 edge를 이용한다. PARTIAL/AMBIGUOUS/UNMAPPED는 이유를 남기고 API fallback으로 제한한다. WALK segmentId는 현재 계약대로 null이다.
+
+### 3.3 step 역할 분류와 승·하차 좌표
+
+대중교통 응답을 받은 다음 후보마다 아래 값을 만든다.
+
+| 내부 필드 | 타입/nullable | 산출 규칙 |
+|---|---|---|
+| `legRole` | ACCESS_WALK/TRANSFER_WALK/EGRESS_WALK/RIDE | WALK의 앞·뒤에 존재하는 BUS/SUBWAY index로 분류. BUS/SUBWAY는 RIDE |
+| `boardingCoordinateCandidate` | Coordinate nullable | 첫 BUS/SUBWAY step `path.points[0]` |
+| `alightingCoordinateCandidate` | Coordinate nullable | 마지막 BUS/SUBWAY step `path.points[last]` |
+| `mappedBoardingCoordinate` | Coordinate nullable | 첫 transit step의 EXACT 마스터 승차 node 좌표 |
+| `mappedAlightingCoordinate` | Coordinate nullable | 마지막 transit step의 EXACT 마스터 하차 node 좌표 |
+| `boardingCoordinate` / `alightingCoordinate` | Coordinate nullable | 카카오 후보와 마스터 좌표가 정책 허용 오차 안에서 유일하게 일치한 endpoint |
+| `coordinateEvidence` | object | provider point, master ID/version, 거리 차이 m, 정책 버전, 판정 |
+
+현재 `KakaoPublicTransitResponse.Stop` DTO는 `name`만 받고 실제 fixture도 stop 좌표를 제공하지 않는다. 따라서 stop 객체에 존재한다고 가정해 x/y 필드를 만들지 않는다. `path.points`의 첫·끝도 노선 polyline endpoint일 뿐 승강장 출입구 보증이 없으므로 EXACT 마스터 좌표와 검증한다. 지하철 마스터가 역 중심점만 제공해 출입구가 확인되지 않으면 `STATION_CENTER_ONLY`로 품질을 낮추고 도보 API endpoint 정확성을 보장하지 않는다.
+
+좌표 검증 임계값은 실제 corpus로 정해 `walking-endpoint-policy-v1`에 둔다. 문서 단계에서 임의 50m 등을 확정하지 않는다. 거리 계산은 WGS84 geodesic/Haversine m 단위이며 경도·위도 순서를 바꾸지 않는다. 하나의 step에 차량 대안이 여러 개면 선택한 EXACT 대안의 좌표를 사용하고 서로 다른 대안 좌표를 섞지 않는다.
+
+### 3.4 S02-W 카카오 제휴 도보 API
+
+공식 호출 규격은 다음과 같다.
+
+- `GET https://apis-navi.kakaomobility.com/affiliate/walking/v1/directions`
+- Header: `Authorization: KakaoAK ${REST_API_KEY}`, `service: {제휴 등록 서비스 식별자}`, `Content-Type: application/json`.
+- Query: `origin={longitude},{latitude}`, `destination={longitude},{latitude}`, `priority=DISTANCE`, `summary=false`. `waypoints`는 접근·이탈 기본 호출에서는 사용하지 않는다.
+- `default_speed=0`이면 공식 문서상 4km/h 기준 ETA다. 사용자 보행속도 정책을 도입하기 전에는 값을 임의 변경하지 않는다.
+- 이 API는 제휴 파트너 전용이므로 별도 계약·권한·쿼터 확인을 배포 선행 조건으로 둔다. 일반 카카오맵 REST API 권한과 동일하다고 가정하지 않는다.
+
+후보마다 최대 두 번 호출한다.
+
+| 호출 | origin | destination | 결과 역할 |
+|---|---|---|---|
+| 접근 | 사용자 일정의 출발 좌표 | 검증된 첫 승차 좌표 | ACCESS_WALK |
+| 이탈 | 검증된 마지막 하차 좌표 | 사용자 일정의 목적지 좌표 | EGRESS_WALK |
+
+도보 응답 DTO는 공식 응답의 route summary와 sections/roads/guides 전체를 원문 fixture로 먼저 검증한 다음 필요한 값을 `distanceMeters`, `durationSeconds`, `geometry`, `guides`, `providerRouteIndex`로 정규화한다. 응답 스키마를 확인하지 않고 자동차 길찾기의 필드 구조를 복사하지 않는다. 시간·거리 음수, 빈 route, 시작/종료 endpoint가 요청 좌표와 크게 다른 응답은 거부한다.
+
+캐시 키는 `walkingApiVersion + endpointPolicyVersion + roundedOrigin + roundedDestination + priority + defaultSpeed`를 제안한다. 좌표 반올림 정밀도와 TTL은 정확도·호출 예산 실측으로 정하며 서로 다른 정류장/출입구가 합쳐지지 않게 한다. API 키·사용자 일정 제목·원문 개인정보를 캐시 키나 로그에 넣지 않는다.
+
+fallback 순서는 `검증된 별도 도보 API → 동일 역할의 카카오 대중교통 WALK → provider 전체시간 + DATA_INSUFFICIENT`다. 직선거리/고정 보행속도로 확정 시간을 만들지 않는다. 대중교통 응답에 ACCESS/EGRESS WALK가 없고 별도 도보 API도 실패하면 0초로 두지 않는다.
+
+### 3.5 비용 범위와 중복 방지
+
+`providerTotalSeconds`에는 step 밖 접근·대기·환승 시간이 포함될 수 있다. 별도 도보 API의 duration을 무조건 더하면 중복될 수 있다.
+
+1. 원본 step별 `legRole`, 시간, 거리와 별도 WALK를 후보 snapshot에 모두 보존한다.
+2. 대중교통 ACCESS/EGRESS WALK가 있으면 동일 역할의 별도 결과로 교체하며 두 값을 더하지 않는다.
+3. 해당 WALK step이 없으면 `unassignedDurationSeconds`에 도보가 포함되지 않았다는 검증 전에는 provider 총시간에 추가하지 않는다.
+4. WAIT/RIDE/TRANSFER/ACCESS/EGRESS의 비용 범위가 완전히 검증된 후보만 componentized ETA를 만든다.
+5. 불완전한 후보는 provider 전체시간 fallback과 별도 도보 정보의 미적용 이유를 반환한다. 일부만 합친 ETA를 운영 추천으로 사용하지 않는다.
 
 ## 4. S03·S04: 버스 도착·위치
 

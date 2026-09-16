@@ -15,6 +15,7 @@
 | C01 | Backend·Client·데이터 | 없음 | P/D 의미, 조건부 정책, v2 응답 fixture·schema |
 | B01 | Backend 일정 | C01 | 입력 유지·검증, 작업 영속화, 반복 일정 출발 입력, migration |
 | B02 | Backend 추천 | C01 | 공통 여정 계산기·증거 스냅샷·조건 분기·제한된 최신 출발 탐색 |
+| B02-W | Backend 경로·외부 연동 | C01,B02 | 승·하차 endpoint 검증, 제휴 도보 API, 접근/환승/이탈 WALK 역할과 fallback |
 | D01 | Collector | C01 | S03~S12 원천·필드·수집 상태·키 예산·신선도 |
 | D02 | 데이터 마스터 | C01 | 시간표·열차 crosswalk·도로 방향 매핑·manifest·검증 corpus |
 | D03 | Spark | D01,D02 | 사건 lifecycle·영향 edge·구간 상태·변경 이벤트·Replay |
@@ -219,6 +220,9 @@ PREVIEW 수락 차단은 유지한다. 모델 승인·시간 분해 검증 작�
 | `evaluation/DepartureSuggestionService.java` | P 평가와 T 탐색 분리. timetable 후보/격자/예산을 받아 같은 JourneyEvaluationService 호출 |
 | `evaluation/JourneyEvidence.java` | trip stop prediction·incident revision·time validity·cost coverage·source metadata 확장 |
 | `evaluation/RouteEvidenceAssembler.java` | 후보 edge·Redis·시간표·기준선·통제 artifact를 검증한 snapshot 조립 |
+| **추가** `evaluation/RouteLegRoleClassifier.java` | step 순서와 앞뒤 대중교통 구간으로 ACCESS_WALK/TRANSFER_WALK/EGRESS_WALK/RIDE 분류 |
+| **추가** `evaluation/WalkingEndpointResolver.java` | 카카오 path endpoint와 EXACT 마스터 node 좌표를 비교해 도보 호출 endpoint 판정 |
+| **추가** `evaluation/WalkingEvidence.java` | 별도 도보 결과·fallback·endpoint 근거·비용 범위·API 버전 보존 |
 | **추가** `evaluation/EvaluationSnapshot.java` | asOf·원천시각·원본 참조·hash·버전·validity·scope coverage를 불변 객체로 보존 |
 | **추가** `evaluation/RecommendationChangeAnalyzer.java` | 이전/현재 결과 → 시각·경로·정시·품질·사건 변화, 알림 판단 입력 |
 
@@ -250,7 +254,56 @@ completeIfCurrent(job, result, pendingNotification)
 
 과거 P의 대안은 KEEP_DEPARTURE라는 이름으로 표현하지 않고 `departureMissed=true`와 DEPART_NOW를 함께 반환한다. 조건부 T 탐색에 들어간 경우 정시 전 도착은 가능하지만 10분 여유가 없으면 MARGIN_UNAVAILABLE로 구별한다. 수치 ETA가 있는 PREVIEW도 표시용 분기를 계산할 수 있지만 productionEligible=false를 유지한다. 탐색이 미완료이면 실행 가능한 후보를 찾았어도 전체 decision은 SEARCH_INCOMPLETE이며, 후보의 성격은 별도 `bestKnownDecision`으로 표시한다.
 
-### 4.3 엄격한 경계와 탐색 완전성
+### 4.3 대중교통 분해·마스터 매핑·도보 API 보강
+
+조건부 출발 계산 전에 후보를 다음 순서로 준비한다.
+
+1. `PublicTransitRouteClient.search(origin,destination)`으로 카카오 대중교통 JSON을 받는다.
+2. `KakaoRouteMapper`가 step을 BUS/SUBWAY/WALK로 파싱한다. 기존 WALK를 버리지 않는다.
+3. BUS/SUBWAY만 `MasterDataTransitMappingResolver`로 매핑한다. 버스는 수도권 버스 마스터·노선·정류장 순번·geometry, 지하철은 노선·역 순서·별칭·실시간 crosswalk를 검증한다.
+4. EXACT 인접 edge와 카카오 transit step의 path endpoint를 이용해 첫 승차·마지막 하차 좌표를 판정한다.
+5. `RouteLegRoleClassifier`가 ACCESS/TRANSFER/EGRESS WALK를 분리한다.
+6. 좌표와 제휴 권한이 준비된 후보는 접근·이탈 도보 API를 각각 호출한다.
+7. `RouteEvidenceAssembler`가 원본 WALK를 동일 역할별로 교체하거나 fallback하고 비용 범위 검증 결과를 만든다.
+8. `JourneyEvaluationService`가 ACCESS_WALK부터 EGRESS_WALK까지 순차 평가한다.
+
+#### 변경·추가 파일
+
+아래 경로의 기준은 `backend/src/main/java/com/ssafy/ddubi/domain/route/`다.
+
+| 파일 | 구체 작업 |
+|---|---|
+| `client/dto/KakaoPublicTransitResponse.java` | stop에 없는 좌표를 추가하지 않음. path.points의 원문 좌표와 unknown 필드 허용 유지 |
+| `service/KakaoRouteMapper.java` | mode 파싱 뒤 leg role 분류에 필요한 sequence/geometry/stop names 보존. 매핑 결과와 endpoint 후보 연결 |
+| `model/RouteSegment.java` | `legRole`, boarding/alighting endpoint evidence 또는 별도 evidence 참조 추가. DB/API 하위 호환 adapter 마련 |
+| `service/MasterDataTransitMappingResolver.java` | 기존 EXACT/PARTIAL/AMBIGUOUS/UNMAPPED 유지. 선택한 공식 node 좌표를 endpoint resolver에 제공 |
+| `mapping/MetropolitanBusMaster.java`, 지하철 master provider | 정류장/역 좌표의 출처·버전·nullable을 노출. 중심점/출입구 의미 구분 |
+| **추가** `client/WalkingRouteClient.java` | 접근·이탈 도보 조회 port |
+| **추가** `client/KakaoWalkingRouteClient.java` | 제휴 host·service header·인증·timeout·429/4xx/5xx 처리 |
+| **추가** `client/KakaoWalkingProperties.java` | baseUrl, path, service, enabled, timeout. 키는 기존 secret 경계 재사용 |
+| **추가** `client/dto/KakaoWalkingResponse.java` | 실제 공식 fixture로 확인한 응답 필드만 선언. 자동차 DTO 재사용 금지 |
+| `service/RouteSearchService.java`, `recommendation/service/ScheduleEvaluationWorkflow.java` | 후보 획득 뒤 도보 보강 session 호출, 후보별 호출 한도·캐시·실패 격리 |
+| `evaluation/RouteEvidenceAssembler.java` | 역할별 교체, provider total/step 비용 범위, fallback reason 조립 |
+
+제휴 도보 API는 후보당 최대 두 번이라 후보 15개면 최대 30회다. 모든 후보를 무조건 호출하지 않는다. 먼저 BUS/SUBWAY 마스터 매핑·기본 품질로 후보를 제한하고, 선택 경로와 상위 평가 후보를 우선하여 평가 세션별 호출 예산을 적용한다. 호출하지 않은 후보는 원본 WALK fallback을 유지한다. 초기 상한값은 실제 제휴 쿼터·latency를 확인한 뒤 설정으로 정한다.
+
+도보 API 장애가 전체 대중교통 후보 검색을 503으로 만들지 않는다. 권한 없음/403은 운영 설정 오류로 지표·health에 표시하고 해당 평가에서는 원본 WALK fallback을 사용한다. 429는 retry-after/제휴 정책을 따르고 같은 평가에서 폭주 재시도하지 않는다. 좌표 불일치는 API 장애가 아니라 `WALK_ENDPOINT_UNVERIFIED` 품질 사유다.
+
+#### 저장·응답 필드 추가안
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `segments[].legRole` | enum | ACCESS_WALK/TRANSFER_WALK/EGRESS_WALK/RIDE |
+| `segments[].endpointEvidence` | object nullable | provider/master 좌표·거리·매핑/정책 버전·판정 |
+| `segments[].durationSource` | enum | KAKAO_WALKING_API/PUBLIC_TRANSIT_STEP/PROVIDER_TOTAL_FALLBACK 등 |
+| `walkingApiApplied` | boolean | 접근·이탈 중 하나 이상 계산에 실제 반영됐는지 |
+| `walkingApiCoverage` | NONE/ACCESS_ONLY/EGRESS_ONLY/BOTH | 호출 성공이 아니라 계산 반영 범위 |
+| `costCoverage` | COMPLETE/PARTIAL/UNKNOWN | 중복 없는 구성요소 합산 가능 여부 |
+| `fallbackReasons` | string[] | 권한·좌표·응답·예산·비용범위 미검증 이유 |
+
+DB의 기존 route_segment mode는 WALK를 유지하고 역할은 새 컬럼 또는 versioned metadata JSON으로 추가한다. 조회·인덱스 필요성과 migration 담당 협의 후 결정한다. ACCESS/EGRESS를 BUS/SUBWAY segmentId로 만들지 않는다.
+
+### 4.4 엄격한 경계와 탐색 완전성
 
 현재 RouteTimelineEvaluator의 ON_TIME_ESTIMATE는 `<= arriveBy`를 사용할 수 있다. 전역 enum 의미를 조용히 바꾸지 말고 ConditionalDeparturePolicy에서 **직접 ETA.isBefore(D)**로 판정한다. T 성공 검사는 `!ETA.isAfter(T)`다. 기존 evaluator를 사용하는 다른 검색/검증 경로의 회귀를 막는다.
 
@@ -275,7 +328,7 @@ for lastTrip whose alightAt <= lastAllowedArrival:
 
 boardingCutoffAt은 검증된 승차 가능 마감 시각이다. 원천이 도착 ETA만 제공하면 출발/승차마감을 정확히 확보한 것으로 취급하지 않고 보수적 추정·품질 제한을 붙인다. 중간 버스의 미래 운행시각이 없으면 해당 조합의 정확한 역산을 멈추고 경로 전체를 제한 격자로 평가한다. 격자는 상한에서 과거 방향으로 열거하되 항상 asOf와 운행/통제/시간대 경계 후보를 포함한다. 단조성이 없어도 검증한 후보를 생략하지 않아야 그 후보 집합 내 최신을 주장할 수 있다. API의 현재 총시간은 미래 시각별 정확한 함수가 아니므로 fallback 결과의 탐색 domain과 한계를 표시한다.
 
-### 4.4 스냅샷과 모델 캐시
+### 4.5 스냅샷과 모델 캐시
 
 - Redis MGET과 DB active baseline version 조회를 후보 묶음 단위로 한다. MGET도 서로 다른 원천 관측시각을 동일 시각으로 만들지 않으며 각 sourceGeneratedAt을 보존한다.
 - snapshot 이후 검색 도중 들어온 사건은 다음 평가 revision으로 처리한다. 같은 계산 중 최신값을 무작위로 섞지 않는다.
@@ -293,9 +346,10 @@ boardingCutoffAt은 검증된 승차 가능 마감 시각이다. 원천이 도�
 | `evaluation/SubwayTimingService.java` | S05~S08의 trip crosswalk 검증 후 stop별 시각 적용. 취소/무정차 제외. 하차 예측 없으면 ESTIMATED 명시 | 시간표 trainCode를 실시간 ID로 착각하지 않음. 지연으로 다음 환승을 놓치면 재선택 |
 | `evaluation/SubwayTimetable.java` | serviceDate·24시 초과 시각·역 순서 검증 유지. 도착 기준 후보 조회 인덱스 추가 | 전날 운행의 25시, 막차, 다른 dayType, 지선/급행 fixture |
 | `evaluation/RoadImpactEvidence.java` | namespace/방향/occurrence/기간 매핑 후 FULL 여부 검사 | 반대 방향·시간 밖·부분 통제는 완전 차단하지 않음 |
+| `route/client/KakaoWalkingRouteClient.java` (추가) | 검증된 origin/destination으로 접근·이탈 도보 조회, 제휴 권한·쿼터·오류 분류 | endpoint 순서, 권한 없음 fallback, 빈/깨진 응답, timeout, 429 fixture |
 | `service/BaselineSnapshot.java` | 날씨·버전·p80/p95·표본 품질까지 보존 | DRY와 RAIN 혼합 금지, version 고정, 없는 표본 unknown |
 
-일반 도보·환승은 제공자 WALK를 유지한다. 로컬 미커밋 `TransferTimingService.java`와 관련 마스터/테스트는 이 문서의 구현 완료 항목이 아니다. 자동으로 채택·수정·삭제하지 않는다.
+접근·이탈 도보는 검증된 별도 도보 API 결과를 우선하며 실패하면 같은 역할의 제공자 WALK를 유지한다. 환승은 제공자 WALK를 유지한다. 로컬 미커밋 `TransferTimingService.java`와 관련 마스터/테스트는 이 문서의 구현 완료 항목이 아니다. 자동으로 채택·수정·삭제하지 않는다.
 
 `MasterDataTransitMappingResolver`, `CanonicalSegmentIdFactory`, `RouteCandidateAssembler`, `RouteSegmentEdgeWriter`는 보수적 ID 매핑·저장 역할을 유지한다. 외부 후보 생성은 `PublicTransitRouteClient` 책임이며 Spark가 최단경로를 만들지 않는다.
 
@@ -557,6 +611,14 @@ cause에는 `incidentKey,revision,source,officialNoticeAt,affectedSegmentIds,evi
 | T24 | 출발 확인 후 늦게 조기 출발 알림 실행 | 취소. 남은 여정만 평가 |
 | T25 | 앱 일정·홈·추천·알림 | 같은 평가 ID의 ETA/P/D·품질 표시 일치 |
 | T26 | 구버전 JSON/Client가 새 enum 수신 | 과거 조회 정상, 안전한 unknown 표시 |
+| T27 | 출발지→첫 BUS/SUBWAY endpoint | 경도·위도 순서의 ACCESS_WALK 요청, 응답 초·m·geometry 보존 |
+| T28 | 마지막 BUS/SUBWAY endpoint→목적지 | EGRESS_WALK 요청 방향이 뒤집히지 않음 |
+| T29 | BUS→WALK→SUBWAY 및 SUBWAY→WALK→BUS | 중간 WALK는 TRANSFER_WALK, 접근/이탈 API로 교체하지 않음 |
+| T30 | path endpoint와 EXACT 마스터 좌표 충돌 | 도보 호출 생략, WALK_ENDPOINT_UNVERIFIED fallback |
+| T31 | 도보 제휴 권한 없음/403·429·timeout | 대중교통 WALK fallback, 전체 후보 실패로 변경하지 않음 |
+| T32 | 원본 ACCESS WALK와 별도 WALK 모두 존재 | 하나만 계산하고 durationSource 기록 |
+| T33 | 원본 ACCESS WALK 없음·unassigned 비용 미검증 | 별도 WALK를 providerTotal에 가산하지 않고 PARTIAL/UNKNOWN |
+| T34 | 여러 버스 대안의 승차 좌표가 다름 | 선택한 EXACT 대안 좌표만 사용, 대안 간 혼합 금지 |
 
 테스트 파일 위치:
 

@@ -975,6 +975,21 @@ services:
     ports:
       - "7979:7979"
 
+  # 상태 주소를 대신 찔러 보고 성공 여부를 지표(probe_success 1/0)로 바꿔 주는 도구. 서버2 monitoring 프로필.
+  # ml-serving 은 Prometheus 가 읽을 지표 주소가 없고 /health/ready(준비되면 200, 아니면 503)만 있어서 이 도구로 감시한다.
+  # 어떤 주소를 어떻게 찌를지는 monitoring/blackbox/blackbox.yml 에, 어떤 주소를 감시할지는 prometheus.yml 의 ml-serving 잡에 있다.
+  # 나중에 다른 URL 도 같은 방식으로 붙일 수 있다.
+  blackbox-exporter:
+    <<: *common
+    image: prom/blackbox-exporter:${BLACKBOX_EXPORTER_VERSION:-v0.25.0}
+    container_name: blackbox-exporter
+    profiles: ["monitoring"]
+    mem_limit: 64m
+    command:
+      - --config.file=/config/blackbox.yml
+    volumes:
+      - ./monitoring/blackbox:/config:ro
+
   redis-exporter:
     <<: *common
     image: oliver006/redis_exporter:${REDIS_EXPORTER_VERSION:-v1.66.0}

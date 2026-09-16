@@ -1,6 +1,6 @@
 # 일정 경로 검증 — transit-prev-v3
 
-> 2026-09-16 후속 설계: 사용자가 일정 시작시각만 입력하는 [목표 계산 흐름](arrival-deadline-calculation.md)과 [파일별 적용 계획](arrival-deadline-implementation-plan.md)을 별도로 기록했다. 아래는 기존 검증 흐름의 설명이며, 후속 설계가 구현·배포됐다는 뜻은 아니다. 현재 코드에서는 PREVIEW 추천 행 저장이 허용되고 수락·자동 알림은 차단되어 있으므로, 아래의 PREVIEW 저장 제한 설명은 과거 상태로 구분한다.
+> 2026-09-16 후속 설계 수정: 사용자가 출발 예정시각과 일정 시작시각을 모두 입력한다. 예상 도착이 일정 시작보다 빠르면 출발을 유지하고, 같거나 늦을 때만 일정 시작 10분 전을 목표로 출발을 다시 탐색한다. [계산 정책](arrival-deadline-calculation.md), [파트별 구현 계획](arrival-deadline-implementation-plan.md), [원천·컬럼 가이드](arrival-deadline-data-guide.md)를 따른다. 아래는 기존 검증 흐름이며 후속 설계의 구현·배포 완료를 뜻하지 않는다. 현재 PREVIEW 추천 행 저장은 허용되고 수락·자동 알림은 차단되므로 아래 PREVIEW 저장 제한은 과거 상태로 구분한다.
 
 ## 현재 동작
 

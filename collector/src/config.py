@@ -57,6 +57,10 @@ class Settings:
         "BUS_ROUTE_IDS",
         "BUS_ROUTE_LIMIT",
         "SUBWAY_LINES",
+        "SUBWAY_SKIP_ENABLED",
+        "SUBWAY_SKIP_START",
+        "SUBWAY_SKIP_END",
+        "SUBWAY_SKIP_OVERRIDE_DATES",
         "CITY_AREA_IDENTIFIERS",
         "CITY_AREA_REGISTRY_PATH",
     )

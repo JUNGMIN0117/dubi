@@ -6,6 +6,79 @@
 - 새로운 JSON 필드·Redis 키·Kafka 토픽은 이 문서만으로 활성화하지 않는다. Producer와 Consumer가 같은 변경에서 기계 계약·fixture·호환 테스트를 추가한다.
 - 최신 대상 브랜치 대조: `dt/dev@f6905b9`의 Bus Silver, 버스 위치 재시도, 지하철 새벽 생략·빈 응답, TOPIS 공지 중복 억제까지 확인했다. 해당 기능은 아래 계획의 재사용 기반이다.
 
+## 0. 먼저 확인할 데이터 확보 현황과 확보 작업
+
+**이 문서는 사용자가 데이터를 모두 보유하고 있다는 전제로 작성하지 않는다.** API 공개, 수집 코드 존재, 파일 존재, 운영 수집 성공, 서비스 사용 가능은 각각 다른 상태다. 아래에서 운영 데이터의 실제 보유·권한·최신성이 입증되지 않은 항목은 모두 **확보 미확인**이다. 이는 데이터가 없다고 확정한 것도 아니며, 구현 선행 조건으로 확인·확보해야 한다는 뜻이다.
+
+### 0.1 상태를 기록하는 방법
+
+| 축 | 기록할 값 | 통과 증거 |
+|---|---|---|
+| 출처 | 공식 공개 / 제휴 / 제공기관 문의 필요 / 내부 생성 | 공식 URL·서비스명·적용 범위 |
+| 코드 | 수집기 있음 / 변환기 있음 / 추가 구현 필요 | 아래 코드 링크. 코드 존재만으로 데이터 확보 처리 금지 |
+| 확보 | 미확인 / 신청 중 / 샘플 확보 / 운영 검증 | 키를 뺀 실제 응답·파일 SHA·수집일·권한/쿼터 확인 기록 |
+| 사용 가능 | 불가 / 제한 사용 / 검증 범위 내 사용 | ID 매핑·최신성·필수 필드·지원 지역·소비자 테스트 |
+
+아래 원천 필드는 기존 코드가 소비하는 필드 또는 확보 시 요구할 필드다. **요구할 필드를 외부 API가 실제 제공한다고 해석하지 않는다.** 13절의 `TripStopPrediction`, `NormalizedIncident`, `EvaluationSnapshot`은 내부 설계이며 다운로드 가능한 데이터셋 이름이 아니다.
+
+### 0.2 실시간·준실시간 데이터 확보 목록
+
+| ID / 필요한 데이터 | 공식 제공처·신청 페이지 | 받아올 원본과 목적 | 현재 확인한 것 / 아직 확인 못 한 것 | 확보 담당의 다음 작업·미확보 시 동작 |
+|---|---|---|---|---|
+| S03 버스 도착예측 | 서울특별시 [버스도착정보조회](https://www.data.go.kr/data/15000314/openapi.do) | `busRouteId,stId,staOrd,mkTm,exps1/2,vehId1/2,full1/2,deTourAt`; 정류장 도착 이후 탑승 가능한 차량과 대기시간 | `collector/src/sources/bus_arrival.py` 존재. 실제 키 승인·대상 노선 수집 성공·120초 신선도는 미확인 | 공공데이터포털 활용신청→대상 routeId 샘플 수집→4.2절 필드/코드 확인→쿼터 산정. 미확보면 카카오 fallback, 실시간 대기 반영 표시 금지 |
+| S04 버스 위치 | 서울특별시 [버스위치정보조회](https://www.data.go.kr/data/15000332/openapi.do) | `vehId,sectOrd,sectDist,fullSectDist,stopFlag,congetion`, 제공 좌표·시각; 차량 순서/상태 보조 | `bus_location.py` 존재. 연속 운행 기록·실제 통과시각 보유 미확인 | 별도 서비스 권한과 `getBusPosByRtid` 샘플 검증. 없으면 위치 보정 제외; 위치만으로 실제 구간 정답 생성 금지 |
+| S06 지하철 도착예측 | 서울열린데이터광장 [OA-12764](https://data.seoul.go.kr/dataList/OA-12764/A/1/datasetView.do) | `subwayId,statnId,btrainNo,recptnDt,barvlDt,updnLine,bstatnNm,btrainStt,arvlCd`; 역별 도착예측 | `subway_arrival.py` 존재. 현재 운영 수집 범위·모든 하차역 예측 확보 미확인 | 인증키 신청·일괄/역별 호출 권한과 건수 확인→원본 저장→노선/역 ID 매핑. 없으면 시간표 추정; 정확한 지연분 주장 금지 |
+| S07 지하철 위치 | 서울열린데이터광장 [OA-12601](https://data.seoul.go.kr/dataList/OA-12601/A/1/datasetView.do) | `subwayId,trainNo,statnId/statnNm,updnLine,statnTnm,trainSttus,recptnDt`; 열차 위치·방향·상태 | `subway_location.py` 존재. 시간표 열차와 실시간 열차의 동일성 미확인 | 노선별 실제 응답과 상태 코드 확보→serviceDate/방향 검증. 없으면 위치 기반 보정 제외 |
+| S08 지하철 지연·중단 공지 | 서울열린데이터광장 [OA-22718 getNtceList](https://data.seoul.go.kr/dataList/OA-22718/A/1/datasetView.do) | `noftOcrnDt,noftTtl,noftCn,lineNmLst,stnSctnCdLst`; 공식 이유·영향 구간 후보 | `subway_alert.py` 존재. 구조화된 장애 종료·방향·열차별 적용 여부 미확인 | 인증키·구간 코드표·정정/해제 실제 예제 확보. 없으면 ETA 변화만 안내하고 사고 이유 생성 금지 |
+| S09 도로 돌발·통제 | 서울 TOPIS [OA-13315 AccInfo](https://data.seoul.go.kr/dataList/OA-13315/A/1/datasetView.do) | `acc_id,link_id,acc_type,acc_dtype,occr_date/time,exp_clr_date/time,acc_info,grs80tm_x/y`; 사건 식별·링크·예상 기간 | `traffic_incident.py` 존재. FULL 통제·버스 적용·실제 종료를 확정할 필드 미확보/미검증 | 키 신청→전체 페이지 샘플→[유형 코드](https://data.seoul.go.kr/dataList/OA-13312/A/1/datasetView.do)와 7절 도로 매핑 확보. 미확보면 POTENTIAL_IMPACT만 |
+| S12-N 우회·집회·행사 공지 | 서울 TOPIS [OA-22861 NoticeList](https://data.seoul.go.kr/dataList/OA-22861/A/1/datasetView.do) | `bdwr_seq,bdwr_ttl_nm,bdwr_cts,create_date,update_date,url`; 공지 원문과 수정 추적 | `topis_notice.py` 존재. 모든 사고를 포괄하거나 종료 상태를 보장하는 피드가 아님 | 이용조건·키·XML 원문과 영향 도로 근거 확보. 미확보면 구체 공지 기반 원인 안내 제외 |
+| S11 현재 날씨 | 기상청 [단기예보 조회서비스](https://www.data.go.kr/data/15084084/openapi.do), [API허브](https://apihub.kma.go.kr/apiList.do?seqApi=10) | `baseDate/baseTime,nx,ny,category,obsrValue`; T1H/RN1/REH/PTY/WSD | weather 수집 코드 존재. 운영 격자·실제 관측 이력 미확인 | 사용할 플랫폼별 키 승인→대상 격자와 관측시각 확인. 누락을 DRY/0으로 채우지 않음 |
+| S11-F 미래 날씨 예보 | 위 기상청 서비스의 초단기/단기예보 | `baseDate/baseTime,fcstDate/fcstTime,nx,ny,category,fcstValue`; 미래 진입시각의 예보 | 이번 확인 범위에서 예보 이력 수집 완료 증거 없음 | 예보 operation·category·단위를 별도 검증하고 발표본별 보존. 미확보면 현재 날씨를 미래 실측처럼 사용 금지 |
+| S12-C 장소 혼잡 | 서울 [실시간 도시데이터 OA-21285](https://data.seoul.go.kr/dataList/OA-21285/F/1/datasetView.do) | AREA_CD/NM, 인구 혼잡/범위, 지역 도로 평균속도 및 각 갱신시각; 보조 위험 | 도시데이터 수집 경로 존재. 대상 장소·현재 응답 최신성 미확인 | 제공 장소와 서비스 지역 대조 후 수집. 지역 평균을 버스 edge 속도로 대입 금지 |
+| S14 도로 링크별 소통 | 서울 TOPIS [실시간 도로 소통 OA-13291](https://data.seoul.go.kr/dataList/OA-13291/A/1/datasetView.do) | 필요한 값: 링크 ID, 속도, 통행시간, 관측시각. **정확한 raw 필드명·단위는 활용명세/샘플 확인 후 확정** | 공식 데이터셋 확인. 현재 해당 원천 수집·정규화 연결과 샘플 확보 미확인 | 수집 담당이 명세·샘플 확보→AccInfo/버스 링크와 namespace 대조→별도 adapter 제안. 확보 전 ‘교통량 증가’ 원인이나 통제 지연초 생성 금지 |
+
+S03/S04의 서울 스키마가 수도권 전체를 지원한다는 뜻은 아니다. 경기·인천 노선은 해당 지역 공식 원천과 adapter를 따로 검증하기 전 실시간 지원 대상으로 표시하지 않는다. 원천 페이지가 ‘실시간’이라고 해도 프로젝트가 해당 주기·범위로 수집하고 있다는 증거가 되지 않는다.
+
+### 0.3 정적·배치·제휴 데이터 확보 목록
+
+| 필요한 데이터 | 출처·확보 경로 | 반드시 확보/검증할 값 | 로컬 근거와 확보 제한 |
+|---|---|---|---|
+| 카카오 후보 경로 | [카카오 REST 문서](https://developers.kakao.com/docs/ko/kakaomap/rest-api), 저장소 `kakao-public-transit-route.md`의 호출 계약 | 후보·step 순서·수단·시간·거리·정류장 이름·차량·geometry | Client/fixture 존재. 운영 endpoint 권한·지원 범위는 실제 키로 별도 검증 필요; 문서 링크만으로 사용권 보장하지 않음 |
+| 접근·이탈 도보 | [카카오모빌리티 제휴 도보](https://developers.kakaomobility.com/affiliate/walking/directions.html) | 검증 endpoint, duration/distance/geometry, 응답 코드 | **제휴 권한·실제 성공 응답 확보 미확인.** 제휴 신청/확인→service 식별자·쿼터→샘플→DTO. 일반 REST 키 보유로 대체 불가 |
+| 버스 노선·정류장·좌표·순서 | `backend/transit-master/bus/metropolitan-bus-v6.json.gz` 및 개별 manifest; 원천 추적은 [수도권 버스 계약](metropolitan-bus-mapping.md) | namespace,routeId,stopId,노선 순번,방향,좌표,기준일,원본 출처 | artifact 파일 존재. 원본 재확보 가능성·현 운행일 유효성·운영 DB 적재는 별도 확인. 해당 파일 존재를 전체 최신 원천 확보로 표시 금지 |
+| 지하철 역·노선·좌표 | `backend/transit-master/subway/metropolitan-subway-master.sources.json`에 원문 URL·SHA; [서울 역정보 OA-21232](https://data.seoul.go.kr/dataList/OA-21232/S/1/datasetView.do) 및 manifest의 KRIC 자료 | operator,lineId,stationId,이름,좌표,순서,버전 | 로컬 마스터/출처 manifest 존재. 역 중심 좌표와 출입구·승강장 좌표는 다름; 출입구 좌표 확보 증거 없음 |
+| 지하철 정적 시간표 | [서울교통공사 열차운행시각표](https://www.data.go.kr/data/15098251/fileData.do) | 호선,역사코드,주중주말,방향,급행,열차코드,도착/출발시간,시행일 | 빌더·원천 manifest 존재. 최신 파일 적용·운영자별 누락 검증 필요. 서울교통공사 파일로 전체 수도권 운행을 가정하지 않음 |
+| 버스 edge↔도로 링크 | 7.2절 [BIS 노선 57](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=57), [노선구간 58](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=58), [구간링크 62](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=62), [공간링크 63](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=63), [표준링크 7](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=7) | 노선/구간/링크 ID, 순번, 시작/끝 노드, 사용여부,적용기간 | audit/promote 도구 존재. 운영 가능한 COMPLETE 매핑 확보는 미확인; 도구 존재만으로 차단 기능 활성화 금지 |
+| 공휴일 달력 | [한국천문연구원 특일 정보](https://www.data.go.kr/data/15012690/openapi.do) | 날짜,공휴일 여부,명칭,공개/조회일; 수집 후 serviceDate/dayType 생성 | 추가 확보·연결 필요. 운행사의 특별 시간표는 공휴일 달력만으로 알 수 없어 별도 확보 |
+| 환승 통로·승강장 정보 | 현재 카카오 TRANSFER_WALK; 별도 공식 환승 자료는 원천·단위 확인 후 사용 | 출발/도착 노선·방향·승강장,통로 거리/기준시간,대기 포함 여부 | 미추적 `transfer-and-boarding.md`와 로컬 파일을 승인된 자료로 자동 채택하지 않음. 확보 전 카카오 환승 WALK 유지 |
+
+### 0.4 공개 API로 바로 채울 수 있다고 가정하면 안 되는 데이터
+
+| 필요한 값 | 실제 확보 상태·출처 | 확보 방법/담당 | 확보 전 제한 |
+|---|---|---|---|
+| 정적 열차코드↔실시간 열차 ID | **직접 대응표를 제공하는 확정 출처 미확보** | 마스터 담당이 해당 운영자에 운행일·방향·행선지별 대응 자료 요청. 운영자·제공 문서·허용범위를 확보 기록에 남김 | 이름/번호 일치만으로 결합 금지; 시간표 fallback |
+| 모든 역의 열차 미래 도착/출발 예측 | S06이 필요한 모든 정차시각을 제공하는지 미확인 | 수집 담당이 실제 제공 역 범위를 측정하고 운영자 예측 피드 확보 가능성 문의 | 하차 예측은 null; 정적 이동시간은 ESTIMATED |
+| 실제 버스/열차 정류장·역 통과기록 | **차량별 정답 원천 미확보**. ETA와 sparse 위치는 정답이 아님 | 수집 담당이 운수사/운영기관에 vehicle/trip,stop,실제 arrival/departure,event timestamp 기록 요청. 제공 불가면 기능 범위 축소 | ACTUAL_TRAVERSAL 기반 신규 기준선·정확도 검증을 완료했다고 표시 금지 |
+| 요일·시간대별 확정 버스 배차간격 | 해당 세부 범위를 보장하는 원천·필드 미확정 | 마스터 담당이 노선/운수사 운행계획 확보, 범위형 간격과 scalar를 구별 | 미래 차량 합성 금지; API fallback/UNKNOWN |
+| FULL/PARTIAL·적용 차종·방향·실제 해제 | AccInfo 현재 파싱값만으로 모두 확보되지 않음 | 공식 통제 공고/코드표·TOPIS 담당 자료에서 명시 근거 확보, 필요 시 검토 기록 | POTENTIAL_IMPACT만; BLOCKED·해제 알림 확정 금지 |
+| 실제 탑승·하차·환승 완료시각 | 외부 확정 데이터셋 미확보 | 별도 사용자 동의와 수집 설계가 승인된 경우에만 앱 측정. 출발 버튼은 실제 탑승 증거가 아님 | 개인 대기·환승 실측 학습/검증 미지원 |
+| 구간 P50/P80/P95·confidence·원인 영향 | **외부에서 그대로 받는 값이 아니라 내부 산출물** | 실제 fact·표본·매핑 확보 후 Spark 생성; confidence는 품질 정책으로 계산 | 입력 없으면 unknown; 분위수·원인을 임의 생성 금지 |
+| 운영 가능한 ML 예측 | 내부 ML 서비스. 원천 수집 출처가 아님 | ML 담당이 학습 원본 manifest·정답 정의·지원 범위·운영 승인 증거 제공 | PREVIEW 제한 유지 |
+
+미확정 출처에는 가짜 API 이름이나 필드명을 채우지 않는다. 담당자가 제공기관의 답변과 샘플을 확보한 뒤 상태를 갱신하거나 해당 기능을 지원 범위에서 제외한다.
+
+### 0.5 실제 확보 작업 순서와 인계 파일
+
+1. 데이터 담당이 위 목록의 source별로 `sourceId, officialUrl, serviceName, provider, coverage, acquisitionStatus, owner`를 작성한다. 초기 acquisitionStatus는 미확인이다.
+2. 공개 API는 활용신청·승인·키별 쿼터 확인, 파일은 최신 시행일·다운로드·SHA 확인, 제휴는 사용 권한 확인을 먼저 한다.
+3. 키를 제거한 정상/빈/오류 응답을 받아 `rawField → normalizedField → 타입/단위 → 필수 여부 → null 처리` 표를 실제 응답과 대조한다. 아래 상세표와 다르면 파서를 먼저 고치지 말고 계약 차이를 기록한다.
+4. 실제 보유 범위인 날짜·노선·역·지역·행 수·원천 최신성·누락률을 기록한다. 샘플 1건 확보를 운영 수집 완료로 바꾸지 않는다.
+5. 수집·매핑·소비자 테스트가 통과한 범위만 사용 가능으로 바꾼다. 데이터 확보 전에는 샘플 기반 어댑터 개발까지만 가능하다.
+
+권장 인계 산출물은 **추가 예정** `docs/contracts/source-acquisition-register.csv`다. 컬럼은 `sourceId,officialUrl,serviceName,codePath,acquisitionStatus,sampleRef,sampleSha256,coverage,sourceTimeField,approvedQuota,pollIntervalSeconds,observedAgeSeconds,mappingStatus,consumer,blockedFeature,owner,verifiedAt`다. 지금은 검증 결과가 없으므로 샘플 SHA·쿼터·운영 최신성에 숫자를 만들어 넣지 않는다. 실제 raw 파일은 허용된 데이터 저장소에 두고 문서에는 참조와 마스킹한 fixture만 남긴다.
+
+2026-09-16 출처 확인 범위: 버스 위치·서울 돌발/소통/공지·서울교통공사 시간표·카카오 도보의 공식 안내 페이지를 확인했다. 지하철 도착 페이지는 이번 조회에서 서비스 지연 응답이었으므로 최신 명세 재확인이 필요하다. 실제 인증 API 호출·키 권한·운영 데이터 보유는 이번 문서 작업에서 확인하지 않았다. 나머지 기존 출처 링크/필드는 저장소 계약·코드·원천 manifest 근거이며 최신 응답 검증 완료가 아니다.
+
 ## 1. 어떤 데이터를 누가 사용하는가
 
 | ID | 입력·공식 출처 | 받아오는 주체 | 출력/주 소비자 |
@@ -14,7 +87,7 @@
 | S02 | [카카오 대중교통 경로](https://developers.kakao.com/docs/ko/kakaomap/rest-api) | Backend PublicTransitRouteClient | 후보·WALK·총시간·geometry → 매핑·여정 평가 |
 | S02-W | [카카오모빌리티 제휴용 도보 길찾기](https://developers.kakaomobility.com/affiliate/walking/directions.html) | Backend WalkingRouteClient 추가 | ACCESS_WALK·EGRESS_WALK 거리/시간/geometry. 제휴 권한 필요 |
 | S03 | [서울 버스 도착정보](https://www.data.go.kr/data/15000314/openapi.do) | Collector bus_arrival | transport.raw → 최신 도착 → 버스 대기 |
-| S04 | 서울 버스 위치 API `getBusPosByRtid` | Collector bus_location | transport.raw → 최신 위치 → 탑승 가능성 보조 |
+| S04 | [서울 버스 위치 API](https://www.data.go.kr/data/15000332/openapi.do) `getBusPosByRtid` | Collector bus_location | transport.raw → 최신 위치 → 탑승 가능성 보조 |
 | S05 | [서울교통공사 열차운행시각표](https://www.data.go.kr/data/15098251/fileData.do) | Backend 시간표 도구 | 버전 지정 JSON artifact → 시간표 서비스 |
 | S06 | [서울 지하철 도착정보](https://data.seoul.go.kr/dataList/OA-12764/A/1/datasetView.do) | Collector subway_arrival | transport.raw → 역·열차별 ETA |
 | S07 | [서울 지하철 열차 위치](https://data.seoul.go.kr/dataList/datasetView.do?infId=OA-12601&serviceKind=1&srvType=A) | Collector subway_location | transport.raw → 열차 위치·운행 상태 |

@@ -101,6 +101,11 @@ Kafka 이력은 상태 변경과 10분 구획별 전체 기록이며 중복 제�
 
 ## 테스트
 
+버스 위치·도착 이력의 제출용 전처리는 `batch/bus_silver.py`가 담당한다.
+Redis 최신값과 달리 전체 관측을 보존하며 원본을 직접 읽어 오류·중복·결측 사유를 남긴다.
+컬럼, 결측 처리 이유, 실행과 제출 기준은 [버스 Silver 안내](../docs/contracts/bus-silver.md)를 따른다.
+새 구간 매핑·날씨 결합·실제 이동시간 Label 생성은 이 잡의 범위가 아니다.
+
 지하철 시간표 연동용 최신값은 `observation.arrivalTrainType`과 `sourceGeneratedAt`을 함께 보존한다.
 버스 대기 연동은 `exps1/2`(초), `staOrd`, 운행/만차/우회 코드와 `mkTm`을 보존한다.
 기존 traTime(분)을 ArrivalSeconds에 저장한 오류를 수정했다. `arrivalTimeBasis=SEOUL_EXPS_SECONDS_V1`이

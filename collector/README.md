@@ -254,3 +254,8 @@ python -m pytest -q -p no:cacheprovider
 ## 경기·인천 선택 실행 수집기
 
 도착/위치 4개 소스와 namespace·페이지·초 단위 규칙은 [통합 보강 계약](../docs/contracts/transit-service-integration.md)을 따른다. 기존 운영 대상과 주기는 변경하지 않았다.
+# TOPIS 공지 중복 전송
+
+TOPIS는 조회한 공지 중 최초·변경 공지만 Kafka로 전송한다. ACK 성공 기록은 기존
+영속 데이터 볼륨의 SQLite에 유지한다. API 조회 범위는 1,000건, 주기는 15분으로 유지한다.
+전처리는 추가하지 않는다. [비교 규칙·배포·Redis 만료 동작](../docs/contracts/topis-notice-dedup.md)을 참고한다.

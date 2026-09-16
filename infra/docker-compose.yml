@@ -233,6 +233,7 @@ services:
     environment:
       <<: *collector-env
       COLLECTOR_SOURCE: topis_notice
+      TOPIS_NOTICE_DEDUP_PATH: /app/data/topis_notice_dedup.sqlite3
 
   # =========================================================================
   # data : MySQL, Redis                                             [서버2]

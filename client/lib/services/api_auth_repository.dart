@@ -117,6 +117,49 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<List<String>> linkSocialAccount({
+    required String provider,
+    String? accessToken,
+    String? idToken,
+  }) async {
+    try {
+      final response = await _api.linkSocialAccount(
+        provider: provider,
+        accessToken: accessToken,
+        idToken: idToken,
+      );
+      return _socialProviders(response.data);
+    } on DioException catch (error) {
+      throw _mapDioException(error);
+    }
+  }
+
+  @override
+  Future<List<String>> unlinkSocialAccount(String provider) async {
+    try {
+      final response = await _api.unlinkSocialAccount(provider);
+      return _socialProviders(response.data);
+    } on DioException catch (error) {
+      throw _mapDioException(error);
+    }
+  }
+
+  List<String> _socialProviders(Map<String, dynamic>? body) {
+    final rawData = body?['data'];
+    final data = rawData is Map
+        ? rawData.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final providers = data['providers'];
+    if (body?['success'] != true || providers is! List) {
+      throw const AuthException(
+        AuthErrorCode.serverError,
+        message: '소셜 계정 연결 응답을 확인할 수 없습니다.',
+      );
+    }
+    return providers.map((item) => item.toString()).toList(growable: false);
+  }
+
+  @override
   Future<void> loginWithOAuthIdToken({
     required String provider,
     required String idToken,
@@ -168,9 +211,7 @@ class ApiAuthRepository implements AuthRepository {
         message: '로그인 응답 형식을 확인할 수 없습니다.',
       );
     }
-    final data = rawData.map(
-      (key, value) => MapEntry(key.toString(), value),
-    );
+    final data = rawData.map((key, value) => MapEntry(key.toString(), value));
     final status = data['status']?.toString();
     if (status == 'ACCOUNT_LINK_REQUIRED') {
       final linkToken = data['linkToken']?.toString() ?? '';

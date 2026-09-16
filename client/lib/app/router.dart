@@ -45,8 +45,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/home',
-            builder: (context, state) =>
-                HomeScreen(repository: repository, homeApi: homeApi),
+            builder: (context, state) => HomeScreen(
+              homeApi: homeApi,
+              recommendationApi: recommendationApi,
+            ),
           ),
           GoRoute(
             path: '/schedules',
@@ -101,6 +103,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   return ScheduleDetailScreen(
                     repository: scheduleRepository,
                     routeRepository: repository,
+                    recommendationApi: recommendationApi,
                     scheduleId: state.pathParameters['id']!,
                     arrivalApi: arrivalApi,
                     initialSchedule: arguments?.schedule,
@@ -167,6 +170,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => AccountManagementScreen(
                   userApi: userApi,
                   authRepository: authRepository,
+                  kakaoLoginService: kakaoLoginService,
+                  googleLoginService: googleLoginService,
                 ),
               ),
             ],

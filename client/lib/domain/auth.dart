@@ -118,6 +118,12 @@ abstract interface class AuthRepository {
     required String linkToken,
     required String password,
   });
+  Future<List<String>> linkSocialAccount({
+    required String provider,
+    String? accessToken,
+    String? idToken,
+  });
+  Future<List<String>> unlinkSocialAccount(String provider);
   Future<void> requestEmailVerification(String email);
   Future<void> confirmEmailVerification({
     required String email,
@@ -176,6 +182,16 @@ class MockAuthRepository implements AuthRepository {
       throw const AuthException(AuthErrorCode.invalidCredentials);
     }
   }
+
+  @override
+  Future<List<String>> linkSocialAccount({
+    required String provider,
+    String? accessToken,
+    String? idToken,
+  }) async => [provider];
+
+  @override
+  Future<List<String>> unlinkSocialAccount(String provider) async => const [];
 
   @override
   Future<void> requestEmailVerification(String email) async {}

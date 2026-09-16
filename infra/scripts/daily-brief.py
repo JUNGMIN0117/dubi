@@ -122,6 +122,7 @@ echo "@@archive_files"; docker logs archiver --since %(h)dh 2>&1 | grep -c " wro
 echo "@@archiver_started"; docker inspect archiver --format '{{.State.StartedAt}}'
 echo "@@kafka"; docker exec kafka du -s --block-size=1 /var/lib/kafka/data 2>/dev/null | cut -f1   # 실제 디스크 사용량(희소 인덱스 파일 제외)
 echo "@@deploy"; cd ~/S15P21E202 && git log -1 --format='%h %cd' --date=format:'%m-%d %H:%M' && stat -c %y .git/FETCH_HEAD 2>/dev/null | cut -c1-16
+echo "@@nn_backup"; tail -n 1 ~/backups/hdfs-name/backup.log 2>/dev/null || echo "로그 없음"
 """
 
 
@@ -388,8 +389,15 @@ def build(env):
         w("안정성", "재시작 있음")
 
     backup = last_backup()
-    if "OK" not in backup:
+    # 마지막 줄이 OK 가 아니면 백업이 실패한 것이고, OK 라도 WARN 이 붙어 있으면 서버1 로 사본을 못 보낸 것이다. 둘 다 알린다.
+    if "OK" not in backup or "WARN" in backup:
         w("운영", "백업 확인 필요")
+    # 서버1의 네임노드 목차 백업(backup-namenode.sh, 매일 04:20) 결과를 본다. 서버1 조회 자체가 실패한 경우는 위에서 이미
+    # 빨간불로 처리했으므로 여기서는 건너뛴다. 로그가 없거나 마지막 줄이 OK 가 아니면 "백업 확인 필요" 로, OK 라도 WARN 이 붙어 있으면
+    # 세컨더리 네임노드가 26시간 넘게 사본을 안 만든 것이므로 "fsimage 오래됨" 으로 알린다.
+    nn_backup = (rem.get("nn_backup") or ["로그 없음"])[0].strip() if rem else None
+    if nn_backup is not None and ("OK" not in nn_backup or "WARN" in nn_backup):
+        w("운영", "네임노드 백업 확인 필요" if "WARN" not in nn_backup else "네임노드 fsimage 오래됨")
 
     def light(area):
         return "🔴" if any(k in " ".join(warns[area]) for k in ("다운", "Missing", "부족", "유입 0", "조회 실패")) else ("🟡" if warns[area] else "🟢")

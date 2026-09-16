@@ -11,6 +11,8 @@ import logging
 import signal
 import sys
 import threading
+import time
+from pathlib import Path
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -20,6 +22,7 @@ from events import build_event
 from publisher import Publisher
 from sources.base import SourceSpec, now_kst
 from sources.subway_schedule import pause_until, SkippedNonService
+from request_budget import RetryScheduled, RetryWait, RequestBudget
 
 log = logging.getLogger("collector")
 
@@ -94,6 +97,7 @@ def main() -> int:
     with httpx.Client(timeout=httpx.Timeout(10.0 if settings.source == "weather" else 60.0, connect=5.0)) as client:
         while not stop.is_set():
             wait_seconds = interval
+            waiting_for_retry = False
             try:
                 count = run_cycle(spec, settings, client, publisher)
                 # 사이클마다 전송 확인을 기다려 sent/failed 가 이 사이클의 실제 결과를 반영하게 한다.
@@ -106,6 +110,14 @@ def main() -> int:
             except SkippedNonService as exc:
                 log.info("cycle skipped reason=SKIPPED_NON_SERVICE source=%s resumeAt=%s", settings.source, exc.resume_at.isoformat())
                 wait_seconds = exc.wait_seconds
+            except RetryScheduled as exc:
+                log.error("cycle failed: %s; retry scheduled in %.0fs", exc, exc.wait_seconds)
+                wait_seconds = exc.wait_seconds
+                waiting_for_retry = True
+            except RetryWait as exc:
+                log.info("cycle waiting reason=RETRY_PENDING resumeIn=%.0fs", exc.wait_seconds)
+                wait_seconds = exc.wait_seconds
+                waiting_for_retry = True
             except ConfigError as exc:
                 log.error("%s", exc)
                 exit_code = 2
@@ -116,6 +128,15 @@ def main() -> int:
                     exit_code = 1
             if settings.run_once:
                 break
+            if settings.source == "bus_location" and not waiting_for_retry:
+                # After either regular/retry completion, keep the original 8h deadline.
+                try:
+                    budget = RequestBudget(settings.extra.get("API_BUDGET_PATH", str(Path(__file__).resolve().parents[1] / "data" / "request_budget.sqlite3")), settings.api_key("BUS_LOCATION_API_KEY"), int(settings.extra.get("API_DAILY_LIMIT", "900")))
+                    next_at = budget.next_cycle_at("bus_location")
+                    if next_at is not None and next_at > time.time():
+                        wait_seconds = next_at - time.time()
+                except Exception:
+                    log.warning("Could not read bus regular deadline; using normal polling interval")
             stop.wait(wait_seconds)
 
     if publisher.flush() > 0 or publisher.failed > 0:

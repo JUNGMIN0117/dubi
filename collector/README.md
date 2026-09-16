@@ -1,5 +1,8 @@
 # DDUBI 실시간 데이터 Collector
 
+버스 위치의 일시적 호출 실패는 예산이 허용하면 5분 뒤 최대 한 번 재시도한다.
+오류 구분·정기 주기·호출 예산·운영 적용은 [버스 위치 재시도](../docs/contracts/bus-location-retry.md)를 따른다.
+
 지하철 위치·도착은 기본 KST 03:30~04:30에 호출을 건너뛰고, 그 외 시간의 정상 빈 응답은 0건으로 처리한다.
 특별 운행일 해제 설정, 로그와 운영 적용은 [지하철 새벽 수집 정책](../docs/contracts/subway-collection-policy.md)을 따른다.
 

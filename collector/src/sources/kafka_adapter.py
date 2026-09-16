@@ -11,7 +11,7 @@ from functools import lru_cache
 from bus_crosswalk import BusCrosswalk, POLICY as BUS_ID_POLICY
 
 from config import Settings
-from request_budget import RequestBudget
+from request_budget import RequestBudget, RetryScheduled
 from sources.base import KST, Record, SourceSpec, now_kst
 from sources.subway_schedule import pause_until, SkippedNonService
 
@@ -154,7 +154,7 @@ def collect(name, settings: Settings, client):
     budget = RequestBudget(settings.extra.get("API_BUDGET_PATH", str(Path(__file__).resolve().parents[2]/"data"/"request_budget.sqlite3")),
                            key, int(settings.extra.get("API_DAILY_LIMIT", "900")))
     interval = max(default_interval, settings.interval_seconds or 0)
-    if not budget.claim_cycle(name, interval, expected):
+    if not budget.claim_cycle(name, interval, expected, allow_retry=name == "bus_location"):
         log.info("source=%s cooldown active; no API request", name)
         return []
     hook = budget.before_request
@@ -192,6 +192,14 @@ def collect(name, settings: Settings, client):
             log.warning("source=%s response may have more rows; first 1000 only", name)
         return [to_record(name, row) for row in result["items"]]
     except Exception as exc:
+        if name == "bus_location":
+            from sources.bus_location import BusLocationError
+            if isinstance(exc, BusLocationError):
+                if exc.retryable and not settings.run_once:
+                    retry_at = budget.schedule_retry(name, 300, expected)
+                    if retry_at is not None:
+                        raise RetryScheduled(retry_at, budget.clock(), f"source={name} collection failed: {exc}") from None
+                raise RuntimeError(f"source={name} collection failed: {exc}; delayed retry unavailable or not eligible") from None
         if name in ("subway_location", "subway_arrival"):
             from sources.subway_location import SubwayLocationError
             from sources.subway_arrival import SubwayArrivalError

@@ -158,8 +158,9 @@ def test_http_queue_limit_and_health_while_model_runs():
         release = Event()
 
         class Model:
+            bundle={'missing_files':[]}
             def metadata(self):
-                return {}
+                return {'supported_from':'2000-01-01','supported_until':'2100-01-01'}
 
             def predict(self, request):
                 release.wait(3)

@@ -26,13 +26,25 @@ public class ScheduleEvaluationWorkflow {
     private final EvaluationNotificationPlanner notifications;
     private final ScheduleMonitoringPolicy monitoring;
     private final com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking;
+    private final com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher;
 
     public ScheduleEvaluationWorkflow(ScheduleEvaluationStore store, PublicTransitRouteClient routes,
             RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
             com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking,
             @Value("${ddubi.recommendation.candidate-ttl-seconds:900}") int candidateTtl) {
+        this(store, routes, evidence, conditional, notifications, walking, candidateTtl, null);
+    }
+
+    /** 운영에서는 캐시 재사용에도 현재 매핑 판정을 적용한다. 외부 API TTL과 매핑 버전 수명은 별개다. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ScheduleEvaluationWorkflow(ScheduleEvaluationStore store, PublicTransitRouteClient routes,
+            RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
+            com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking,
+            @Value("${ddubi.recommendation.candidate-ttl-seconds:900}") int candidateTtl,
+            com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher) {
         this.store = store; this.routes = routes; this.evidence = evidence; this.conditional = conditional;
         this.notifications = notifications; this.walking=walking;
+        this.mappingRefresher = mappingRefresher;
         // 초기 실험 주기이며 검증된 도착 보장 임계값이 아니다. 여유시간으로 가산하지 않는다.
         monitoring = new ScheduleMonitoringPolicy(Duration.ofHours(1), Duration.ofMinutes(30), Duration.ofMinutes(10),
                 Duration.ofMinutes(10), Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofSeconds(candidateTtl));
@@ -112,6 +124,13 @@ public class ScheduleEvaluationWorkflow {
             var cache = job.cache();
             boolean refresh = monitoring.refreshCandidates(now, cache == null ? null : cache.search().fetchedAt(), false);
             RouteSearchResult search = refresh ? routes.search(new RouteSearchQuery(job.origin(), job.destination())) : cache.search();
+            if (!refresh && mappingRefresher != null) {
+                var remapped = BusAlternativeExpansion.expand(mappingRefresher.refresh(search));
+                // 변경된 edge와 평가 증거를 함께 저장한다. 원본 fetchedAt을 유지하여 경로 TTL은 연장하지 않는다.
+                refresh = !remapped.equals(search);
+                search = remapped;
+            }
+            search = BusAlternativeExpansion.expand(search);
 
             var snapshot = evidence.read(search.candidates(), now);
             Instant departure = job.departure().isBefore(now) ? now : job.departure();
@@ -132,7 +151,7 @@ public class ScheduleEvaluationWorkflow {
                     || previous.selected().assessment() == Assessment.LATE_ESTIMATE
                     || previous.selected().reasons().stream().anyMatch(r -> r.startsWith("ROAD_POTENTIAL_IMPACT:")));
             if (!refresh && newlyAtRisk && !previousAtRisk) {
-                search = routes.search(new RouteSearchQuery(job.origin(), job.destination()));
+                search = BusAlternativeExpansion.expand(routes.search(new RouteSearchQuery(job.origin(), job.destination())));
 
                 snapshot = evidence.read(search.candidates(), now);
                 enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now,selectedKey(job,search),walkingSession);
@@ -142,7 +161,7 @@ public class ScheduleEvaluationWorkflow {
                 selectedKey = selectedKey(job, search); selected = selected(suggestion, selectedKey); refresh = true;
             }
             var info = new ArrayList<CandidateInfo>();
-            for (RouteCandidate c : search.candidates()) info.add(new CandidateInfo(RouteEvidenceAssembler.key(c), evidence.riskReasons(c, snapshot), c.segments().stream().map(s -> new RouteStep(s.mode().name(), s.fromName(), s.toName(), s.vehicles().stream().map(v -> v.name()).toList())).toList()));
+            for (RouteCandidate c : search.candidates()) info.add(new CandidateInfo(RouteEvidenceAssembler.key(c), evidence.riskReasons(c, snapshot), c.segments().stream().map(s -> new RouteStep(s.mode().name(), s.fromName(), s.toName(), BusAlternativeExpansion.displayedVehicles(s))).toList()));
             var result = new Outcome(job.token(), scheduleId, null, job.departure(), job.arriveBy(), now,
                     selectedKey, selected, suggestion, info, snapshot, trigger, "cdep-v1", job.eventRevision(), comparison, null, calculation);
             // 출발 변경(accept)은 계속 막는다 — 미승인 모델 값으로 사용자의 일정을 바꾸지 않는다.
@@ -188,7 +207,8 @@ public class ScheduleEvaluationWorkflow {
 
     private String signature(RouteCandidate candidate) {
         return store.write(candidate.segments().stream().map(s -> Arrays.asList(s.mode(), s.providerRouteKey(),
-                s.fromName(), s.toName(), s.stopNames(), s.vehicles(), s.geometry())).toList());
+                s.fromName(), s.toName(), s.stopNames(), s.vehicles(), s.geometry(),
+                RouteEvidenceAssembler.pathIdentity(s))).toList());
     }
 
 }

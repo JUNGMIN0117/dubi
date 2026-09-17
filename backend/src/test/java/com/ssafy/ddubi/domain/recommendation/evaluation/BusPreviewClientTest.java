@@ -11,6 +11,15 @@ import static org.assertj.core.api.Assertions.*;
 
 /** 실제 로컬 HTTP 서버로 Python 계약 직렬화·응답 상관키·실패 처리를 검증한다. 실제 모델 정확도 시험은 아니다. */
 class BusPreviewClientTest {
+    @Test void numericPredictionWithMissingHistoryIsNotAnApplicableEstimate() {
+        // 실제 모델이 숫자를 반환해도 과거 관측이 부족하면 승인 상태와 다른 실패 이유를 보존한다.
+        var estimate = new BusPreviewClient.Estimate(160.74, "MODEL_NOT_PRODUCTION_READY",
+                "v12", Instant.now(), 17, 0, true);
+        assertThat(estimate.applicationFailure()).isEqualTo("ML_HISTORY_INSUFFICIENT");
+        assertThat(estimate.seconds()).isEqualTo(160.74);
+        assertThat(BusPreviewClient.Estimate.unavailable("REFERENCE_DATE_UNSUPPORTED").applicationFailure())
+                .isEqualTo("REFERENCE_DATE_UNSUPPORTED");
+    }
     final ObjectMapper json = new ObjectMapper();
     final BusPreviewClient.Input input = new BusPreviewClient.Input("100","200","300",1,LocalDate.now(ZoneId.of("Asia/Seoul")),9);
 

@@ -34,6 +34,16 @@ public class BusPreviewClient {
     /** 모델 출처·계산시각·결측 품질까지 저장한다. 실패의 seconds는 null이며 0초로 변환하지 않는다. */
     public record Estimate(Double seconds, String reason, String modelVersion, Instant computedAt,
                            Integer missingFeatureCount, Integer historySampleCount, Boolean dataInsufficient) {
+        /**
+         * HTTP 호출 성공과 실제 시간 교체 자격을 분리한다. 모델은 결측 대체값으로 숫자를 만들 수
+         * 있으므로 표본 부족을 PREVIEW 승인 사유로 덮지 않는다. 원래 반환 수치는 진단에 보존한다.
+         */
+        public String applicationFailure() {
+            if (Boolean.TRUE.equals(dataInsufficient)) return "ML_HISTORY_INSUFFICIENT";
+            if (seconds == null) return reason;
+            if (!Double.isFinite(seconds) || seconds < 0) return "ML_INVALID_DURATION";
+            return null;
+        }
         public static Estimate unavailable(String reason) {
             return new Estimate(null, reason, null, null, null, null, null);
         }

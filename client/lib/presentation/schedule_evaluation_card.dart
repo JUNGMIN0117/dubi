@@ -1,175 +1,436 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../domain/schedule_evaluation.dart';
 
-/// 서버 평가 상태를 보여준다. 임의 신뢰도·정시 도착 보장을 표시하지 않고,
-/// 결과 시각/잠정 여부/실패를 구분한다. 수락과 실제 출발 확인은 사용자 동작에서만 보낸다.
 class ScheduleEvaluationCard extends StatefulWidget {
-  const ScheduleEvaluationCard({super.key, required this.repository, required this.scheduleId});
+  const ScheduleEvaluationCard({
+    super.key,
+    required this.repository,
+    required this.scheduleId,
+  });
+
   final ScheduleEvaluationRepository repository;
   final String scheduleId;
+
   @override
   State<ScheduleEvaluationCard> createState() => _ScheduleEvaluationCardState();
 }
 
-class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard> {
-  Map<String, dynamic>? data;
+class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
+    with WidgetsBindingObserver {
+  ScheduleEvaluationV2? evaluation;
   String? error;
+  String? notice;
   bool busy = false;
+  bool active = true;
+  int requestGeneration = 0;
+  int retryCount = 0;
   Timer? timer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
-    timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!busy && data?['state'] != 'STOPPED') _load();
-    });
   }
 
   @override
-  void dispose() { timer?.cancel(); super.dispose(); }
+  void dispose() {
+    requestGeneration++;
+    timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    active = state == AppLifecycleState.resumed;
+    timer?.cancel();
+    if (active) _load();
+  }
+
+  bool get _shouldPoll => switch (evaluation?.state) {
+    EvaluationState.stopped || EvaluationState.departureRequired => false,
+    _ => true,
+  };
+
+  void _scheduleNext({required bool failed}) {
+    timer?.cancel();
+    if (!mounted || !active || !_shouldPoll) return;
+    final backoffStep = (retryCount - 1).clamp(0, 2);
+    final seconds = failed ? (30 * (1 << backoffStep)) : 30;
+    timer = Timer(Duration(seconds: seconds), _load);
+  }
 
   Future<void> _load() async {
-    if (busy) return;
+    if (busy || !active) return;
+    final generation = ++requestGeneration;
     setState(() => busy = true);
+    var failed = false;
     try {
-      final latest = await widget.repository.latestEvaluation(widget.scheduleId);
-      if (mounted) setState(() { data = latest; error = null; });
-    } catch (_) {
-      if (mounted) setState(() => error = '예측을 불러오지 못했습니다. 다시 확인해 주세요.');
+      final latest = await widget.repository.latestEvaluation(
+        widget.scheduleId,
+      );
+      if (!mounted || generation != requestGeneration) return;
+      if (!_isOlderThanCurrent(latest)) {
+        setState(() {
+          evaluation = latest;
+          error = null;
+          retryCount = 0;
+        });
+      }
+    } on ScheduleEvaluationFailure catch (failure) {
+      failed = true;
+      if (!mounted || generation != requestGeneration) return;
+      setState(() {
+        retryCount++;
+        error = _failureMessage(failure);
+      });
+    } on Object {
+      failed = true;
+      if (!mounted || generation != requestGeneration) return;
+      setState(() {
+        retryCount++;
+        error = '예측을 불러오지 못했습니다. 연결 상태를 확인해 주세요.';
+      });
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted && generation == requestGeneration) {
+        setState(() => busy = false);
+        _scheduleNext(failed: failed);
+      }
     }
+  }
+
+  bool _isOlderThanCurrent(ScheduleEvaluationV2 next) {
+    final current = evaluation;
+    if (current == null) return false;
+    final currentInput = current.inputVersion;
+    final nextInput = next.inputVersion;
+    if (currentInput != null && nextInput != null && nextInput < currentInput) {
+      return true;
+    }
+    if (currentInput == nextInput &&
+        current.computedAt != null &&
+        next.computedAt != null &&
+        next.computedAt!.isBefore(current.computedAt!)) {
+      return true;
+    }
+    return false;
   }
 
   Future<void> _action(Future<void> Function() action) async {
     if (busy) return;
-    setState(() => busy = true);
+    timer?.cancel();
+    setState(() {
+      busy = true;
+      notice = null;
+    });
+    var stale = false;
     try {
       await action();
-      final latest = await widget.repository.latestEvaluation(widget.scheduleId);
-      if (mounted) setState(() { data = latest; error = null; });
-    } catch (_) {
-      if (mounted) setState(() => error = '처리하지 못했습니다. 최신 예측을 다시 확인해 주세요.');
+    } on ScheduleEvaluationFailure catch (failure) {
+      stale = failure.kind == EvaluationFailureKind.staleEvaluation;
+      if (mounted) {
+        setState(() {
+          if (stale) {
+            error = null;
+            notice = '추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.';
+          } else {
+            error = _failureMessage(failure);
+          }
+        });
+      }
+    } on Object {
+      if (mounted) {
+        setState(() => error = '요청을 처리하지 못했습니다. 다시 시도해 주세요.');
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
+    if (!mounted) return;
+    if (!stale) setState(() => notice = '서버 처리 결과를 다시 확인했습니다.');
+    await _load();
   }
 
-  Map _map(dynamic value) => value is Map ? value : const {};
-  String _time(dynamic value) {
-    final instant = DateTime.tryParse(value?.toString() ?? '');
-    if (instant == null) return '확인 불가';
-    final kst = instant.toUtc().add(const Duration(hours: 9));
-    return '${kst.month}/${kst.day} ${kst.hour.toString().padLeft(2, '0')}:${kst.minute.toString().padLeft(2, '0')}';
-  }
+  String _failureMessage(ScheduleEvaluationFailure failure) =>
+      switch (failure.kind) {
+        EvaluationFailureKind.rateLimited => '요청이 많아 잠시 후 자동으로 다시 확인합니다.',
+        EvaluationFailureKind.dependencyUnavailable =>
+          '교통 데이터 연결이 불안정해 잠시 후 다시 확인합니다.',
+        EvaluationFailureKind.authentication => '로그인 또는 일정 접근 권한을 확인해 주세요.',
+        EvaluationFailureKind.notFound => '아직 생성된 평가 결과가 없습니다.',
+        EvaluationFailureKind.invalidResponse => '서버 응답 형식을 확인할 수 없습니다.',
+        _ => failure.message,
+      };
 
-  String _stepLabel(Map step) {
-    final mode = switch (step['mode']) { 'BUS' => '버스', 'SUBWAY' => '지하철', 'WALK' => '도보', _ => '이동' };
-    final vehicles = (step['vehicles'] as List? ?? const []).join(', ');
-    return '$mode $vehicles · ${step['fromName']} → ${step['toName']}';
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('이동 예측', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          if (evaluation != null)
+            ScheduleEvaluationSummary(evaluation: evaluation!),
+          if (evaluation == null && error == null)
+            const Text('최신 예측을 확인하고 있습니다.'),
+          if (error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              error!,
+              key: const Key('evaluationError'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          if (notice != null) ...[
+            const SizedBox(height: 8),
+            Text(notice!, key: const Key('evaluationNotice')),
+          ],
+          if (evaluation != null) ...[
+            const SizedBox(height: 10),
+            _actions(evaluation!),
+          ],
+          if (busy) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(),
+          ],
+        ],
+      ),
+    ),
+  );
+
+  Widget _actions(ScheduleEvaluationV2 value) {
+    final canAccept = value.canAcceptAt(DateTime.now());
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (value.proposedDepartAt != null)
+          FilledButton(
+            key: const Key('acceptEvaluationButton'),
+            onPressed: busy || !canAccept || value.evaluationId.isEmpty
+                ? null
+                : () => _action(
+                    () => widget.repository.acceptEvaluation(
+                      widget.scheduleId,
+                      value.evaluationId,
+                    ),
+                  ),
+            child: const Text('이 제안 적용'),
+          ),
+        if (value.state != EvaluationState.stopped &&
+            value.state != EvaluationState.departureRequired)
+          OutlinedButton(
+            onPressed: busy
+                ? null
+                : () => _action(
+                    () =>
+                        widget.repository.refreshEvaluation(widget.scheduleId),
+                  ),
+            child: const Text('다시 계산'),
+          ),
+        if (value.state != EvaluationState.stopped &&
+            value.state != EvaluationState.departureRequired)
+          TextButton(
+            onPressed: busy
+                ? null
+                : () => _action(
+                    () => widget.repository.confirmDeparture(widget.scheduleId),
+                  ),
+            child: const Text('출발했어요'),
+          ),
+      ],
+    );
   }
+}
+
+class ScheduleEvaluationSummary extends StatelessWidget {
+  const ScheduleEvaluationSummary({super.key, required this.evaluation});
+
+  final ScheduleEvaluationV2 evaluation;
 
   @override
   Widget build(BuildContext context) {
-    final state = data?['state'];
-    final result = _map(data?['result']);
-    final preview = _map(result['preview']);
-    final isPreview = preview.isNotEmpty;
-    final selected = isPreview ? _map(preview['fastest']) : _map(result['selected']);
-    final roadAlternative = _map(preview['roadAlternative']);
-    final roadReasons = (selected['reasons'] as List? ?? const []).map((r) => r.toString());
-    final suggestion = _map(result['suggestion']);
-    final proposed = _map(suggestion['proposed']);
-    final hasChange = proposed.isNotEmpty && (proposed['journeyKey'] != result['selectedKey'] ||
-        proposed['departureAt'] != result['plannedDepartAt']);
-    final candidates = result['candidates'] is List ? result['candidates'] as List : const [];
-    final proposedInfo = candidates.map(_map).where((c) => c['key'] == proposed['journeyKey']);
-    final routeSteps = proposedInfo.isEmpty ? const [] : (proposedInfo.first['steps'] as List? ?? const []);
-    final label = switch (state) {
-      'PENDING' => '예측을 준비하고 있습니다.',
-      'STALE' => '갱신을 기다리고 있습니다. 아래 값은 이전 예측입니다.',
-      'DEPARTURE_REQUIRED' => '일정 수정에서 출발 예정시각을 입력해 주세요.',
-      'STOPPED' => '이 일정의 출발 전 감시가 종료됐습니다.',
-      'FAILED' => '최신 예측을 계산하지 못했습니다. 잠시 후 다시 확인해 주세요.',
-      'READY' => switch (selected['assessment']) {
-        'ON_TIME_ESTIMATE' => '목표시간 이내 도착 예상',
-        'LATE_ESTIMATE' => '목표시간보다 늦게 도착할 것으로 예상됩니다.',
-        'BLOCKED' => '현재 경로에 이용 불가 구간이 있습니다.',
-        _ => '도착 예측에 필요한 정보가 부족합니다.',
-      },
-      _ => '예측을 확인하고 있습니다.',
-    };
-    return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
+    final stale =
+        evaluation.state == EvaluationState.stale ||
+        evaluation.isExpiredAt(DateTime.now());
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('이동 예측', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8), Text(label),
-        if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-        if (result.isNotEmpty) ...[
-          if (isPreview) const Text('검증용 최소시간 후보 · 구간별 계산 방식은 아래 표시'),
-          if (isPreview && selected.isEmpty) const Text('계산 가능하고 통제되지 않은 후보가 없습니다.'),
-          Text('입력 출발: ${_time(result['plannedDepartAt'])}'),
-          Text('예상 도착: ${_time(selected['estimatedArrivalAt'])}'),
-          Text('계산: ${_time(result['checkedAt'])}'),
-          const Text('배차와 실제 도착은 달라질 수 있습니다.'),
-          if (selected['tentative'] == true) const Text('잠정 예측입니다. 배차와 모델 정확도 검증이 필요합니다.'),
-          if (roadReasons.any((r) => r.startsWith('ROAD_POTENTIAL_IMPACT:')))
-            const Text('예상 통과 구간에 사고·통제 영향이 있을 수 있습니다.'),
-          if (roadReasons.any((r) => r.startsWith('ROAD_') && !r.startsWith('ROAD_POTENTIAL_IMPACT:')))
-            const Text('일부 도로의 영향 여부는 확인되지 않았습니다.'),
-          if (roadAlternative.isNotEmpty)
-            Text('도로 영향 검토용 대체 후보 · 예상 도착 ${_time(roadAlternative['estimatedArrivalAt'])}'),
-          if (isPreview) ...[
-            for (final candidate in (preview['candidates'] as List? ?? const []))
-              Text('${_map(_map(candidate)['result'])['journeyKey']}: 버스 ML ${_map(candidate)['mlSteps']}개, 지하철 시간표·실시간 ${_map(candidate)['subwaySteps'] ?? 0}개, API ${_map(candidate)['apiSteps']}개'),
-            // 지하철 별도 계산이 있어도 전체 시간에 미반영된 상태를 적용 성공으로 표시하지 않는다.
-            for (final value in (preview['subwayPredictions'] as List? ?? const []))
-              Text(_subwayLabel(_map(value))),
-            for (final value in (preview['waitPredictions'] as List? ?? const []))
-              Text(_waitLabel(_map(value))),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            if (evaluation.quality.preview) const Chip(label: Text('검증용')),
+            if (stale) const Chip(label: Text('갱신 필요')),
+            if (evaluation.isLegacy) const Chip(label: Text('구버전 응답')),
           ],
-          if (hasChange || isPreview && proposed.isNotEmpty) ...[
-            const Divider(),
-            Text('제안 출발: ${_time(proposed['departureAt'])}'),
-            Text('제안 도착: ${_time(proposed['estimatedArrivalAt'])}'),
-            for (final value in routeSteps) Text(_stepLabel(_map(value))),
-            if (!isPreview) FilledButton(onPressed: busy || error != null || state != 'READY' ? null : () => _action(() =>
-                widget.repository.acceptEvaluation(widget.scheduleId, result['evaluationId'] as String)),
-                child: const Text('이 제안 적용')),
-          ],
+        ),
+        Text(
+          _stateMessage(evaluation.state),
+          key: const Key('evaluationStateMessage'),
+        ),
+        if (evaluation.state == EvaluationState.ready) ...[
+          const SizedBox(height: 6),
+          Text(
+            _decisionMessage(evaluation.decision),
+            key: const Key('evaluationDecisionMessage'),
+          ),
         ],
-        if (busy) const LinearProgressIndicator(),
-        if (state != 'STOPPED' && state != 'DEPARTURE_REQUIRED') Wrap(spacing: 8, children: [
-          OutlinedButton(onPressed: busy ? null : () => _action(() => widget.repository.refreshEvaluation(widget.scheduleId)),
-              child: const Text('다시 계산')),
-          TextButton(onPressed: busy ? null : () => _action(() => widget.repository.confirmDeparture(widget.scheduleId)),
-              child: const Text('출발했어요')),
-        ]),
+        const SizedBox(height: 8),
+        _timeRow('사용자 입력 출발', evaluation.userInputDepartAt),
+        _timeRow('현재 계획 출발', evaluation.plannedDepartAt),
+        if (evaluation.targetArriveAt != null)
+          _timeRow('평가 목표 도착', evaluation.targetArriveAt),
+        if (evaluation.proposedDepartAt != null)
+          _timeRow('제안 출발', evaluation.proposedDepartAt),
+        _timeRow('예상 도착', evaluation.estimatedArrivalAt),
+        if (evaluation.computedAt != null)
+          _timeRow('계산 시각', evaluation.computedAt),
+        if (evaluation.validUntil != null)
+          _timeRow('유효 시각', evaluation.validUntil),
+        if (evaluation.nextEvaluationAt != null)
+          _timeRow('다음 확인', evaluation.nextEvaluationAt),
+        const SizedBox(height: 8),
+        Text(_qualityMessage(evaluation.quality)),
+        if (evaluation.quality.costCoverage != 'COMPLETE')
+          const Text('전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'),
+        if (evaluation.quality.missingInputs.isNotEmpty)
+          Text(
+            '부족한 정보: '
+            '${evaluation.quality.missingInputs.map(_inputLabel).join(', ')}',
+          ),
+        if (evaluation.quality.fallbackReasons.isNotEmpty)
+          Text(
+            '대체 계산 사용: '
+            '${evaluation.quality.fallbackReasons.map(_fallbackLabel).join(', ')}',
+          ),
+        if (evaluation.decision == DepartureDecision.searchIncomplete &&
+            evaluation.bestKnownDecision != null)
+          Text(
+            '현재까지 확인된 결과: '
+            '${_decisionMessage(evaluation.bestKnownDecision!)}',
+          ),
+        if (evaluation.causes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          for (final cause in evaluation.causes) Text(_causeMessage(cause)),
+        ],
+        if (evaluation.legs.isNotEmpty) ...[
+          const Divider(),
+          const Text('경로 구간', style: TextStyle(fontWeight: FontWeight.w700)),
+          for (final leg in evaluation.legs) Text(_legLabel(leg)),
+        ],
+        if (!evaluation.canAcceptAt(DateTime.now()) &&
+            evaluation.proposedDepartAt != null)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('검증·유효성 조건을 충족한 제안만 일정에 적용할 수 있습니다.'),
+          ),
       ],
-    )));
+    );
   }
 
-  String _subwayLabel(Map value) {
-    final estimate = _map(value['estimate']);
-    final prefix = '${value['candidateKey']} 지하철';
-    if (estimate['arrivalAt'] == null) return '$prefix: 시간표·도착 정보 부족으로 API 시간 사용';
-    if (value['applied'] != true) return '$prefix: 대기·환승 시간 확인이 필요해 API 시간 유지';
-    final source = estimate['source'] == 'SUBWAY_REALTIME_ARRIVAL_AND_TIMETABLE'
-        ? '실시간 도착 + 시간표' : '시간표';
-    return '$prefix: $source · 탑승 예상 ${_time(estimate['boardingAt'])} · 하차 예상 ${_time(estimate['arrivalAt'])}';
+  Widget _timeRow(String label, DateTime? value) =>
+      Text('$label: ${value == null ? '확인 불가' : _formatDateTime(value)}');
+
+  static String _formatDateTime(DateTime value) {
+    final local = value.toLocal();
+    return '${local.month}/${local.day} '
+        '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
   }
 
-  /// 결측은 0분으로 표시하지 않는다. 계산했지만 시간 중복 방지로 미반영된 대기도 구별한다.
-  String _waitLabel(Map value) {
-    final mode = value['mode'] == 'BUS' ? '버스' : '지하철';
-    final prefix = '${value['candidateKey']} ${value['stepKey']} $mode 대기';
-    final seconds = value['seconds'];
-    if (seconds is! num) return '$prefix: 다음 차량 정보 부족';
-    final duration = '${seconds ~/ 60}분 ${seconds.toInt() % 60}초';
-    final source = value['source'] == 'SUBWAY_TIMETABLE' ? '시간표 기준' : '실시간 도착예측 기준';
-    final applied = value['applied'] == true ? '전체 시간에 반영' : '전체 시간에는 미반영';
-    return '$prefix: $duration · $source · $applied';
+  static String _causeMessage(EvaluationCause cause) {
+    final description = cause.description?.trim();
+    if (description != null && description.isNotEmpty) return description;
+
+    final evidenceLevel = cause.evidenceLevel?.toUpperCase();
+    if (evidenceLevel == 'FULL' || evidenceLevel == 'EXACT') {
+      return '이동 영향 원인이 확인되었습니다.';
+    }
+    return '이동 구간에 영향 가능성이 있습니다.';
+  }
+
+  static String _stateMessage(EvaluationState state) => switch (state) {
+    EvaluationState.pending => '예측을 준비하고 있습니다.',
+    EvaluationState.running => '최신 경로와 도착시각을 계산하고 있습니다.',
+    EvaluationState.ready => '평가가 완료됐습니다.',
+    EvaluationState.failed => '최신 예측을 계산하지 못했습니다.',
+    EvaluationState.stopped => '이 일정의 출발 전 감시가 종료됐습니다.',
+    EvaluationState.departureRequired => '일정 수정에서 출발 예정시각을 입력해 주세요.',
+    EvaluationState.stale => '이전 결과입니다. 최신 결과를 다시 확인해 주세요.',
+    EvaluationState.unknown => '평가 상태를 확인하고 있습니다.',
+  };
+
+  static String _decisionMessage(
+    DepartureDecision decision,
+  ) => switch (decision) {
+    DepartureDecision.keepDeparture => '현재 출발 계획을 유지해도 일정 전에 도착할 것으로 예상됩니다.',
+    DepartureDecision.advanceDeparture => '제안 시각에 출발하면 일정 10분 전 도착이 예상됩니다.',
+    DepartureDecision.departNow => '계획한 출발시각이 지났습니다. 현재 가능한 경로를 확인하세요.',
+    DepartureDecision.marginUnavailable => '10분 여유 확보는 어렵지만 일정 전 도착 가능한 경로입니다.',
+    DepartureDecision.lateExpected => '현재 확인 가능한 경로로는 일정 시작 이후 도착이 예상됩니다.',
+    DepartureDecision.dataInsufficient => '최신 도착 예측에 필요한 정보가 부족합니다.',
+    DepartureDecision.routeUnavailable => '현재 이용 가능한 경로를 확인하지 못했습니다.',
+    DepartureDecision.searchIncomplete =>
+      '제한 시간 안에 탐색을 완료하지 못했습니다. 확인된 대안만 표시합니다.',
+    DepartureDecision.unknown => '결과의 의미를 확인 중입니다.',
+  };
+
+  static String _qualityMessage(EvaluationQuality quality) {
+    final walking = switch (quality.walkingApiCoverage) {
+      'BOTH' => '접근·이탈 도보 경로 반영',
+      'ACCESS_ONLY' => '접근 도보 경로만 반영',
+      'EGRESS_ONLY' => '이탈 도보 경로만 반영',
+      _ => '기존 대중교통 도보 정보 사용',
+    };
+    final realtime = quality.realtimeApplied ? '일부 실시간 정보 반영' : '실시간 정보 미적용';
+    return '$walking · $realtime';
+  }
+
+  static String _inputLabel(String value) => switch (value) {
+    'PLANNED_DEPART_AT' => '출발 예정시각',
+    'BUS_ARRIVAL' => '버스 도착 정보',
+    'ROUTE_PROVIDER' => '경로 정보',
+    _ => value,
+  };
+
+  static String _fallbackLabel(String value) => switch (value) {
+    'EGRESS_ENDPOINT_UNVERIFIED' ||
+    'EGRESS_WALK_FALLBACK' => '이탈 도보는 기존 경로 정보 사용',
+    'MODEL_VALIDATION_ONLY' || 'VALIDATION_ONLY' => '검증 중인 모델 결과',
+    _ => value,
+  };
+
+  static String _legLabel(EvaluationRouteLeg leg) {
+    final role = switch (leg.role) {
+      RouteLegRole.accessWalk => '접근 도보',
+      RouteLegRole.transferWalk => '환승 도보',
+      RouteLegRole.egressWalk => '이탈 도보',
+      RouteLegRole.ride => leg.mode == 'BUS' ? '버스 탑승' : '지하철 탑승',
+      RouteLegRole.wait => '대기',
+      RouteLegRole.unknown => leg.roleRaw ?? '이동 구간',
+    };
+    final source = switch (leg.durationSource) {
+      DurationSource.kakaoWalkingApi => '도보 API',
+      DurationSource.publicTransitStep => '원본 경로 기준',
+      DurationSource.providerTotalFallback => '전체 경로시간 기준',
+      DurationSource.realtimeArrival => '실시간 도착예측',
+      DurationSource.timetable => '시간표 기준',
+      DurationSource.mlPreview => '검증용 모델',
+      DurationSource.unknown => leg.durationSourceRaw ?? '출처 확인 중',
+    };
+    final endpoints = [
+      leg.fromName,
+      leg.toName,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' → ');
+    final duration = leg.durationSeconds == null
+        ? ''
+        : ' · ${(leg.durationSeconds! / 60).ceil()}분';
+    return '$role${endpoints.isEmpty ? '' : ' · $endpoints'}$duration · $source';
   }
 }

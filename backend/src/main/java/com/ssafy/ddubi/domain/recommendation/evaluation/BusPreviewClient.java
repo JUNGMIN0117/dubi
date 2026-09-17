@@ -27,6 +27,8 @@ public class BusPreviewClient {
     /** 응답 계약 종류. 운영 계약은 ML 담당이 새 bundle을 제공한 뒤에만 실제로 통과할 수 있다. */
     public enum Contract { PREVIEW, PRODUCTION }
     public static final int MISSING_FEATURES_LIMIT = 32;
+    /** HTTP 호출 한 건에 허용하는 최대 대기. 설정으로도 이 값을 넘길 수 없다. */
+    public static final int MAX_TIMEOUT_MS = 10000;
     private static final Pattern FEATURE_NAME = Pattern.compile("[A-Za-z0-9_.:-]{1,64}");
     private static final Set<String> PASS_THROUGH_UNAVAILABLE = Set.of("UNSUPPORTED_PROVIDER", "REFERENCE_DATE_UNSUPPORTED", "UNSEEN_PROVIDER_ID");
 
@@ -48,11 +50,16 @@ public class BusPreviewClient {
     }
     /** 배치 크기를 직접 정하는 생성자. 테스트가 작은 배치로 분할 동작을 확인할 때 쓴다. */
     public BusPreviewClient(ObjectMapper json, String baseUrl, int timeoutMs, int maxBatchSegments) {
-        if (timeoutMs < 1 || timeoutMs > 5000) throw new IllegalArgumentException("ML timeout 범위 오류");
+        // 상한은 10초다. ml-serving 단독 응답이 약 4초라 5초는 여유가 없어 정상 응답도 끊겼다(2026-09-18).
+        // 무제한은 허용하지 않는다. 한 번의 호출이 평가 예산 전체를 삼키면 과거 평균 계산 시간이 사라진다.
+        if (timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) throw new IllegalArgumentException("ML timeout 범위 오류");
         if (maxBatchSegments < 1 || maxBatchSegments > 1000) throw new IllegalArgumentException("ML 배치 크기 범위 오류");
         this.baseUrl = baseUrl; this.json = json; this.timeout = Duration.ofMillis(timeoutMs); this.maxBatchSegments = maxBatchSegments;
         this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(timeout).followRedirects(HttpClient.Redirect.NEVER).build();
     }
+
+    /** 이 클라이언트가 한 번의 호출에 기다리는 시간. 평가 예산이 이만큼 남았을 때만 호출을 시작한다. */
+    public long timeoutMillis() { return timeout.toMillis(); }
 
     /** 학습 원천의 서울 ID·순번이다. canonical 문자열을 잘라 provider ID로 만들지 않는다. */
     public record Input(String routeId, String fromStopId, String toStopId, int sequence,

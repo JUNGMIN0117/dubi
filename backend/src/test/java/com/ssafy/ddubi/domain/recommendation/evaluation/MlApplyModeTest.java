@@ -158,6 +158,32 @@ class MlApplyModeTest {
         assertThat(capped.budgetExhausted()).isTrue();
     }
 
+    @Test void mlCallIsNotStartedWhenTheRemainingBudgetCannotCoverOneCall() {
+        // 수동 재계산 예산은 10초, 호출 한 건 제한은 7초다. 남은 시간이 7초보다 적으면 호출을 시작하지 않고
+        // 기존 fallback 으로 간다. 시작해 버리면 한 건이 전체 예산을 넘겨 과거 평균 계산 시간이 사라진다.
+        when(client.timeoutMillis()).thenReturn(7000L);
+        when(client.predict(any())).thenReturn(sufficient(30));
+        long nowNanos = System.nanoTime();
+        var session = JourneyEvaluationService.Session.withDeadlines(
+                nowNanos + Duration.ofSeconds(3).toNanos(), nowNanos + Duration.ofSeconds(2).toNanos());
+        var result = service(MlApplyMode.TEST_APPLY).compare(List.of(MlRoutePreviewTest.route(0,"1",300,10,1)),
+                empty, now, now, now.plusSeconds(1000), session);
+
+        verify(client, never()).predict(any());
+        verify(client, never()).predictBatch(anyList(), any());
+        assertThat(result.fastest().steps().get(0).source()).isEqualTo("FALLBACK");
+        assertThat(result.fastest().reasons()).contains("step-1:ML_BUDGET_EXHAUSTED","step-1:API_FALLBACK");
+        assertThat(result.budgetExhausted()).isTrue();
+
+        // 같은 마감이라도 호출 제한이 짧으면(여유가 충분하면) 호출을 시작한다.
+        when(client.timeoutMillis()).thenReturn(500L);
+        var roomy = JourneyEvaluationService.Session.withDeadlines(
+                System.nanoTime() + Duration.ofSeconds(3).toNanos(), System.nanoTime() + Duration.ofSeconds(2).toNanos());
+        service(MlApplyMode.TEST_APPLY).compare(List.of(MlRoutePreviewTest.route(0,"1",300,10,1)),
+                empty, now, now, now.plusSeconds(1000), roomy);
+        verify(client, atLeastOnce()).predict(any());
+    }
+
     @Test void invalidModeConfigurationFailsFastAndDefaultIsShadow() {
         assertThat(MlApplyMode.parse(null)).isEqualTo(MlApplyMode.SHADOW);
         assertThat(MlApplyMode.parse(" test_apply ")).isEqualTo(MlApplyMode.TEST_APPLY);

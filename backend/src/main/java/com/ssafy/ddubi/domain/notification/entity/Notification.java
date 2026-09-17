@@ -125,6 +125,20 @@ public class Notification extends BaseTimeEntity {
         return readAt != null;
     }
 
+    /**
+     * 아직 발송하지 못한 outbox가 새 평가로 교체되면 인앱 이력도 같은 내용으로 맞춘다.
+     * notificationId와 읽음 시각은 보존하고 이미 발송된 이력은 변경하지 않는다.
+     * 소유권 확인과 DB 트랜잭션은 NotificationService가 담당한다.
+     */
+    public void refreshPendingContent(NotificationType type, String title, String body, Long recommendationId) {
+        if (status == NotificationStatus.SENT) return;
+        this.type = type;
+        this.title = title;
+        this.body = body;
+        this.recommendationId = recommendationId;
+        this.suppressReason = null;
+    }
+
     /** 발송 성공. 억제 상태로 만들어 둔 행을 SENT 로 올린다. */
     public void markSent(LocalDateTime sentAt) {
         this.status = NotificationStatus.SENT;

@@ -24,10 +24,18 @@ public class JourneyEvaluationService {
     private final RouteTimelineEvaluator evaluator;
     private final SubwayTimingService subway;
     private final BusWaitingService busWaiting;
+    private final BusHistoricalReferenceService historical;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public JourneyEvaluationService(BusPreviewClient client, RouteEvidenceAssembler evidence, RouteTimelineEvaluator evaluator,
+                          SubwayTimingService subway, BusWaitingService busWaiting,BusHistoricalReferenceService historical) {
+        this.client = client; this.evidence = evidence; this.evaluator = evaluator; this.subway = subway; this.busWaiting = busWaiting;
+        this.historical=historical;
+    }
+    /** 기존 순수 fixture는 명시적 역사자료 설정 없이 이전 동작을 유지한다. */
     public JourneyEvaluationService(BusPreviewClient client, RouteEvidenceAssembler evidence, RouteTimelineEvaluator evaluator,
                           SubwayTimingService subway, BusWaitingService busWaiting) {
-        this.client = client; this.evidence = evidence; this.evaluator = evaluator; this.subway = subway; this.busWaiting = busWaiting;
+        this(client,evidence,evaluator,subway,busWaiting,null);
     }
 
     /**
@@ -44,6 +52,7 @@ public class JourneyEvaluationService {
         final Map<BusPreviewClient.Input, BusPreviewClient.Estimate> cache = new HashMap<>();
         final SubwayTimingService.Session subway = new SubwayTimingService.Session();
         final BusWaitingService.Session bus = new BusWaitingService.Session();
+        final BusHistoricalReferenceService.Session historical = new BusHistoricalReferenceService.Session();
         final long deadline;
         String modelVersion;
         boolean mixedModel;
@@ -69,7 +78,7 @@ public class JourneyEvaluationService {
             Journey original = evidence.assemble(route, snapshot, asOf);
             var legs = new ArrayList<Leg>();
             Instant cursor = departure;
-            int mlSteps = 0, apiSteps = 0, subwaySteps = 0, busWaitSteps = 0, roadSteps = 0;
+            int mlSteps = 0, apiSteps = 0, subwaySteps = 0, busWaitSteps = 0, roadSteps = 0,historicalSteps=0;
             var reasons = new ArrayList<String>();
             for (Leg leg : original.legs()) {
                 RouteSegment segment = route.segments().stream().filter(s -> ("step-" + s.sequence()).equals(leg.key())).findFirst().orElse(null);
@@ -82,6 +91,9 @@ public class JourneyEvaluationService {
                     boolean waitApplied = false;
                     if (!supported(edges)) {
                         reasons.add(leg.key() + ":UNVERIFIED_OR_UNSUPPORTED_BUS_MAPPING");
+                        if(segment.mapping()!=null && BusAlternativeExpansion.LIMITED.equals(segment.mapping().failureReason())) {
+                            reasons.add(leg.key()+":"+BusAlternativeExpansion.LIMITED); exhausted=true;
+                        }
                     } else {
                         // 대기 후 실제 탑승 예상시각을 버스 ML의 첫 edge 입력으로 사용한다.
                         Instant edgeCursor = canUseWait ? wait.boardingAt() : cursor;
@@ -111,8 +123,8 @@ public class JourneyEvaluationService {
                                 }
                             }
                             attempts.add(new Prediction(original.key(), leg.key(), edge.segmentId(), edgeCursor, input, estimate, false));
-                            if (session.mixedModel || estimate.seconds() == null || !Double.isFinite(estimate.seconds()) || estimate.seconds() < 0 || Boolean.TRUE.equals(estimate.dataInsufficient())) {
-                                reasons.add(leg.key() + ":" + (session.mixedModel ? "ML_MODEL_VERSION_MISMATCH" : estimate.reason())); complete = false; break;
+                            if (session.mixedModel || estimate.applicationFailure() != null) {
+                                reasons.add(leg.key() + ":" + (session.mixedModel ? "ML_MODEL_VERSION_MISMATCH" : estimate.applicationFailure())); complete = false; break;
                             }
                             long seconds = (long) Math.ceil(estimate.seconds());
                             total += seconds; edgeCursor = edgeCursor.plusSeconds(seconds);
@@ -133,6 +145,32 @@ public class JourneyEvaluationService {
                             }
                         }
                     }
+                    if(chosen==leg && historical!=null && supported(edges) && !session.mixedModel) {
+                        // ML 일부 edge와 합치지 않고 같은 RIDE 전체를 역사자료로 다시 평가한다.
+                        Instant historyEntry=canUseWait?wait.boardingAt():cursor;
+                        var reference=historical.estimate(edges,segment.mapping().masterDataVersion(),historyEntry,
+                                leg.entryUncertaintySeconds(),asOf,session.historical,deadline);
+                        if(reference.seconds()!=null) {
+                            chosen=new Leg(leg.key(),leg.kind(),leg.segmentIds(),reference.seconds(),reference.seconds(),
+                                    new Window("BUS_HISTORICAL_REFERENCE",asOf,asOf,Instant.MAX),List.of(),leg.entryUncertaintySeconds());
+                            historicalSteps++;
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_APPLIED");
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_WEATHER_UNKNOWN");
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_VERSION:"+reference.dataVersion());
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_SAMPLE_KIND:"+reference.sampleKind());
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_MIN_SAMPLE_COUNT:"+reference.rows().stream().mapToLong(com.ssafy.ddubi.domain.pipeline.service.BusReferenceService.Row::sampleCount).min().orElse(0));
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_MIN_OBSERVED_DATES:"+reference.rows().stream().mapToInt(com.ssafy.ddubi.domain.pipeline.service.BusReferenceService.Row::observedDates).min().orElse(0));
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_OLDEST_OBSERVATION_END:"+reference.rows().stream().map(com.ssafy.ddubi.domain.pipeline.service.BusReferenceService.Row::observationEnd).min(Comparator.naturalOrder()).orElse(null));
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_NEWEST_OBSERVATION_END:"+reference.rows().stream().map(com.ssafy.ddubi.domain.pipeline.service.BusReferenceService.Row::observationEnd).max(Comparator.naturalOrder()).orElse(null));
+                            reasons.add(leg.key()+":HISTORICAL_REFERENCE_ENTRY_UNCERTAINTY_SECONDS:"+leg.entryUncertaintySeconds());
+                            if(canUseWait) {
+                                legs.add(new Leg(leg.key()+"-wait",Kind.WAIT,List.of(),wait.seconds(),null,
+                                        new Window(wait.source(),asOf,asOf,Instant.MAX),
+                                        List.of(new Boarding(wait.vehicleId(),wait.boardingAt(),wait.boardingAt(),false))));
+                                cursor=wait.boardingAt();waitApplied=true;busWaitSteps++;
+                            }
+                        } else if(!"HISTORICAL_REFERENCE_DISABLED".equals(reference.reason())) reasons.add(leg.key()+":"+reference.reason());
+                    }
                     var waitReasons = new ArrayList<>(wait.reasons());
                     if (wait.seconds() != null && !waitApplied) waitReasons.add(canUseWait ? "BUS_WAIT_MOVEMENT_UNAVAILABLE" : "BUS_WAIT_TIME_COMPONENTS_UNRESOLVED");
                     if (busWaiting.decompositionVerified() && leg.entryUncertaintySeconds() == 0 && !waitApplied) {
@@ -141,7 +179,7 @@ public class JourneyEvaluationService {
                         waitReasons.add("BUS_WAIT_REQUIRED_NOT_APPLIED");
                     }
                     waitPredictions.add(new WaitPrediction(original.key(),leg.key(),TransportMode.BUS,station,wait.seconds(),
-                            wait.boardingAt(),wait.vehicleId(),wait.source(),wait.eventId(),wait.observedAt(),waitApplied,waitReasons));
+                            wait.boardingAt(),wait.vehicleId(),wait.source(),wait.eventId(),wait.observedAt(),wait.validUntil(),waitApplied,waitReasons));
                     reasons.addAll(waitReasons.stream().map(r -> leg.key()+":"+r).toList());
                 }
                 if (segment != null && segment.mode() == TransportMode.SUBWAY) {
@@ -156,7 +194,7 @@ public class JourneyEvaluationService {
                     var waitReasons = new ArrayList<>(timing.reasons());
                     if (reason != null) waitReasons.add(reason);
                     waitPredictions.add(new WaitPrediction(original.key(),leg.key(),TransportMode.SUBWAY,platform,timing.waitSeconds(),
-                            timing.boardingAt(),timing.tripKey(),timing.source(),timing.arrivalEventId(),timing.observedAt(),applied,waitReasons));
+                            timing.boardingAt(),timing.tripKey(),timing.source(),timing.arrivalEventId(),timing.observedAt(),timing.validUntil(),applied,waitReasons));
                     subwayPredictions.add(new SubwayPrediction(original.key(), leg.key(), platform, timing, applied, reason));
                     reasons.addAll(timing.reasons().stream().map(r -> leg.key() + ":" + r).toList());
                     if (applied) {
@@ -192,6 +230,7 @@ public class JourneyEvaluationService {
                     raw.steps(), reasons, "transit-prev-v3");
             String quality = mlSteps + subwaySteps == 0 ? "API_ONLY" : busWaitSteps > 0 || apiSteps > 0 || mlSteps > 0 && subwaySteps > 0
                     ? "MIXED_PREVIEW" : subwaySteps > 0 ? "SUBWAY_PREVIEW" : "ML_PREVIEW";
+            if(historicalSteps>0) quality=mlSteps+subwaySteps+apiSteps+busWaitSteps>0?"MIXED_HISTORICAL_REFERENCE":"HISTORICAL_REFERENCE";
             results.add(new Candidate(result, quality, mlSteps, apiSteps, subwaySteps, busWaitSteps));
         }
         if(session.mixedModel) {

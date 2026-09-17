@@ -119,8 +119,11 @@ public class ConditionalDepartureEvaluator {
                 best=current; bestComparison=batch;
             }
             if (current!=null && !current.estimatedArrivalAt().isAfter(policy.target()))
+                // 최신 후보부터 검사했으므로 여기까지 모두 평가했다면 제한 격자의 최신 해다.
+                // 메모리 제한으로 버린 더 이른 후보는 이 해를 개선하지 못한다. 시간/호출 예산
+                // 초과는 complete로 계속 차단하고, truncated는 해 없이 탐색을 마칠 때만 적용한다.
                 return result(at.equals(asOf) ? Decision.DEPART_NOW : Decision.ADVANCE_DEPARTURE,
-                        policy, initial, batch, current, count, complete && !truncated);
+                        policy, initial, batch, current, count, complete);
             if (!complete) break;
         }
         // 잘린 도메인의 끝에 도달해도 완료라고 표시하지 않는다.

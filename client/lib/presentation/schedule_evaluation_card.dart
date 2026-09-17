@@ -148,9 +148,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
       }
     } on Object {
       if (mounted) {
-        setState(
-          () => actionError = '요청을 처리하지 못했습니다. 다시 시도해 주세요.',
-        );
+        setState(() => actionError = '요청을 처리하지 못했습니다. 다시 시도해 주세요.');
       }
     } finally {
       if (mounted) setState(() => busy = false);
@@ -233,12 +231,19 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
                     evaluationId == null ||
                     evaluationId.isEmpty
                 ? null
-                : () => _action(
-                    () => widget.repository.acceptEvaluation(
-                      widget.scheduleId,
-                      evaluationId,
-                    ),
-                  ),
+                : () {
+                    if (!value.canAcceptAt(DateTime.now())) {
+                      setState(() => notice = '제안이 만료됐습니다. 최신 결과를 확인해 주세요.');
+                      _load();
+                      return;
+                    }
+                    _action(
+                      () => widget.repository.acceptEvaluation(
+                        widget.scheduleId,
+                        evaluationId,
+                      ),
+                    );
+                  },
             child: const Text('이 제안 적용'),
           ),
         if (value.state != EvaluationState.stopped &&
@@ -267,13 +272,61 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
   }
 }
 
-class ScheduleEvaluationSummary extends StatelessWidget {
-  const ScheduleEvaluationSummary({super.key, required this.evaluation});
+class ScheduleEvaluationSummary extends StatefulWidget {
+  const ScheduleEvaluationSummary({
+    super.key,
+    required this.evaluation,
+    this.compact = false,
+  });
 
   final ScheduleEvaluationV2 evaluation;
+  final bool compact;
+
+  @override
+  State<ScheduleEvaluationSummary> createState() => _SummaryState();
+}
+
+class _SummaryState extends State<ScheduleEvaluationSummary> {
+  ScheduleEvaluationV2 get evaluation => widget.evaluation;
+  Timer? _expiry;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleExpiry();
+  }
+
+  @override
+  void didUpdateWidget(covariant ScheduleEvaluationSummary oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleExpiry();
+  }
+
+  void _scheduleExpiry() {
+    _expiry?.cancel();
+    final until = evaluation.validUntil;
+    if (until != null && until.isAfter(DateTime.now())) {
+      _expiry = Timer(
+        until.difference(DateTime.now()) + const Duration(milliseconds: 1),
+        () {
+          if (mounted) setState(() {});
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _expiry?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final usable = evaluation.canRecommendAt(DateTime.now());
+    final historicalEstimate = evaluation.canShowHistoricalEstimateAt(
+      DateTime.now(),
+    );
     final stale =
         evaluation.state == EvaluationState.stale ||
         evaluation.isExpiredAt(DateTime.now());
@@ -287,13 +340,19 @@ class ScheduleEvaluationSummary extends StatelessWidget {
             if (evaluation.quality.preview) const Chip(label: Text('검증용')),
             if (stale) const Chip(label: Text('갱신 필요')),
             if (evaluation.isLegacy) const Chip(label: Text('구버전 응답')),
+            if (evaluation.hasHistoricalReference)
+              const Chip(label: Text('과거 평균 기반 추정')),
           ],
         ),
         Text(
-          _stateMessage(evaluation.state),
+          stale
+              ? '이전 결과입니다. 최신 결과를 다시 확인해 주세요.'
+              : evaluation.state == EvaluationState.ready && !usable
+              ? '정확한 출발 추천을 아직 확정하지 못했어요.'
+              : _stateMessage(evaluation.state),
           key: const Key('evaluationStateMessage'),
         ),
-        if (evaluation.state == EvaluationState.ready) ...[
+        if (usable) ...[
           const SizedBox(height: 6),
           Text(
             _decisionMessage(
@@ -304,49 +363,55 @@ class ScheduleEvaluationSummary extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 8),
-        _timeRow('사용자 입력 출발', evaluation.userInputDepartAt),
-        _timeRow('현재 계획 출발', evaluation.plannedDepartAt),
+        if (!widget.compact) ...[
+          _timeRow('사용자 입력 출발', evaluation.userInputDepartAt),
+          _timeRow('현재 계획 출발', evaluation.plannedDepartAt),
+        ],
         if (evaluation.targetArriveAt != null)
           _timeRow('평가 목표 도착', evaluation.targetArriveAt),
-        if (evaluation.proposedDepartAt != null)
+        if (usable && evaluation.proposedDepartAt != null)
           _timeRow('제안 출발', evaluation.proposedDepartAt),
-        _timeRow('예상 도착', evaluation.estimatedArrivalAt),
+        if (usable) _timeRow('예상 도착', evaluation.estimatedArrivalAt),
+        if (!usable && historicalEstimate) ...[
+          _timeRow('과거 평균 기반 참고 출발', evaluation.proposedDepartAt),
+          _timeRow('과거 평균 기반 참고 도착', evaluation.estimatedArrivalAt),
+          const Text('과거 자료로 계산한 참고 추정입니다. 현재 운행상황이나 정시 도착을 보장하지 않습니다.'),
+        ],
         if (evaluation.computedAt != null)
-          _timeRow('계산 시각', evaluation.computedAt),
-        if (evaluation.validUntil != null)
+          _timeRow('마지막 확인', evaluation.computedAt),
+        if (!widget.compact && evaluation.validUntil != null)
           _timeRow('유효 시각', evaluation.validUntil),
-        if (evaluation.nextEvaluationAt != null)
+        if (!widget.compact && evaluation.nextEvaluationAt != null)
           _timeRow('다음 확인', evaluation.nextEvaluationAt),
         const SizedBox(height: 8),
         Text(_qualityMessage(evaluation.quality)),
+        if (evaluation.hasHistoricalReference)
+          const Text('버스 일부 구간에 과거 평균 소요시간을 사용했습니다. 실시간 정보나 ML 예측값이 아닙니다.'),
         if (evaluation.quality.costCoverage != 'COMPLETE')
           const Text('전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'),
         if (evaluation.quality.missingInputs.isNotEmpty)
           Text(
             '부족한 정보: '
-            '${evaluation.quality.missingInputs.map(_inputLabel).join(', ')}',
+            '${_groupMissing(evaluation.quality.missingInputs)}',
           ),
-        if (evaluation.quality.fallbackReasons.isNotEmpty)
+        if (!widget.compact && evaluation.quality.fallbackReasons.isNotEmpty)
           Text(
             '대체 계산 사용: '
-            '${evaluation.quality.fallbackReasons.map(_fallbackLabel).join(', ')}',
+            '${evaluation.quality.fallbackReasons.map(_fallbackLabel).toSet().join(', ')}',
           ),
-        if (evaluation.decision == DepartureDecision.searchIncomplete &&
-            evaluation.bestKnownDecision != null)
-          Text(
-            '현재까지 확인된 결과: '
-            '${_decisionMessage(evaluation.bestKnownDecision!)}',
-          ),
-        if (evaluation.causes.isNotEmpty) ...[
+        if (evaluation.decision == DepartureDecision.searchIncomplete)
+          const Text('아직 최신 출발시각을 확정하지 못했어요. 확인된 후보는 참고용입니다.'),
+        if (!widget.compact && evaluation.causes.isNotEmpty) ...[
           const SizedBox(height: 8),
           for (final cause in evaluation.causes) Text(_causeMessage(cause)),
         ],
-        if (evaluation.legs.isNotEmpty) ...[
+        if (!widget.compact && evaluation.legs.isNotEmpty) ...[
           const Divider(),
           const Text('경로 구간', style: TextStyle(fontWeight: FontWeight.w700)),
           for (final leg in evaluation.legs) Text(_legLabel(leg)),
         ],
-        if (!evaluation.canAcceptAt(DateTime.now()) &&
+        if (!widget.compact &&
+            !evaluation.canAcceptAt(DateTime.now()) &&
             evaluation.proposedDepartAt != null)
           const Padding(
             padding: EdgeInsets.only(top: 8),
@@ -399,9 +464,10 @@ class ScheduleEvaluationSummary extends StatelessWidget {
   }) => switch (decision) {
     DepartureDecision.keepDeparture => '현재 출발 계획을 유지해도 일정 전에 도착할 것으로 예상됩니다.',
     DepartureDecision.advanceDeparture => '제안 시각에 출발하면 일정 10분 전 도착이 예상됩니다.',
-    DepartureDecision.departNow => departureMissed
-        ? '계획한 출발시각이 지났습니다. 현재 가능한 경로를 확인하세요.'
-        : '일정에 맞추려면 지금 출발해야 합니다.',
+    DepartureDecision.departNow =>
+      departureMissed
+          ? '계획한 출발시각이 지났습니다. 현재 가능한 경로를 확인하세요.'
+          : '일정에 맞추려면 지금 출발해야 합니다.',
     DepartureDecision.marginUnavailable => '10분 여유 확보는 어렵지만 일정 전 도착 가능한 경로입니다.',
     DepartureDecision.lateExpected => '현재 확인 가능한 경로로는 일정 시작 이후 도착이 예상됩니다.',
     DepartureDecision.dataInsufficient => '최신 도착 예측에 필요한 정보가 부족합니다.',
@@ -418,23 +484,55 @@ class ScheduleEvaluationSummary extends StatelessWidget {
       'EGRESS_ONLY' => '이탈 도보 경로만 반영',
       _ => '기존 대중교통 도보 정보 사용',
     };
-    final realtime = quality.realtimeApplied ? '일부 실시간 정보 반영' : '실시간 정보 미적용';
+    final realtime = quality.realtimeApplied
+        ? '일부 구간에 실시간 정보 반영'
+        : '실시간 정보 미적용';
     return '$walking · $realtime';
   }
 
   static String _inputLabel(String value) => switch (value) {
+    _ when value.startsWith('BUS:') => '일부 버스 구간의 실시간 정보 부족',
+    _ when value.startsWith('SUB:') => '일부 지하철 구간의 운행정보 부족',
+    'SUBWAY_TIMETABLE_NOT_CONFIGURED' => '지하철 시간표 미연결',
+    'ML_NOT_CONFIGURED' => '기본 경로 소요시간 사용',
     'PLANNED_DEPART_AT' => '출발 예정시각',
     'BUS_ARRIVAL' => '버스 도착 정보',
     'ROUTE_PROVIDER' => '경로 정보',
-    _ => value,
+    _ => '일부 교통정보 확인 불가',
   };
 
-  static String _fallbackLabel(String value) => switch (value) {
-    'EGRESS_ENDPOINT_UNVERIFIED' ||
-    'EGRESS_WALK_FALLBACK' => '이탈 도보는 기존 경로 정보 사용',
-    'MODEL_VALIDATION_ONLY' || 'VALIDATION_ONLY' => '검증 중인 모델 결과',
-    _ => value,
-  };
+  static String _groupMissing(List<String> inputs) {
+    final groups = <String, int>{};
+    for (final input in inputs.toSet()) {
+      final label = _inputLabel(input);
+      groups[label] = (groups[label] ?? 0) + 1;
+    }
+    return groups.entries
+        .map(
+          (entry) =>
+              entry.value > 1 ? '${entry.key} (${entry.value}건)' : entry.key,
+        )
+        .join(', ');
+  }
+
+  static String _fallbackLabel(String value) =>
+      historicalReferenceReasonLabel(value) ??
+      switch (value) {
+        _ when value.contains('HISTORICAL_REFERENCE_APPLIED') =>
+          '버스 과거 평균 소요시간 적용',
+        _ when value.contains('HISTORICAL_REFERENCE_WEATHER_UNKNOWN') =>
+          '과거 평균에 현재 날씨 미반영',
+        _
+            when value.contains('HISTORICAL_REFERENCE_DATA_VERSION') ||
+                value.contains('HISTORICAL_REFERENCE_SAMPLE_KIND') =>
+          '사용한 과거 자료의 출처 기록',
+        _ when value.contains('HISTORICAL_REFERENCE_') =>
+          '과거 자료 적용 조건이 맞지 않아 기본 경로시간 유지',
+        'EGRESS_ENDPOINT_UNVERIFIED' ||
+        'EGRESS_WALK_FALLBACK' => '이탈 도보는 기존 경로 정보 사용',
+        'MODEL_VALIDATION_ONLY' || 'VALIDATION_ONLY' => '검증 중인 모델 결과',
+        _ => '일부 구간은 기본 경로 정보 사용',
+      };
 
   static String _legLabel(EvaluationRouteLeg leg) {
     final role = switch (leg.role) {
@@ -443,7 +541,7 @@ class ScheduleEvaluationSummary extends StatelessWidget {
       RouteLegRole.egressWalk => '이탈 도보',
       RouteLegRole.ride => leg.mode == 'BUS' ? '버스 탑승' : '지하철 탑승',
       RouteLegRole.wait => '대기',
-      RouteLegRole.unknown => leg.roleRaw ?? '이동 구간',
+      RouteLegRole.unknown => '이동 구간',
     };
     final source = switch (leg.durationSource) {
       DurationSource.kakaoWalkingApi => '도보 API',
@@ -452,7 +550,8 @@ class ScheduleEvaluationSummary extends StatelessWidget {
       DurationSource.realtimeArrival => '실시간 도착예측',
       DurationSource.timetable => '시간표 기준',
       DurationSource.mlPreview => '검증용 모델',
-      DurationSource.unknown => leg.durationSourceRaw ?? '출처 확인 중',
+      DurationSource.busHistoricalReference => '과거 버스 평균 기준 · 실시간 아님',
+      DurationSource.unknown => '출처 확인 중',
     };
     final endpoints = [
       leg.fromName,

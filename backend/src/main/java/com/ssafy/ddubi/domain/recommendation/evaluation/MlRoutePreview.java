@@ -25,10 +25,11 @@ public class MlRoutePreview {
     /** 지하철 별도 계산과 실제 총시간 반영 여부를 구분한다. 미분해 잔여시간이 있으면 applied=false다. */
     public record SubwayPrediction(String candidateKey, String stepKey, Instant platformAt,
                                    SubwayTimingService.Estimate estimate, boolean applied, String reason) { }
-    /** 버스·지하철 공통 대기 결과다. seconds=null은 부족, applied=false는 전체 ETA 미반영이며 0초와 다르다. */
+    /** 버스·지하철 공통 대기 결과다. seconds=null은 부족, applied=false는 ETA 미반영이다.
+     * validUntil은 적용 근거의 만료이며 저장 JSON에서도 보존한다. 구형 JSON의 null은 유효함을 뜻하지 않는다. */
     public record WaitPrediction(String candidateKey, String stepKey, TransportMode mode, Instant stationAt,
                                 Long seconds, Instant boardingAt, String vehicleId, String source, String eventId,
-                                Instant observedAt, boolean applied, List<String> reasons) {
+                                Instant observedAt, Instant validUntil, boolean applied, List<String> reasons) {
         public WaitPrediction { reasons = List.copyOf(reasons); }
     }
     /** fastest는 반환 후보 중 계산 가능하고 차단되지 않은 최소시간 한 건이다. 실제 최적 경로나 도착 보장이 아니다. */

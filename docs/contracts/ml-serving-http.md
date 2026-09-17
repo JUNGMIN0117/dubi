@@ -348,6 +348,13 @@ Backend의 전체 timeout은 대기 예산 + 서버에서 측정한 계산 시�
 
 ## 8. 기존 Backend 계약과 연결 범위
 
+2026-09-17: 검색의 `BusPreviewPredictionAdapter`를 실제 HTTP 클라이언트에 연결했다.
+검색 응답의 `segments[].busEvaluations[].previewEstimatedSeconds`는 유효한 전체 버스 step
+PREVIEW 합계이며 `estimatedSeconds`/`predictionReady`의 운영 승인 의미를 바꾸지 않는다.
+이력 표본 0은 수치가 있어도 `ML_HISTORY_INSUFFICIENT`이며 step 전체가 API fallback한다.
+미지원 출처, 호출 오류, 예산 초과는 사유를 구분한다. 아래 포트의 미충족 승인 조건은 그대로다.
+대안 전개·참조 갱신·실제 배포 상태는 [갱신 계약](transit-data-refresh.md)을 따른다.
+
 현재 `BusPredictionPort`의 승인된 `Batch`와 이 HTTP 응답은 동일한 DTO가 아니다.
 HTTP 호출 성공만으로 그 계약에 맞는 운영 결과를 만들 수 없다.
 
@@ -378,8 +385,10 @@ Redis의 현재 상태 보정, baseline_serving 조회, 카카오 시간 선택�
 ## 9. 상태 확인 API
 
 - `GET /health/live`: 프로세스 생존 확인. HTTP 200 `{"status":"UP"}`. 모델 준비를 뜻하지 않음.
-- `GET /health/ready`: 모델 로드 성공 시 HTTP 200, 아래 메타데이터 반환.
+- `GET /health/ready`: 모델 로드 성공 및 오늘 KST가 지원 범위 안이면 HTTP 200, 아래 메타데이터 반환.
 - 미로드 readiness: HTTP 503 `{"detail":"MODEL_NOT_READY"}`.
+- 참조 날짜 미지원: HTTP 503, `status=REFERENCE_DATE_UNSUPPORTED` 및 아래 메타데이터.
+- 이 날짜 검사/추가 필드는 로컬 코드 변경이다. 운영 기존 이미지는 참조 묶음만 새로 설치되어 기본 지원 날짜 필드를 반환한다.
 
 ```json
 {
@@ -390,11 +399,16 @@ Redis의 현재 상태 보정, baseline_serving 조회, 카카오 시간 선택�
   "production_ready": false,
   "bundle_production_ready": false,
   "supported_from": "2026-09-10",
-  "supported_until": "2026-09-17"
+  "supported_until": "2026-10-10",
+  "reference_status": "CURRENT",
+  "reference_days_remaining": 23,
+  "missing_reference_file_count": 11
 }
 ```
 
-readiness는 로드된 객체 존재를 확인한다. 호출마다 모든 참조 파일의 SHA나 실제 추론을
+위 예시는 2026-09-17 KST 기준이며 days_remaining은 날짜에 따라 달라진다.
+reference_status는 CURRENT/NOT_STARTED/EXPIRED다. 결측 개수는 파일 단위이며 개별 노선 표본 수가 아니다.
+readiness는 로드된 객체와 오늘 지원 범위를 확인한다. 호출마다 모든 참조 파일의 SHA나 실제 추론을
 다시 검사하지 않으므로, 실행 중 참조 변경/손상이나 이후 I/O 실패까지 보장하지 않는다.
 모델 묶음은 실행 중 바꾸지 않고, 새 묶음 설치·검증 후 프로세스를 재시작한다.
 

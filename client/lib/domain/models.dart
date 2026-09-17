@@ -358,6 +358,7 @@ class AppNotification {
     this.scheduleId,
     this.evaluationId,
     this.decision,
+    this.validUntil,
     this.readAt,
   });
 
@@ -365,6 +366,7 @@ class AppNotification {
   final String? scheduleId;
   final String? evaluationId;
   final String? decision;
+  final DateTime? validUntil;
   final String type;
   final String title;
   final String body;
@@ -380,6 +382,7 @@ class AppNotification {
         scheduleId: json['scheduleId']?.toString(),
         evaluationId: json['evaluationId']?.toString(),
         decision: json['decision']?.toString(),
+        validUntil: DateTime.tryParse(json['validUntil'] as String? ?? ''),
         type: json['type'] as String? ?? 'INFO',
         title: json['title'] as String? ?? '',
         body: json['body'] as String? ?? '',

@@ -36,15 +36,37 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
             catch(RuntimeException invalid) { until=asOf; }
         }
         if(e!=null && e.walking()!=null && e.walking().validUntil()!=null && e.walking().validUntil().isBefore(until)) until=e.walking().validUntil();
+        // P에서의 판단과 제안시각에서의 ETA가 사용한 증거를 함께 제한한다.
+        // 조회만 했거나 fallback으로 폐기한 예측은 만료 근거가 아니다. 구형 저장 JSON에
+        // 적용 표시만 있고 만료가 없으면 이번 시각에 만료시켜 60초로 임의 연장하지 않는다.
+        if(e!=null) for(var comparison:List.of(e.originalComparison(),e.proposedComparison())) {
+            for(var wait:comparison.waitPredictions()) if(wait.applied())
+                until=earlier(until,wait.validUntil()==null?asOf:wait.validUntil());
+            for(var subway:comparison.subwayPredictions()) if(subway.applied())
+                until=earlier(until,subway.estimate().validUntil()==null?asOf:subway.estimate().validUntil());
+        }
         if(nextAt!=null && nextAt.isBefore(until)) until=nextAt;
         return until;
     }
 
-    /** 평가의 실제 적용 근거에서 품질을 만든다. 도보 API 미확보는 성공으로 표시하지 않는다. */
+    private static Instant earlier(Instant left,Instant right) { return left.isBefore(right)?left:right; }
+
+    /** 읽기 전용 평가에는 사용자 선택 경로가 없으므로 기존 호출 계약을 유지한다. */
     public static ScheduleEvaluationV2 from(ConditionalDepartureEvaluator.Evaluation e, String id, Long schedule,
             Long revision, long eventRevision, String trigger, Instant userInput, Instant planned, Instant deadline,
             Instant now, Instant validUntil, Instant nextAt, Long selectedRouteId, Long proposedRouteId,
             List<String> missing,RouteEvidenceAssembler.Snapshot snapshot, List<com.ssafy.ddubi.domain.route.model.RouteCandidate> routes) {
+        return from(e,id,schedule,revision,eventRevision,trigger,userInput,planned,deadline,now,validUntil,nextAt,
+                selectedRouteId,proposedRouteId,missing,snapshot,routes,null);
+    }
+
+    /** 평가 근거에서 품질·원인을 만든다. selected는 DB ID가 아닌 실제 선택 후보의 평가 결과이며,
+     * 통제로 최선 후보에서 제외돼도 원인을 보존한다. 관련 없는 다른 후보의 사건은 포함하지 않는다. */
+    public static ScheduleEvaluationV2 from(ConditionalDepartureEvaluator.Evaluation e, String id, Long schedule,
+            Long revision, long eventRevision, String trigger, Instant userInput, Instant planned, Instant deadline,
+            Instant now, Instant validUntil, Instant nextAt, Long selectedRouteId, Long proposedRouteId,
+            List<String> missing,RouteEvidenceAssembler.Snapshot snapshot, List<com.ssafy.ddubi.domain.route.model.RouteCandidate> routes,
+            RouteTimelineEvaluator.Result selected) {
         var p=e.proposed();
         Instant eta=p==null?null:p.estimatedArrivalAt();
         var comparison=e.proposedComparison();
@@ -59,13 +81,15 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
         boolean access=eta!=null && legs.stream().anyMatch(l->l.legRole().equals("ACCESS_WALK")&&appliedWalk(l,p));
         boolean egress=eta!=null && legs.stream().anyMatch(l->l.legRole().equals("EGRESS_WALK")&&appliedWalk(l,p));
         String costCoverage=p==null || p.steps().stream().anyMatch(x->x.key().equals("provider-total"))?"UNKNOWN":
-                routes!=null && routes.stream().filter(r->("candidate-"+r.providerCandidateIndex()).equals(p.journeyKey()))
+                routes!=null && routes.stream().filter(r->RouteEvidenceAssembler.key(r).equals(p.journeyKey()))
                         .anyMatch(r->r.unassignedDurationSeconds()==0 && r.totalDurationSeconds()==r.segments().stream().mapToLong(com.ssafy.ddubi.domain.route.model.RouteSegment::durationSeconds).sum())?"COMPLETE":"PARTIAL";
         boolean realtime=p!=null && eta!=null && (comparison.waitPredictions().stream().anyMatch(w -> w.candidateKey().equals(p.journeyKey()) && w.applied() && w.eventId()!=null)
                 || comparison.subwayPredictions().stream().anyMatch(s -> s.candidateKey().equals(p.journeyKey()) && s.applied() && s.estimate().arrivalEventId()!=null));
         var causes=new ArrayList<Cause>();
         var checked=java.util.stream.Stream.concat(e.originalComparison().candidates().stream(),e.proposedComparison().candidates().stream()).map(MlRoutePreview.Candidate::result)
-                .filter(r->p==null || r.journeyKey().equals(p.journeyKey()) || e.original()!=null && r.journeyKey().equals(e.original().journeyKey())).toList();
+                .filter(r->p==null || r.journeyKey().equals(p.journeyKey())
+                        || e.original()!=null && r.journeyKey().equals(e.original().journeyKey())
+                        || selected!=null && r.journeyKey().equals(selected.journeyKey())).toList();
         var impacted=new HashSet<String>();
         checked.forEach(r->r.reasons().stream().filter(x->x.startsWith("CLOSURE:")).forEach(x->impacted.add(x.substring(8))));
         if(snapshot!=null) snapshot.states().forEach((segment,node)->{
@@ -134,9 +158,10 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
             Long seconds=total||step==null||step.exitedAt()==null?null:Duration.between(step.enteredAt(),step.exitedAt()).getSeconds();
             String source=total?"PROVIDER_TOTAL_FALLBACK":leg.durationSource();
             if(!total && step!=null && "ML_PREVIEW".equals(step.source())) source="ML_PREVIEW";
+            else if(!total && step!=null && "BUS_HISTORICAL_REFERENCE".equals(step.source())) source="BUS_HISTORICAL_REFERENCE";
             else if(!total && evaluation.proposedComparison().subwayPredictions().stream().anyMatch(s->s.applied()
                     && s.candidateKey().equals(leg.candidateKey()) && s.stepKey().equals("step-"+leg.sequence()))) source="TIMETABLE";
-            var original=routes==null?null:routes.stream().filter(r->("candidate-"+r.providerCandidateIndex()).equals(leg.candidateKey()))
+            var original=routes==null?null:routes.stream().filter(r->RouteEvidenceAssembler.key(r).equals(leg.candidateKey()))
                     .flatMap(r->r.segments().stream()).filter(s->s.sequence()==leg.sequence()).findFirst().orElse(null);
             output.add(new Segment(leg.candidateKey(),leg.sequence(),original==null?null:original.mode().name(),
                     original==null?null:original.fromName(),original==null?null:original.toName(),leg.legRole(),seconds,source,leg.endpointEvidence()));

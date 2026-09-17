@@ -11,6 +11,7 @@ Redis에 TTL과 함께 저장한다. Kafka 원문 보존은 Spark가 아니라 A
 | `streaming/weather_latest.py` | `city.raw` | `weather.observation` | Redis `weather:latest:{nx}:{ny}` + HDFS `silver/weather` |
 | `streaming/realtime_latest.py` | `transport.raw,city.raw` | 버스·지하철·도로·도시·S-DoT 9종 | `docs/contracts/redis-keys.yaml`의 소스별 latest 키 |
 | `streaming/topis_enriched.py` | `city.raw` | `topis.notice` | GMS/Kakao 정규화 → Redis JSON + 선택적 HDFS Parquet |
+| `streaming/traffic_incident_silver.py` | `city.raw` | `traffic.incident` | 링크·좌표 검증 → Redis JSON + 선택적 HDFS Parquet |
 
 서버 `.env`에 `SILVER_OUTPUT_URI`가 설정되어 있으면 Weather Silver가 Kafka의 새 관측을 자동 저장한다.
 Silver가 실패해도 Redis latest는 계속 갱신한다. Redis latest와 HDFS Silver는
@@ -35,10 +36,12 @@ sh submit.sh streaming/topis_enriched.py
 
 TOPIS AI 잡의 컬럼, 좌표·반경, 결측/오류 정책과 과거 아카이브 백필은
 [TOPIS 공지 AI 전처리 계약](../docs/contracts/topis-notice-enrichment.md)을 따른다.
+교통 돌발의 LINK_ID 우선순위, EPSG:5181 변환, 위치 충돌과 마스터 승인 조건은
+[Traffic Incident Silver 계약](../docs/contracts/traffic-incident-silver.md)을 따른다.
 
-현재 저장소의 Compose에는 날씨 잡만 등록돼 있다. 비기상 잡의 자동 기동에 필요한 인프라 변경은
-[배포 요청 문서](../docs/meetings/2026-09-04-realtime-latest-deployment-handoff.md)에 서비스 정의와
-검증 절차까지 정리했으며, 인프라 담당자가 적용하기 전에는 위 명령으로 수동 실행해야 한다.
+Compose의 TOPIS AI와 교통 돌발 잡은 각각 `topis-ai`, `road-silver` 프로필에서만 명시적으로 켠다.
+일반 비기상 잡의 배포 절차는
+[배포 요청 문서](../docs/meetings/2026-09-04-realtime-latest-deployment-handoff.md)를 따른다.
 
 공통 필수 환경변수는 `KAFKA_BOOTSTRAP_SERVERS`, `REDIS_HOST`, `SPARK_CHECKPOINT_DIR`이며,
 Redis 인증을 사용하면 `REDIS_PASSWORD`도 넣는다. 비기상 잡은 기본적으로 두 원본 토픽을 모두

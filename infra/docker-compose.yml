@@ -681,6 +681,49 @@ services:
       - spark-worker-1
       - spark-worker-2
 
+  # TOPIS 교통 돌발을 공식 링크 마스터와 좌표로 검증하는 Silver 잡.
+  # 승인된 링크 artifact가 아직 없으므로 기본 spark 배포와 분리한다.
+  spark-streaming-traffic-incident:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-traffic-incident
+    profiles: ["road-silver"]
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command: ["sh", "submit.sh", "streaming/traffic_incident_silver.py"]
+    ports:
+      - "${SPARK_TRAFFIC_INCIDENT_DRIVER_UI_PORT:-4044}:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      SPARK_EXECUTOR_MEMORY: ${TRAFFIC_INCIDENT_EXECUTOR_MEMORY:-768m}
+      SPARK_CORES_MAX: ${TRAFFIC_INCIDENT_CORES_MAX:-1}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TRAFFIC_INCIDENT_SILVER_OUTPUT_URI: ${TRAFFIC_INCIDENT_SILVER_OUTPUT_URI:-}
+      TRAFFIC_LINK_MASTER_PATH: ${TRAFFIC_LINK_MASTER_PATH:-}
+      TRAFFIC_LINK_MASTER_SHA256: ${TRAFFIC_LINK_MASTER_SHA256:-}
+      TRAFFIC_INCIDENT_STALE_SECONDS: ${TRAFFIC_INCIDENT_STALE_SECONDS:-2700}
+      TRAFFIC_LINK_COORD_TOLERANCE_METERS: ${TRAFFIC_LINK_COORD_TOLERANCE_METERS:-200}
+      TRAFFIC_NEARBY_MAX_METERS: ${TRAFFIC_NEARBY_MAX_METERS:-100}
+    volumes:
+      - ./spark/conf:/opt/spark/conf:ro
+      - ../backend/transit-master:/opt/ddubi/transit-master:ro
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+    depends_on:
+      - spark-master
+      - spark-worker-1
+      - spark-worker-2
+
   # 부하 실험용 스트리밍 인스턴스 (experiment 프로필). 운영 잡과 같은 코드를 환경변수만 바꿔 띄운다:
   #  - city.replay(재생 토픽)를 읽고 Redis 는 weather:replay:* 에만 써서 운영 키를 건드리지 않는다
   #  - 체크포인트도 별도(weather_replay), 진행률은 Spark UI 의 Input Rows 로 측정한다

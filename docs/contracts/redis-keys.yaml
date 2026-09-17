@@ -153,6 +153,16 @@ keys:
       TOPIS 사고·통제별 최신 요약. 15분 수집 주기의 세 배인 45분 보관하며
       validUntil 이후 현재 위험 판정에 쓰지 않는다. 원문은 HDFS에서 eventId로 추적한다.
 
+  trafficIncidentSilverLatest:
+    pattern: "traffic:latest:incident-silver:{providerIncidentId}"
+    type: string
+    ttlSeconds: 2700
+    owner: spark
+    description: >-
+      EPSG:5181 좌표 변환과 승인된 OA-13310 동일 ID 링크 마스터 검증을 거친 사건 단위 JSON.
+      2700초는 기본값이며 실제 TTL은 validUntil까지다. 만료·부재는 종료가 아니라 UNKNOWN이다.
+      LINK_ID/좌표 충돌은 matchedLinkId를 비우고 원본과 품질 상태를 보존한다.
+
   cityAreaLatest:
     pattern: "city:latest:area:{providerAreaId}"
     ttlSeconds: 64800

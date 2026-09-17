@@ -36,15 +36,37 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
             catch(RuntimeException invalid) { until=asOf; }
         }
         if(e!=null && e.walking()!=null && e.walking().validUntil()!=null && e.walking().validUntil().isBefore(until)) until=e.walking().validUntil();
+        // P에서의 판단과 제안시각에서의 ETA가 사용한 증거를 함께 제한한다.
+        // 조회만 했거나 fallback으로 폐기한 예측은 만료 근거가 아니다. 구형 저장 JSON에
+        // 적용 표시만 있고 만료가 없으면 이번 시각에 만료시켜 60초로 임의 연장하지 않는다.
+        if(e!=null) for(var comparison:List.of(e.originalComparison(),e.proposedComparison())) {
+            for(var wait:comparison.waitPredictions()) if(wait.applied())
+                until=earlier(until,wait.validUntil()==null?asOf:wait.validUntil());
+            for(var subway:comparison.subwayPredictions()) if(subway.applied())
+                until=earlier(until,subway.estimate().validUntil()==null?asOf:subway.estimate().validUntil());
+        }
         if(nextAt!=null && nextAt.isBefore(until)) until=nextAt;
         return until;
     }
 
-    /** 평가의 실제 적용 근거에서 품질을 만든다. 도보 API 미확보는 성공으로 표시하지 않는다. */
+    private static Instant earlier(Instant left,Instant right) { return left.isBefore(right)?left:right; }
+
+    /** 읽기 전용 평가에는 사용자 선택 경로가 없으므로 기존 호출 계약을 유지한다. */
     public static ScheduleEvaluationV2 from(ConditionalDepartureEvaluator.Evaluation e, String id, Long schedule,
             Long revision, long eventRevision, String trigger, Instant userInput, Instant planned, Instant deadline,
             Instant now, Instant validUntil, Instant nextAt, Long selectedRouteId, Long proposedRouteId,
             List<String> missing,RouteEvidenceAssembler.Snapshot snapshot, List<com.ssafy.ddubi.domain.route.model.RouteCandidate> routes) {
+        return from(e,id,schedule,revision,eventRevision,trigger,userInput,planned,deadline,now,validUntil,nextAt,
+                selectedRouteId,proposedRouteId,missing,snapshot,routes,null);
+    }
+
+    /** 평가 근거에서 품질·원인을 만든다. selected는 DB ID가 아닌 실제 선택 후보의 평가 결과이며,
+     * 통제로 최선 후보에서 제외돼도 원인을 보존한다. 관련 없는 다른 후보의 사건은 포함하지 않는다. */
+    public static ScheduleEvaluationV2 from(ConditionalDepartureEvaluator.Evaluation e, String id, Long schedule,
+            Long revision, long eventRevision, String trigger, Instant userInput, Instant planned, Instant deadline,
+            Instant now, Instant validUntil, Instant nextAt, Long selectedRouteId, Long proposedRouteId,
+            List<String> missing,RouteEvidenceAssembler.Snapshot snapshot, List<com.ssafy.ddubi.domain.route.model.RouteCandidate> routes,
+            RouteTimelineEvaluator.Result selected) {
         var p=e.proposed();
         Instant eta=p==null?null:p.estimatedArrivalAt();
         var comparison=e.proposedComparison();
@@ -65,7 +87,9 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
                 || comparison.subwayPredictions().stream().anyMatch(s -> s.candidateKey().equals(p.journeyKey()) && s.applied() && s.estimate().arrivalEventId()!=null));
         var causes=new ArrayList<Cause>();
         var checked=java.util.stream.Stream.concat(e.originalComparison().candidates().stream(),e.proposedComparison().candidates().stream()).map(MlRoutePreview.Candidate::result)
-                .filter(r->p==null || r.journeyKey().equals(p.journeyKey()) || e.original()!=null && r.journeyKey().equals(e.original().journeyKey())).toList();
+                .filter(r->p==null || r.journeyKey().equals(p.journeyKey())
+                        || e.original()!=null && r.journeyKey().equals(e.original().journeyKey())
+                        || selected!=null && r.journeyKey().equals(selected.journeyKey())).toList();
         var impacted=new HashSet<String>();
         checked.forEach(r->r.reasons().stream().filter(x->x.startsWith("CLOSURE:")).forEach(x->impacted.add(x.substring(8))));
         if(snapshot!=null) snapshot.states().forEach((segment,node)->{

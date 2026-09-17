@@ -35,11 +35,11 @@ public class BusWaitingService {
         private boolean unavailable;
     }
     public Session newSession() { return new Session(); }
-    /** null seconds는 관측 부족이다. 0초 대기와 구분하며 source/eventId/발생시각으로 원본을 추적한다. */
+    /** null seconds는 관측 부족이다. validUntil은 선택한 Redis 원천의 만료시각이며 최종 평가에도 전달한다. */
     public record Estimate(Long seconds, Instant boardingAt, String vehicleId, String source,
-                           String eventId, Instant observedAt, List<String> reasons) {
+                           String eventId, Instant observedAt, Instant validUntil, List<String> reasons) {
         public Estimate { reasons = List.copyOf(reasons); }
-        static Estimate missing(String reason) { return new Estimate(null,null,null,"UNAVAILABLE",null,null,List.of(reason)); }
+        static Estimate missing(String reason) { return new Estimate(null,null,null,"UNAVAILABLE",null,null,null,List.of(reason)); }
     }
 
     /**
@@ -111,12 +111,12 @@ public class BusWaitingService {
                 Instant boarding = at.plusSeconds(seconds.asInt());
                 if (boarding.isBefore(stationAt) || !boarding.isBefore(until)) { reasons.add(prefix+":BUS_WAIT_NOT_BOARDABLE"); continue; }
                 candidates.add(new Estimate(Duration.between(stationAt,boarding).getSeconds(),boarding,vehicle,
-                        "BUS_REALTIME_ARRIVAL",row.path("eventId").asText(),at,List.of()));
+                        "BUS_REALTIME_ARRIVAL",row.path("eventId").asText(),at,until,List.of()));
             }
             if (candidates.isEmpty()) reasons.add("BUS_WAIT_NO_BOARDABLE_VEHICLE");
-            if (candidates.isEmpty()) return new Estimate(null,null,null,"UNAVAILABLE",row.path("eventId").asText(),at,reasons);
+            if (candidates.isEmpty()) return new Estimate(null,null,null,"UNAVAILABLE",row.path("eventId").asText(),at,null,reasons);
             var selected = candidates.stream().min(Comparator.comparing(Estimate::boardingAt).thenComparing(Estimate::vehicleId)).orElseThrow();
-            return new Estimate(selected.seconds(),selected.boardingAt(),selected.vehicleId(),selected.source(),selected.eventId(),at,reasons);
+            return new Estimate(selected.seconds(),selected.boardingAt(),selected.vehicleId(),selected.source(),selected.eventId(),at,selected.validUntil(),reasons);
         } catch (RuntimeException invalid) { return Estimate.missing("BUS_WAIT_INVALID_PAYLOAD"); }
     }
     private boolean numeric(String value) { return value != null && value.matches("[0-9]{1,30}"); }

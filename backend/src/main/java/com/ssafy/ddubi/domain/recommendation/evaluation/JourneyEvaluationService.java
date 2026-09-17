@@ -141,7 +141,7 @@ public class JourneyEvaluationService {
                         waitReasons.add("BUS_WAIT_REQUIRED_NOT_APPLIED");
                     }
                     waitPredictions.add(new WaitPrediction(original.key(),leg.key(),TransportMode.BUS,station,wait.seconds(),
-                            wait.boardingAt(),wait.vehicleId(),wait.source(),wait.eventId(),wait.observedAt(),waitApplied,waitReasons));
+                            wait.boardingAt(),wait.vehicleId(),wait.source(),wait.eventId(),wait.observedAt(),wait.validUntil(),waitApplied,waitReasons));
                     reasons.addAll(waitReasons.stream().map(r -> leg.key()+":"+r).toList());
                 }
                 if (segment != null && segment.mode() == TransportMode.SUBWAY) {
@@ -156,7 +156,7 @@ public class JourneyEvaluationService {
                     var waitReasons = new ArrayList<>(timing.reasons());
                     if (reason != null) waitReasons.add(reason);
                     waitPredictions.add(new WaitPrediction(original.key(),leg.key(),TransportMode.SUBWAY,platform,timing.waitSeconds(),
-                            timing.boardingAt(),timing.tripKey(),timing.source(),timing.arrivalEventId(),timing.observedAt(),applied,waitReasons));
+                            timing.boardingAt(),timing.tripKey(),timing.source(),timing.arrivalEventId(),timing.observedAt(),timing.validUntil(),applied,waitReasons));
                     subwayPredictions.add(new SubwayPrediction(original.key(), leg.key(), platform, timing, applied, reason));
                     reasons.addAll(timing.reasons().stream().map(r -> leg.key() + ":" + r).toList());
                     if (applied) {

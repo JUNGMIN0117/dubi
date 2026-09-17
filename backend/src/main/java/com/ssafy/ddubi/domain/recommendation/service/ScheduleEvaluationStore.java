@@ -233,7 +233,7 @@ public class ScheduleEvaluationStore {
                 s.getUserInputDepartAt()==null?null:instant(s.getUserInputDepartAt()),outcome.plannedDepartAt(),outcome.arriveBy(),outcome.checkedAt(),
                 databaseTime(row.get("valid_until")).atZone(KST).toInstant(),databaseTime(row.get("next_check_at")).atZone(KST).toInstant(),
                 cache==null?null:cache.routeIds().get(outcome.selectedKey()),
-                cache==null||proposed==null?null:cache.routeIds().get(proposed.journeyKey()),outcome.evidence().reasons(),outcome.evidence(),cache==null?List.of():cache.search().candidates());
+                cache==null||proposed==null?null:cache.routeIds().get(proposed.journeyKey()),outcome.evidence().reasons(),outcome.evidence(),cache==null?List.of():cache.search().candidates(),outcome.selected());
     }
 
     /** 입력 수정과 출발/완료를 동시에 확인할 수 있도록 bounded 대상만 조회한다. 입력 없는 기존 일정은 건너뛴다. */

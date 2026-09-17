@@ -22,6 +22,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
     with WidgetsBindingObserver {
   ScheduleEvaluationV2? evaluation;
   String? error;
+  String? actionError;
   String? notice;
   bool busy = false;
   bool active = true;
@@ -125,11 +126,14 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
     timer?.cancel();
     setState(() {
       busy = true;
+      actionError = null;
       notice = null;
     });
     var stale = false;
+    var succeeded = false;
     try {
       await action();
+      succeeded = true;
     } on ScheduleEvaluationFailure catch (failure) {
       stale = failure.kind == EvaluationFailureKind.staleEvaluation;
       if (mounted) {
@@ -138,19 +142,21 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
             error = null;
             notice = '추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.';
           } else {
-            error = _failureMessage(failure);
+            actionError = _failureMessage(failure);
           }
         });
       }
     } on Object {
       if (mounted) {
-        setState(() => error = '요청을 처리하지 못했습니다. 다시 시도해 주세요.');
+        setState(
+          () => actionError = '요청을 처리하지 못했습니다. 다시 시도해 주세요.',
+        );
       }
     } finally {
       if (mounted) setState(() => busy = false);
     }
     if (!mounted) return;
-    if (!stale) setState(() => notice = '서버 처리 결과를 다시 확인했습니다.');
+    if (succeeded) setState(() => notice = '서버 처리 결과를 다시 확인했습니다.');
     await _load();
   }
 
@@ -186,6 +192,14 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
+          if (actionError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              actionError!,
+              key: const Key('evaluationActionError'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
           if (notice != null) ...[
             const SizedBox(height: 8),
             Text(notice!, key: const Key('evaluationNotice')),
@@ -205,6 +219,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
 
   Widget _actions(ScheduleEvaluationV2 value) {
     final canAccept = value.canAcceptAt(DateTime.now());
+    final evaluationId = value.evaluationId;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -212,12 +227,16 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
         if (value.proposedDepartAt != null)
           FilledButton(
             key: const Key('acceptEvaluationButton'),
-            onPressed: busy || !canAccept || value.evaluationId.isEmpty
+            onPressed:
+                busy ||
+                    !canAccept ||
+                    evaluationId == null ||
+                    evaluationId.isEmpty
                 ? null
                 : () => _action(
                     () => widget.repository.acceptEvaluation(
                       widget.scheduleId,
-                      value.evaluationId,
+                      evaluationId,
                     ),
                   ),
             child: const Text('이 제안 적용'),
@@ -277,7 +296,10 @@ class ScheduleEvaluationSummary extends StatelessWidget {
         if (evaluation.state == EvaluationState.ready) ...[
           const SizedBox(height: 6),
           Text(
-            _decisionMessage(evaluation.decision),
+            _decisionMessage(
+              evaluation.decision,
+              departureMissed: evaluation.departureMissed,
+            ),
             key: const Key('evaluationDecisionMessage'),
           ),
         ],
@@ -348,6 +370,11 @@ class ScheduleEvaluationSummary extends StatelessWidget {
     final description = cause.description?.trim();
     if (description != null && description.isNotEmpty) return description;
 
+    final effect = cause.effect?.toUpperCase();
+    if (cause.confirmed == true && effect == 'BLOCKED') {
+      return '이동 경로의 통제가 확인되었습니다.';
+    }
+
     final evidenceLevel = cause.evidenceLevel?.toUpperCase();
     if (evidenceLevel == 'FULL' || evidenceLevel == 'EXACT') {
       return '이동 영향 원인이 확인되었습니다.';
@@ -367,11 +394,14 @@ class ScheduleEvaluationSummary extends StatelessWidget {
   };
 
   static String _decisionMessage(
-    DepartureDecision decision,
-  ) => switch (decision) {
+    DepartureDecision decision, {
+    bool departureMissed = false,
+  }) => switch (decision) {
     DepartureDecision.keepDeparture => '현재 출발 계획을 유지해도 일정 전에 도착할 것으로 예상됩니다.',
     DepartureDecision.advanceDeparture => '제안 시각에 출발하면 일정 10분 전 도착이 예상됩니다.',
-    DepartureDecision.departNow => '계획한 출발시각이 지났습니다. 현재 가능한 경로를 확인하세요.',
+    DepartureDecision.departNow => departureMissed
+        ? '계획한 출발시각이 지났습니다. 현재 가능한 경로를 확인하세요.'
+        : '일정에 맞추려면 지금 출발해야 합니다.',
     DepartureDecision.marginUnavailable => '10분 여유 확보는 어렵지만 일정 전 도착 가능한 경로입니다.',
     DepartureDecision.lateExpected => '현재 확인 가능한 경로로는 일정 시작 이후 도착이 예상됩니다.',
     DepartureDecision.dataInsufficient => '최신 도착 예측에 필요한 정보가 부족합니다.',

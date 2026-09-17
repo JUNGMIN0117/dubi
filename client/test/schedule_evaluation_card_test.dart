@@ -18,10 +18,15 @@ Widget _summary(ScheduleEvaluationV2 evaluation) => MaterialApp(
 );
 
 class _FakeEvaluationRepository implements ScheduleEvaluationRepository {
-  _FakeEvaluationRepository(this.responses, {this.acceptFailure});
+  _FakeEvaluationRepository(
+    this.responses, {
+    this.acceptFailure,
+    this.refreshFailure,
+  });
 
   final List<ScheduleEvaluationV2> responses;
   final ScheduleEvaluationFailure? acceptFailure;
+  final ScheduleEvaluationFailure? refreshFailure;
   var latestCalls = 0;
   var acceptCalls = 0;
 
@@ -42,7 +47,9 @@ class _FakeEvaluationRepository implements ScheduleEvaluationRepository {
   Future<void> confirmDeparture(String id) async {}
 
   @override
-  Future<void> refreshEvaluation(String id) async {}
+  Future<void> refreshEvaluation(String id) async {
+    if (refreshFailure != null) throw refreshFailure!;
+  }
 }
 
 class _FailOnceEvaluationRepository implements ScheduleEvaluationRepository {
@@ -213,7 +220,7 @@ void main() {
         home: Scaffold(
           body: ScheduleEvaluationCard(
             repository: repository,
-            scheduleId: preview.scheduleId,
+            scheduleId: preview.scheduleId!,
           ),
         ),
       ),
@@ -258,6 +265,70 @@ void main() {
     expect(find.text('추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.'), findsOneWidget);
     expect(find.textContaining('제안 시각에 출발하면'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('사용자 동작 실패는 후속 조회가 성공해도 오류로 유지한다', (tester) async {
+    final repository = _FakeEvaluationRepository(
+      [fixtures['keep']!],
+      refreshFailure: const ScheduleEvaluationFailure(
+        kind: EvaluationFailureKind.network,
+        message: '다시 계산 요청이 실패했습니다.',
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEvaluationCard(
+            repository: repository,
+            scheduleId: 'schedule-1',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다시 계산'));
+    await tester.pumpAndSettle();
+
+    expect(repository.latestCalls, 2);
+    expect(find.byKey(const Key('evaluationActionError')), findsOneWidget);
+    expect(find.text('다시 계산 요청이 실패했습니다.'), findsOneWidget);
+    expect(find.text('서버 처리 결과를 다시 확인했습니다.'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('확인된 BLOCKED 통제는 가능성이 아니라 확정 원인으로 표시한다', (tester) async {
+    final evaluation = ScheduleEvaluationV2.fromJson({
+      'schemaVersion': 'schedule-evaluation-v2',
+      'state': 'READY',
+      'decision': 'ROUTE_UNAVAILABLE',
+      'causes': [
+        {'effect': 'BLOCKED', 'confirmed': true},
+      ],
+    });
+
+    await tester.pumpWidget(_summary(evaluation));
+
+    expect(find.text('이동 경로의 통제가 확인되었습니다.'), findsOneWidget);
+    expect(find.text('이동 구간에 영향 가능성이 있습니다.'), findsNothing);
+  });
+
+  testWidgets('DEPART_NOW는 출발시각 경과 여부에 따라 안내를 구분한다', (tester) async {
+    ScheduleEvaluationV2 evaluation(bool departureMissed) =>
+        ScheduleEvaluationV2.fromJson({
+          'schemaVersion': 'schedule-evaluation-v2',
+          'state': 'READY',
+          'decision': 'DEPART_NOW',
+          'departureMissed': departureMissed,
+        });
+
+    await tester.pumpWidget(_summary(evaluation(false)));
+    expect(find.text('일정에 맞추려면 지금 출발해야 합니다.'), findsOneWidget);
+    expect(find.textContaining('계획한 출발시각이 지났습니다.'), findsNothing);
+
+    await tester.pumpWidget(_summary(evaluation(true)));
+    expect(find.textContaining('계획한 출발시각이 지났습니다.'), findsOneWidget);
+    expect(find.text('일정에 맞추려면 지금 출발해야 합니다.'), findsNothing);
   });
 
   testWidgets('네트워크 실패 후 첫 재조회는 30초 backoff를 적용한다', (tester) async {

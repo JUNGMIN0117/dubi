@@ -334,8 +334,8 @@ class ScheduleEvaluationV2 {
   });
 
   final String schemaVersion;
-  final String evaluationId;
-  final String scheduleId;
+  final String? evaluationId;
+  final String? scheduleId;
   final int? inputVersion;
   final int? eventRevision;
   final EvaluationState state;
@@ -398,8 +398,8 @@ class ScheduleEvaluationV2 {
     final versions = _map(json['versions']);
     return ScheduleEvaluationV2(
       schemaVersion: 'schedule-evaluation-v2',
-      evaluationId: _requiredString(json, 'evaluationId'),
-      scheduleId: _requiredString(json, 'scheduleId'),
+      evaluationId: json['evaluationId']?.toString(),
+      scheduleId: json['scheduleId']?.toString(),
       inputVersion: (json['inputVersion'] as num?)?.toInt(),
       eventRevision: (json['eventRevision'] as num?)?.toInt(),
       state: EvaluationState.fromRaw(stateRaw),

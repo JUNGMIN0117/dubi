@@ -1,6 +1,7 @@
 package com.ssafy.ddubi.domain.route.service;
 
 import com.ssafy.ddubi.domain.route.mapping.*;
+import com.ssafy.ddubi.domain.recommendation.evaluation.BusHistoricalReferenceService;
 import com.ssafy.ddubi.domain.recommendation.evaluation.SubwayTimetable;
 import java.time.Instant;
 import java.util.*;
@@ -22,15 +23,17 @@ public class TransitDataStatusService {
     private final boolean busDecompositionVerified;
     private final PublicBusReferenceService busReferences;
     private final TransitReferencePackageService referencePackages;
+    private final BusHistoricalReferenceService historical;
     public TransitDataStatusService(MetropolitanBusCatalog bus, SeoulTransitMasterDataProvider subway,
             SubwayTimetable timetable,
             @Value("${ddubi.recommendation.ml-preview-base-url:}") String mlUrl,
             @Value("${ddubi.subway-timing.decomposition-verified:false}") boolean subwayVerified,
             @Value("${ddubi.bus-waiting.decomposition-verified:false}") boolean busVerified,
-            PublicBusReferenceService busReferences,TransitReferencePackageService referencePackages) {
+            PublicBusReferenceService busReferences,TransitReferencePackageService referencePackages,
+            BusHistoricalReferenceService historical) {
         this.bus=bus;this.subway=subway;this.timetable=timetable;this.mlConfigured=mlUrl!=null&&!mlUrl.isBlank();
         this.subwayDecompositionVerified=subwayVerified;this.busDecompositionVerified=busVerified;
-        this.busReferences=busReferences;this.referencePackages=referencePackages;
+        this.busReferences=busReferences;this.referencePackages=referencePackages;this.historical=historical;
     }
     /** 각 준비 단계와 지원 범위를 독립 반환한다. ML 주소 설정을 서버 연결 성공/운영 승인으로 표시하지 않는다. */
     public Map<String,Object> status(Instant now) {
@@ -67,6 +70,8 @@ public class TransitDataStatusService {
         result.put("busMl",Map.of("status",mlConfigured?"CONFIGURED_NOT_PROBED":"ML_NOT_CONFIGURED",
                 "supportedNamespaces",List.of("SEOUL_BUS"),"productionReady",false,"waitingDecompositionVerified",busDecompositionVerified));
         result.put("busReference",busReferences.status());
+        // 설정 활성화, gate 통과, 실제 적용은 서로 다른 상태다. 여기서는 설정과 마지막 gate 결과만 보여 준다.
+        result.put("busHistoricalFallback",historical.gateStatus());
         result.put("subwayReference",referencePackages.status("subway"));
         result.put("roadReference",referencePackages.status("road"));
         return result;

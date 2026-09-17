@@ -48,3 +48,9 @@
 - 같은 step에 MIN_SAMPLE_COUNT, MIN_OBSERVED_DATES, OLDEST_OBSERVATION_END, NEWEST_OBSERVATION_END, ENTRY_UNCERTAINTY_SECONDS를 함께 기록한다. 표본 수는 구간별 최소값이며 서로 다른 구간의 표본을 합산하지 않는다.
 - 실패 이유는 `HISTORICAL_REFERENCE_` 접두어의 DATASET_INCOMPLETE, MASTER_VERSION_MISMATCH, ENTRY_HOUR_UNCERTAIN, SAMPLES_OR_FRESHNESS_INSUFFICIENT 등이며 API fallback을 유지한다.
 - 자료 적용이 productionReady나 ML 적용 수를 올리지 않는다. 유효한 실시간 WAIT를 별도로 실제 적용한 경우에만 기존 실시간 표시가 생길 수 있다.
+
+## gate 관측 (2026-09-17 추가)
+- 설정 활성화, gate 통과, 실제 적용은 서로 다른 상태다. gate는 기동 시 `warmGate`와 첫 평가에서만 전체 COUNT를 실행하고 결과를 프로세스 수명 동안 보존한다.
+- `BusHistoricalReferenceService.gateStatus()`는 설정(enabled, dataVersion, expectedRows/Chunks, 정책)과 마지막 gate 결과만 반환한다. `gateState`는 NOT_EVALUATED/PASSED/FAILED, `gateReason`은 TOTALS_MISMATCH, VERSION_MISMATCH, `STATUS_UNAVAILABLE:<예외 클래스명>`이며 `observedRows/observedChunks`, `gateCheckedAt`, `policyValid`를 함께 준다. 비밀값·경로·예외 메시지는 담지 않는다. 이 조회는 COUNT를 다시 실행하지 않는다.
+- 노출 경로: 인증 사용자용 `GET /api/v1/routes/data-status`의 `busHistoricalFallback`, 내부 키용 `GET /internal/bus-references/{version}/gate`(`requestedVersion`, `matchesConfiguredVersion` 포함). 기동 로그에는 `버스 과거 평균 gate 통과/불일치/확인 실패` 한 줄이 남는다.
+- gate PASSED는 적재 수량이 설정과 같다는 뜻이며 어떤 경로에 실제 적용됐다는 뜻이 아니다. 실제 적용은 평가 결과의 `BUS_HISTORICAL_REFERENCE` source와 `HISTORICAL_REFERENCE_*` 사유로만 확인한다.

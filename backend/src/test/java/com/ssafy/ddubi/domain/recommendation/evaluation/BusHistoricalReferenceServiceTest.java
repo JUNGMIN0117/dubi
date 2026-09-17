@@ -43,6 +43,25 @@ class BusHistoricalReferenceServiceTest {
         var disabled=new BusHistoricalReferenceService(store,publicReferences,masters,catalog,new BusHistoricalReferenceService.Policy(false,"v1",1000,1,90,3,3,7,"HOURLY_SOURCE_MEAN"));
         assertEquals("HISTORICAL_REFERENCE_DISABLED",estimate(disabled,now,1,0).reason());
     }
+    @Test void gateStatusExposesResultAndReasonWithoutSecrets() {
+        var s=service();assertEquals("NOT_EVALUATED",s.gateStatus().get("gateState"));assertNull(s.gateStatus().get("gateCheckedAt"));
+        s.warmGate();var passed=s.gateStatus();
+        assertEquals("PASSED",passed.get("gateState"));assertNull(passed.get("gateReason"));assertNotNull(passed.get("gateCheckedAt"));
+        assertEquals(1000L,passed.get("observedRows"));assertEquals(1L,passed.get("observedChunks"));
+        assertEquals("v1",passed.get("dataVersion"));assertEquals(true,passed.get("policyValid"));assertEquals(false,passed.get("productionReady"));
+        when(store.status("v1")).thenReturn(Map.of("dataVersion","v1","totalRows",999L,"totalChunks",1L));
+        var mismatch=new BusHistoricalReferenceService(store,publicReferences,masters,catalog,policy);
+        assertEquals("HISTORICAL_REFERENCE_DATASET_INCOMPLETE",estimate(mismatch,now,1,0).reason());
+        assertEquals("FAILED",mismatch.gateStatus().get("gateState"));assertEquals("TOTALS_MISMATCH",mismatch.gateStatus().get("gateReason"));
+        assertEquals(999L,mismatch.gateStatus().get("observedRows"));
+        when(store.status("v1")).thenThrow(new IllegalStateException("jdbc://secret-host/ddubi"));
+        var broken=new BusHistoricalReferenceService(store,publicReferences,masters,catalog,policy);
+        assertEquals("HISTORICAL_REFERENCE_DATASET_INCOMPLETE",estimate(broken,now,1,0).reason());
+        assertEquals("STATUS_UNAVAILABLE:IllegalStateException",broken.gateStatus().get("gateReason"));
+        assertFalse(broken.gateStatus().toString().contains("secret-host"));
+        var invalid=new BusHistoricalReferenceService(store,publicReferences,masters,catalog,new BusHistoricalReferenceService.Policy(true,"v1",0,0,90,3,3,7,"HOURLY_SOURCE_MEAN"));
+        assertEquals(false,invalid.gateStatus().get("policyValid"));assertEquals("HISTORICAL_REFERENCE_POLICY_INVALID",estimate(invalid,now,1,0).reason());
+    }
     @Test void staleSparseWrongKindAndFutureObservedRowsAreNotUsed() {
         var s=service();
         for(var rowCase:List.of("stale","sparse","kind","future")) {

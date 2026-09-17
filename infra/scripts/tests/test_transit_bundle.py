@@ -37,6 +37,7 @@ class BundleTests(unittest.TestCase):
 
     def test_part_provenance_formats(self):
         for manifest in [dict(inputs={'raw':'a'*64},codeSha256='b'*64),
+                         dict(inputs={'raw':'a'*64},codeSha256={'build.py':'b'*64}),
                          dict(inputs={'sha256':{'raw':'a'*64,'build.py':'b'*64},'radius':300}),
                          dict(inputs={'raw':'a'*64,'build.py':'b'*64})]:
             self.assertEqual(bundle.provenance_failures(manifest),[])

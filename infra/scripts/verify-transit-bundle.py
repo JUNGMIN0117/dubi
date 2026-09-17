@@ -30,7 +30,10 @@ def provenance_failures(manifest):
     if not isinstance(hashes, dict) or not hashes or not all(valid_digest(v) for v in hashes.values()):
         return ['INPUT_HASHES_INVALID']
     # 코드 해시는 별도 필드 또는 입력 파일 목록의 Python 스크립트에 기록된다.
-    if not valid_digest(manifest.get('codeSha256')) and not any(str(k).endswith('.py') for k in hashes):
+    code = manifest.get('codeSha256')
+    code_map_valid = isinstance(code, dict) and bool(code) and all(
+        isinstance(k, str) and k.endswith('.py') and valid_digest(v) for k, v in code.items())
+    if not valid_digest(code) and not code_map_valid and not any(str(k).endswith('.py') for k in hashes):
         return ['CODE_PROVENANCE_MISSING']
     return []
 

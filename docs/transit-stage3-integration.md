@@ -29,5 +29,6 @@ workbench `data_staging/recommendation-20260917` 아래 원본 traversal과 기�
 - V11에 별도 bus_reference_chunk/row 테이블, 내부 청크 저장·정확키 조회 API 구현. 기존 기준선 및 V1~V10 변경 없음. 운영 활성화/자동 추천 적용 없음.
 - 변환 도구는 실제 stage3 SQLite에서 시간대 평균을 보존한 1000행 청크를 생성한다. pilot complete=false이며 전체 내보내기 완료가 아니다.
 - Python33개, BE참고자료6개(실제1000행 DTO 검증 포함), 기존 workflow/preview12개 통과.
-- 실제 MySQL 통합2개는 Docker 엔진 연결 실패로 실행 전 오류. Docker Desktop 시작을 시도했으나 엔진 파이프가 생성되지 않음. DB 검증 통과로 간주하지 않는다.
+- Docker 기동 장애 복구 후 실제 MySQL8/Redis7 격리 테스트에서 V1~V11 적용 및 신규 참고자료3개/기존 내부인증5개 총8개 통과(실패·오류·스킵0). 새 테이블 테스트 정리 목록과 테스트 API 키 설정 누락을 보완했다.
+- Docker 장애 원인은 run/dockerInference와 docker-secrets-engine/engine.sock의 접근 불가 임시 소켓이었다. 데이터·이미지·볼륨 삭제 없이 부모 런타임 폴더를 백업 이름으로 보존하고 기동 복구. Docker29.6.1 엔진 응답 확인. 운영 서버 사용 없음.
 - 계약/한계는 docs/contracts/bus-reference-staging.md. FE 공개, 전체 내보내기/서버적재, 지하철·도로 연결은 남아 있다.

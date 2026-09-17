@@ -12,9 +12,27 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @AutoConfigureMockMvc
+@org.springframework.test.context.TestPropertySource(properties="ddubi.internal.api-key=test-internal-key")
 class BusReferenceIntegrationTest extends IntegrationTestSupport {
     @Autowired BusReferenceService service;
     @Autowired MockMvc mvc;
+    @Autowired com.fasterxml.jackson.databind.ObjectMapper json;
+    @Test void authenticatedUploadAndLookup() throws Exception {
+        var request=new BusReferenceService.Upload(List.of(BusReferenceServiceTest.row(60,2,"HOURLY_SOURCE_MEAN")));
+        mvc.perform(post("/internal/bus-references/http-v1/chunks/0")
+                .header("X-DDUBI-API-KEY","test-internal-key")
+                .contentType("application/json").content(json.writeValueAsBytes(request)))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.receivedRows").value(1))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.productionReady").value(false));
+        var query=new BusReferenceService.Query("master-v1","SEOUL_BUS","r","a","b",1,2,2,8);
+        mvc.perform(post("/internal/bus-references/http-v1/lookup")
+                .header("X-DDUBI-API-KEY","test-internal-key")
+                .contentType("application/json").content(json.writeValueAsBytes(query)))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.rows[0].meanSeconds").value(60))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.realtimeApplied").value(false));
+    }
     @Test void immutableRetryAndExactLookup() {
         var request=new BusReferenceService.Upload(List.of(BusReferenceServiceTest.row(60,2,"HOURLY_SOURCE_MEAN")));
         assertEquals(false,service.upload("test-v1",0,request).get("reused"));

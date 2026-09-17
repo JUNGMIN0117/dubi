@@ -56,7 +56,7 @@ class _NotificationEvaluationRepository
   Future<void> refreshEvaluation(String id) async {}
 }
 
-AppNotification _notification(String evaluationId) => AppNotification(
+AppNotification _notification(String? evaluationId) => AppNotification(
   id: 'notification-1',
   scheduleId: 'schedule-1',
   evaluationId: evaluationId,

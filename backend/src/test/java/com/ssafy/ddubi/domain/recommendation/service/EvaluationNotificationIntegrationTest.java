@@ -266,4 +266,33 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
         assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox WHERE schedule_id=?",String.class,scheduleId)).isEqualTo("CANCELED");
         assertThat(sent()).isEmpty();
     }
+    /** 같은 dedup의 outbox를 새 평가로 교체할 때 DB 알림 이력과 실제 푸시도 같은 본문이어야 한다. */
+    @Test void replacementAfterPushFailureUpdatesExistingNotificationBody() {
+        schedule(600);
+        workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        when(pushSender.send(any())).thenReturn(PushResult.failed("TEMPORARY"));
+        dispatch();
+        long notificationId=sent().get(0).getId();
+        String oldBody=sent().get(0).getBody();
+        String dedup=outboxKey();
+        // 계획 출발이 지나 현재시각 기준으로 재평가하면 ETA도 2분 늦어지지만 알림 의미/키는 같다.
+        var latest=workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(420));
+        assertThat(outboxKey()).isEqualTo(dedup);
+        var command=store.read(outboxJson(),com.ssafy.ddubi.domain.notification.service.NotificationCommand.class);
+        assertThat(command.body()).isNotEqualTo(oldBody);
+        when(pushSender.send(any())).thenAnswer(call->{
+            var message=call.getArgument(0,com.ssafy.ddubi.global.push.PushMessage.class);
+            assertThat(message.body()).isEqualTo(command.body());
+            assertThat(message.data()).containsEntry("notificationId",Long.toString(notificationId))
+                    .containsEntry("evaluationId",latest.evaluationId());
+            return PushResult.ok();
+        });
+        jdbc.update("UPDATE evaluation_notification_outbox SET next_attempt_at=?",ScheduleEvaluationStore.ts(now.minusSeconds(1)));
+        dispatch();
+        assertThat(sent()).singleElement().satisfies(n->{
+            assertThat(n.getId()).isEqualTo(notificationId);
+            assertThat(n.getBody()).isEqualTo(command.body());
+            assertThat(n.getStatus()).isEqualTo(NotificationStatus.SENT);
+        });
+    }
 }

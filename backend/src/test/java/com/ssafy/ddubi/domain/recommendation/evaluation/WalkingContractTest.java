@@ -80,4 +80,28 @@ class WalkingContractTest {
         });
         write("confirmed-cause",dto);
     }
+    /** 대안 B가 정상이어도 사용자가 선택한 A의 차단 원인을 잃지 않고 무관한 C의 사건은 제외한다. */
+    @Test void alternativeRouteRetainsSelectedClosureButExcludesUnrelatedCandidate() throws Exception {
+        Instant now=fixture.now,p=now.plusSeconds(60),d=now.plusSeconds(3600);
+        var selected=new RouteTimelineEvaluator.Result("candidate-0",p,null,RouteTimelineEvaluator.Assessment.BLOCKED,
+                true,List.of(),List.of("CLOSURE:selected-event"),"fixture");
+        var unrelated=new RouteTimelineEvaluator.Result("candidate-2",p,null,RouteTimelineEvaluator.Assessment.BLOCKED,
+                true,List.of(),List.of("CLOSURE:other-event"),"fixture");
+        var alternative=new RouteTimelineEvaluator.Result("candidate-1",p,p.plusSeconds(600),RouteTimelineEvaluator.Assessment.ON_TIME_ESTIMATE,
+                true,List.of(),List.of(),"fixture");
+        var comparison=new MlRoutePreview.Comparison("PREVIEW",false,alternative,List.of(selected,alternative,unrelated).stream()
+                .map(r->new MlRoutePreview.Candidate(r,"API_ONLY",0,1,0,0)).toList(),List.of(),false,List.of(),List.of());
+        var evaluation=new ConditionalDepartureEvaluator(null,null,256,60,5000).evaluate(3,now,p,d,List.of(),at->comparison);
+        var snapshot=new RouteEvidenceAssembler.Snapshot(Map.of(
+                "selected-segment",json.readTree("{\"eventId\":\"selected-event\",\"source\":\"OFFICIAL\"}"),
+                "other-segment",json.readTree("{\"eventId\":\"other-event\",\"source\":\"OFFICIAL\"}")),List.of());
+        var dto=ScheduleEvaluationV2.from(evaluation,"fixture",1L,1L,0,"REFRESH",p,p,d,now,now.plusSeconds(60),null,
+                10L,11L,List.of(),snapshot,List.of(),selected);
+        assertThat(dto.proposedRouteId()).isEqualTo(11L);
+        assertThat(dto.causes()).singleElement().satisfies(c->{
+            assertThat(c.eventId()).isEqualTo("selected-event");
+            assertThat(c.confirmed()).isTrue();
+            assertThat(c.segmentIds()).containsExactly("selected-segment");
+        });
+    }
 }

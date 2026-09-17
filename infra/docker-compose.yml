@@ -638,6 +638,49 @@ services:
       - spark-worker-1
       - spark-worker-2
 
+  # TOPIS 공지를 GMS로 구조화하고 Kakao 좌표를 붙이는 별도 잡.
+  # 새 외부 API 기능은 기본 배포에서 분리하고 `--profile topis-ai`로 명시적으로 켠다.
+  spark-streaming-topis:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-topis
+    profiles: ["topis-ai"]
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command: ["sh", "submit.sh", "streaming/topis_enriched.py"]
+    ports:
+      - "${SPARK_TOPIS_DRIVER_UI_PORT:-4043}:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      SPARK_EXECUTOR_MEMORY: ${TOPIS_EXECUTOR_MEMORY:-768m}
+      SPARK_CORES_MAX: ${TOPIS_CORES_MAX:-1}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      GMS_API_KEY: ${GMS_API_KEY:-}
+      GMS_BASE_URL: ${GMS_BASE_URL:-https://gms.ssafy.io/gmsapi/}
+      GMS_MODEL: ${GMS_MODEL:-gpt-4o-mini}
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      TOPIS_AI_TIMEOUT_SECONDS: ${TOPIS_AI_TIMEOUT_SECONDS:-30}
+      # 비어 있으면 Redis만 실행한다. HDFS 실패도 Redis 스트림을 중단하지 않는다.
+      TOPIS_SILVER_OUTPUT_URI: ${TOPIS_SILVER_OUTPUT_URI:-}
+    volumes:
+      - ./spark/conf:/opt/spark/conf:ro
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+    depends_on:
+      - spark-master
+      - spark-worker-1
+      - spark-worker-2
+
   # 부하 실험용 스트리밍 인스턴스 (experiment 프로필). 운영 잡과 같은 코드를 환경변수만 바꿔 띄운다:
   #  - city.replay(재생 토픽)를 읽고 Redis 는 weather:replay:* 에만 써서 운영 키를 건드리지 않는다
   #  - 체크포인트도 별도(weather_replay), 진행률은 Spark UI 의 Input Rows 로 측정한다

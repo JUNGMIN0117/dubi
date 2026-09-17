@@ -19,12 +19,22 @@ POINT = T.StructType([
     T.StructField("order", T.IntegerType()), T.StructField("placeText", T.StringType()), T.StructField("role", T.StringType()),
     T.StructField("geocodeQuery", T.StringType()), T.StructField("matchedPlaceName", T.StringType()), T.StructField("kakaoPlaceId", T.StringType()),
     T.StructField("latitude", T.DoubleType()), T.StructField("longitude", T.DoubleType()), T.StructField("geocodeStatus", T.StringType()),
-    T.StructField("geocodeCandidateCount", T.IntegerType()), T.StructField("usableForBusMapping", T.BooleanType())])
+    T.StructField("geocodeCandidateCount", T.IntegerType()), T.StructField("usableForBusMapping", T.BooleanType()),
+    T.StructField("geocodeMatchBasis", T.StringType()), T.StructField("radiusMeters", T.IntegerType()),
+    T.StructField("radiusBasis", T.StringType())])
+LEG = T.StructType([
+    T.StructField("legOrder", T.IntegerType()), T.StructField("fromOrder", T.IntegerType()), T.StructField("toOrder", T.IntegerType()),
+    T.StructField("fromPlaceText", T.StringType()), T.StructField("toPlaceText", T.StringType()),
+    T.StructField("fromLatitude", T.DoubleType()), T.StructField("fromLongitude", T.DoubleType()),
+    T.StructField("toLatitude", T.DoubleType()), T.StructField("toLongitude", T.DoubleType()),
+    T.StructField("mappingStatus", T.StringType())])
 SCHEMA = T.StructType([
-    T.StructField(name, T.StringType()) for name in ("silverVersion","noticeId","sourceEventId","source","title","contentText","categoryName","createdAtText","updatedAtText","collectedAt","noticeContentHash","extractionModel","promptVersion","eventId","eventType","impactType","eventStatus","startAt","endAt","yearBasis","evidenceText","processingStatus")
-] + [T.StructField("yearInferred", T.BooleanType())] + [
+    T.StructField(name, T.StringType()) for name in ("silverVersion","noticeId","sourceEventId","source","title","contentText","categoryName","createdAtText","updatedAtText","collectedAt","noticeContentHash","extractionModel","promptVersion","eventId","eventType","impactType","eventStatus","startAt","endAt","validUntil","yearBasis","evidenceText","processingStatus")
+] + [T.StructField("yearInferred", T.BooleanType()), T.StructField("durationMinutes", T.IntegerType()),
+     T.StructField("routePointCount", T.IntegerType()), T.StructField("mappedRoutePointCount", T.IntegerType()),
+     T.StructField("routeMappingReady", T.BooleanType())] + [
     T.StructField(name, T.ArrayType(T.StringType())) for name in ("roadNames","affectedBusRoutes","affectedBusStops","rejectionReasons","qualityFlags","missingFields")
-] + [T.StructField("routePoints", T.ArrayType(POINT))])
+] + [T.StructField("routePoints", T.ArrayType(POINT)), T.StructField("routeLegs", T.ArrayType(LEG))])
 
 
 def silver_uri(env):
@@ -59,11 +69,15 @@ def enrich_batch(batch, gms, geocoder):
 
 
 def redis_rows(df):
-    eligible = df.filter(F.col("processingStatus").isin("VALID", "PARTIAL") & F.col("eventId").isNotNull())
+    valid_until = F.to_timestamp("validUntil")
+    eligible = df.filter(F.col("processingStatus").isin("VALID", "PARTIAL") &
+                         (F.col("eventStatus") != "ENDED") & F.col("eventId").isNotNull() &
+                         (valid_until > F.current_timestamp()))
     collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     return eligible.select(F.concat(F.lit("traffic:latest:topis-event:"), "eventId").alias("redisKey"),
         F.to_json(F.struct(*[F.col(x) for x in df.columns]), {"ignoreNullFields":"false"}).alias("redisValue"),
-        F.lit(2592000).alias("ttlSeconds"), collected.alias("occurredAtOrder"), collected.alias("collectedAtOrder"))
+        F.least(F.lit(2592000), F.greatest(F.lit(60), valid_until.cast("long") - F.current_timestamp().cast("long"))).cast("int").alias("ttlSeconds"),
+        collected.alias("occurredAtOrder"), collected.alias("collectedAtOrder"))
 
 
 def main():

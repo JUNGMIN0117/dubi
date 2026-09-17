@@ -73,6 +73,47 @@ def exact_edge(index, namespace, route_id, prefix, start, end):
     return found[0]
 
 
+def connected_path(samples, from_vertex, to_vertex):
+    """Conservative dynamic programming over sampled, directed candidates; never runtime approval."""
+    if not samples or set(range(from_vertex,to_vertex))-set(r['shapeEdge'] for r in samples):
+        return dict(state='SHAPE_SAMPLE_COVERAGE_GAP',path=[])
+    states=[]
+    for sample in samples:
+        candidates=sample['permittedCandidates']
+        if not candidates:return dict(state='ROAD_CANDIDATE_GAP',path=[])
+        next_states=[]
+        for current in candidates:
+            if not all(k in current for k in ('directedStart','directedEnd','alongLinkMetres')):
+                return dict(state='DIRECTIONAL_GEOMETRY_NOT_AVAILABLE',path=[])
+            token=(current['linkId'],current['orientation'])
+            paths=[]
+            if not states:
+                paths=[(token,)]
+            for previous,previous_paths in states:
+                old=(previous['linkId'],previous['orientation'])
+                if token==old:
+                    allowed=current['alongLinkMetres']+5>=previous['alongLinkMetres']
+                else:
+                    a,b=previous['directionEvidence'],current['directionEvidence']
+                    node=a.get('sourceNodeTo')
+                    allowed=bool(node and node!='0' and node==b.get('sourceNodeFrom') and math.dist(previous['directedEnd'],current['directedStart'])<=5)
+                if allowed:
+                    for path in previous_paths:
+                        extended=path if token==old else path+(token,)
+                        if extended not in paths:paths.append(extended)
+                        if len(paths)>=2:break
+                if len(paths)>=2:break
+            if paths:next_states.append((current,paths))
+        if not next_states:return dict(state='DIRECTIONAL_PATH_DISCONNECTED',path=[])
+        states=next_states
+    paths=[]
+    for _,possible in states:
+        for path in possible:
+            if path not in paths:paths.append(path)
+            if len(paths)>=2:return dict(state='MULTIPLE_CONNECTED_CANDIDATE_PATHS',path=[])
+    return dict(state='SINGLE_CONNECTED_CANDIDATE_PATH',path=[dict(linkId=p[0],orientation=p[1]) for p in paths[0]])
+
+
 def run(args):
     # This is an explicit identifier adapter, not a route-name or coordinate fuzzy join.
     if not args.gtfs_id_prefix or not args.bus_namespace:
@@ -150,15 +191,18 @@ def run(args):
                 covered = sum(bool(r['permittedCandidates']) for r in portion)
                 ambiguous = sum(len(r['permittedCandidates']) > 1 and r['permittedCandidates'][1]['score']-r['permittedCandidates'][0]['score'] <= margin for r in portion)
                 counts['EXACT_STOP_OCCURRENCE_REVIEW'] += 1
+                connection=connected_path(portion,a,b)
+                counts[connection['state']] += 1
                 out.write(json.dumps(dict(edge=edge,shapeId=trip['shape_id'],fromShapeVertex=a,toShapeVertex=b,
                     sampleCount=len(portion),directionPermittedSamples=covered,ambiguousSamples=ambiguous,
                     sourceNationalLinkCandidates=sorted({c['directionEvidence']['nationalStandardLinkId'] for r in portion for c in r['permittedCandidates'] if c['directionEvidence']['nationalStandardLinkId']}),
                     runtimeMappingApproved=False,productionReady=False,
+                    candidatePath=connection,
                     blockers=['ACCINFO_NAMESPACE_EQUIVALENCE_UNVERIFIED','COMPLETE_DIRECTIONAL_PATH_NOT_REVIEWED','SOURCE_VALIDITY_UNVERIFIED'],
                     reviewSamples=portion),ensure_ascii=False)+'\n')
     report = dict(productionReady=False,approvedMappings=0,masterVersion=bus['masterVersion'],
         busNamespace=args.bus_namespace,gtfsIdPrefix=args.gtfs_id_prefix,counts=dict(counts),shapeCount=len(samples),
-        limitation='Only the first-stage retained top-3 candidates are filtered; alternative permitted candidates may exist outside this set. Recompute directional candidates before complete path approval.',
+        limitation='Retained top-3 candidates only. A connected candidate path is not approval of grade separation, current validity, or AccInfo ID equivalence.',
         sourceSemanticsEvidence='2024년기준 GIS DB 설명자료.hwp: LINK table and sections ②, ⑧, ㉒; see road-mapping-preparation.md',
         inputs={str(p):digest(p) for p in files})
     (args.output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')

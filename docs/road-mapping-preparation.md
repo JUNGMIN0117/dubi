@@ -106,3 +106,53 @@ python infra/scripts/road-occurrence-review.py `
 남은 항목: 방향 필터를 후보 생성 단계에 반영, 전체 구간 연속 경로와 고가·지하 검증, provider namespace 연결 근거, 원본 유효기간 검증. 검증되지 않은 상태는 통제 미확인으로 유지한다.
 
 다음 행동은 **2단계 전체 가공 전에 후보 생성에서 일방통행·노드 방향을 적용하고 occurrence별 연속 경로 검증을 추가하는 것**이다. 원본 추가 요청이나 운영 적용은 선행하지 않는다.
+
+## 2단계: 전체 형상 배치 실행
+
+`infra/scripts/road-batch-pipeline.py`가 최초 후보 탐색에서 일방통행 반대 방향을 제외한다. 방향 필터를 통과한 도로 중 top-3를 저장한다. multipart는 임의 연결하지 않고 별도 검토 사유로 제외한다.
+
+정류장 occurrence의 모든 형상 edge에 표본이 있는지 확인하고, 후보 사이의 다음 조건을 동적 계획법으로 검사한다.
+
+- 같은 링크·방향에서는 도로상 진행거리가 5m 허용치를 넘어 뒤로 움직이지 않아야 한다.
+- 다른 링크로 전환할 때는 원본 종료/시작 노드가 같고, 실제 방향별 끝점 좌표도 5m 이내여야 한다. 노드 ID만 같은 다른 도엽의 링크를 연결하지 않는다.
+- 연결 가능한 후보 경로가 둘 이상이면 모호 상태로 남긴다. 후보 없음, 형상 표본 누락, 방향 단절도 각각 표시한다.
+- 단일 연결 후보도 현행 운행·고가/지하·AccInfo namespace·원본 유효성 승인을 뜻하지 않는다. productionReady=false, approvedMappings=0을 유지한다.
+
+### 사전 검증
+
+기존 3형상 공간 인덱스를 해시와 경계로 검증 후 재사용했다. `stage2-road-smoke`의 2개 배치 완료 후 같은 명령을 다시 실행해 산출물을 재가공하지 않고 체크포인트를 읽는 것을 확인했다.
+
+- occurrence 113개: 단일 연결 후보 6, 복수 연결 후보 71, 도로 후보 누락 29, 방향 단절 7.
+- 원래 1차 top-3에서 역방향만 사후 제거한 결과와 달리, 방향 허용 후보를 처음부터 다시 탐색한다.
+- 기존/추가 도로 테스트 총 19개 모두 통과. 공간 라이브러리를 포함해 건너뛴 테스트 없음.
+
+### 전체 실행과 재시작
+
+2026-09-17 17:52:49 KST에 숨김 독립 Python 프로세스 PID **35632**를 시작했다. 실행 확인 당시 전국 도로 인덱스가 끝났고 **전체 보유 718개 형상, 10개씩 72배치**의 첫 배치를 처리 중이었다. 시작 당시 RSS 약 208MB. 완료 여부는 아래 complete.json으로 재확인해야 한다.
+
+루트: `C:\Users\SSAFY\Documents\ChatGPT\특화 프로젝트\data_staging\recommendation-20260917\stage2-road`
+
+- `job.json`: PID·시작 시각·실제 명령 배열·스크립트·로그·출력 경로.
+- `stdout.log`, `stderr.log`: 독립 프로세스 로그. 인터넷이나 대화 연결이 끊겨도 로컬 프로세스가 계속 실행된다. PC 종료/절전까지 계속 실행된다는 뜻은 아니다.
+- `identity.json`: 원본·코드 SHA와 설정. 다른 입력·코드로 같은 결과 루트를 재사용하면 실패한다.
+- `index-complete.json`: 전체 대상 영역 공간 인덱스 체크포인트. 도로 ZIP을 배치마다 재스캔하지 않는다.
+- `batch-NNNNN.json`: 완료 배치의 형상 ID, 결과 경로·모든 파일 SHA, 처리 수.
+- `status.json`: 인덱스 준비/처리 중 배치/완료 상태.
+- `complete.json`: 전체 배치 성공 뒤에만 생성, exitCode=0 및 각 배치 체크포인트 해시.
+- `failed-PID.json`: 예외와 exitCode=1. 이 파일이 있거나 프로세스만 종료된 것으로 완료 판정하지 않는다.
+
+중단 후 같은 worktree의 스크립트와 동일 원본·설정·출력 루트로 재실행한다. 완료한 인덱스/배치는 해시 검증 후 재사용한다. 미완료 attempt 디렉터리는 지우거나 덮어쓰지 않고 새 attempt를 만든다. 로그 파일은 재실행별 새 이름을 주어 기존 로그를 보존한다. SQLite exclusive lock으로 동일 출력의 중복 실행을 차단하며, 프로세스 종료 시 잠금이 해제된다.
+
+실행 형태:
+
+```powershell
+python -u infra/scripts/road-batch-pipeline.py `
+  --roads "<원본 도로 ZIP>" --gtfs "<서울 버스 GTFS 폴더>" `
+  --bus-crosswalk "<버스 crosswalk.gz>" --bus-namespace SEOUL_BUS `
+  --gtfs-id-prefix SB_ --batch-size 10 --max-shapes 0 `
+  --output "<stage2-road>" --stdout "<stdout 로그>" --stderr "<stderr 로그>"
+```
+
+독립 실행 시 `Start-Process -WindowStyle Hidden`과 출력 리다이렉션을 사용하고 `PYTHONPATH`에 작업 전용 `.road-deps`를 연결한다. 해당 인자는 로그 위치 기록용이며 실제 리다이렉션은 실행기가 한다.
+
+다음 행동: **전체 complete.json과 배치 체크섬을 확인하고, 단일 연결 후보·모호·누락·단절의 실제 커버리지를 평가한다.** 운영 승인이나 namespace 연결은 별도 근거 없이 진행하지 않는다.

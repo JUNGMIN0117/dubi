@@ -103,13 +103,6 @@ class _CountingLegacyRecommendationApi extends RecommendationApi {
   }
 }
 
-String _displayTime(DateTime value) {
-  final local = value.toLocal();
-  return '${local.month}/${local.day} '
-      '${local.hour.toString().padLeft(2, '0')}:'
-      '${local.minute.toString().padLeft(2, '0')}';
-}
-
 void main() {
   late ScheduleEvaluationV2 keep;
 

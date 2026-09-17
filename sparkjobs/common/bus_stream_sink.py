@@ -57,17 +57,40 @@ def redis_rows(silver):
         F.lit(86400).alias("ttlSeconds"), ordering.alias("occurredAtOrder"), collected.alias("collectedAtOrder"))
 
 
-def save_batch(silver, batch_id, root, settings):
-    """Only overwrite this checkpoint's batch directory on retry; errors propagate."""
+def write_bus_silver(silver, batch_id, root):
+    """버스 Silver를 HDFS 이력으로만 쓴다. Redis는 쓰지 않는다.
+
+    같은 checkpoint 배치를 다시 실행하면 그 배치 폴더만 덮어써 멱등적이다. 거절·중복 레코드도
+    함께 남기며, 읽을 때 status와 repeatIndex로 거른다. 오류는 상위로 전파해 Silver 스트림이
+    실패 배치를 건너뛰지 않게 한다. 반환하는 경로에 호출자가 완료 표식을 남긴다.
+    """
     path = root + "/batches/batch=" + str(batch_id)
-    # Preserve rejected and duplicate records too; filter status/repeatIndex when reading history.
     silver.write.mode("overwrite").partitionBy("eventType", "providerNamespace", "archiveDate").parquet(path + "/data")
+    return path
+
+
+def write_bus_redis(silver, settings):
+    """버스 최신값을 Redis에만 쓴다. HDFS는 쓰지 않는다.
+
+    서비스가 읽는 값이라 쓰기 실패는 상위로 전파해 checkpoint가 실패 배치를 건너뛰지 않게 한다.
+    """
     rows = redis_rows(silver).cache()
     try:
         count = rows.count()
         if count:
             write_latest_with_row_ttl(rows, settings.redis_host, settings.redis_port, settings.redis_password)
-        silver.sparkSession.createDataFrame([(batch_id, count)], "batchId long, redisKeys long").write.mode("overwrite").json(path + "/complete")
         return count
     finally:
         rows.unpersist()
+
+
+def save_batch(silver, batch_id, root, settings):
+    """(구) 한 스트림에서 HDFS 이력과 Redis 최신값을 함께 쓰던 경로.
+
+    스트림을 Redis용과 Silver용으로 나눈 뒤 운영 코드는 write_bus_silver와 write_bus_redis를
+    따로 부른다. 이 함수는 두 저장을 한 번에 검증하는 기존 테스트가 계속 쓰도록 남겨 둔다.
+    """
+    path = write_bus_silver(silver, batch_id, root)
+    count = write_bus_redis(silver, settings)
+    silver.sparkSession.createDataFrame([(batch_id, count)], "batchId long, redisKeys long").write.mode("overwrite").json(path + "/complete")
+    return count

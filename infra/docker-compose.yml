@@ -783,7 +783,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       APP_ENV: ${APP_ENV:-local}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-      ARCHIVE_TOPICS: ${ARCHIVE_TOPICS:-transport.raw,city.raw}   # topics.yaml 의 archive: true 토픽
+      ARCHIVE_TOPICS: ${ARCHIVE_TOPICS:-transport.raw,city.raw,source.poll-status}   # topics.yaml 의 archive: true 토픽
       ARCHIVE_LOCAL_DIR: ${ARCHIVE_LOCAL_DIR}
       ARCHIVE_URI: ${ARCHIVE_URI}
       ARCHIVE_HDFS_USER: ${ARCHIVE_HDFS_USER:-hadoop}

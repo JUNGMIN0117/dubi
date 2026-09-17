@@ -61,6 +61,27 @@ class BusWaitingServiceTest {
         assertThat(estimate(0).seconds()).isEqualTo(10);
     }
 
+    @Test void dtPublishedFixtureWithMissingStopOrderRemainsExplicitFallback() throws Exception {
+        var fixture=json.readTree(java.nio.file.Path.of("src/test/resources/conditional-departure-dt/redis-bus-arrival.json").toFile());
+        when(values.get(anyString())).thenReturn(json.writeValueAsString(fixture.path("value")));
+        assertThat(estimate(0).seconds()).isNull();
+        assertThat(estimate(0).reasons()).contains("BUS_WAIT_IDENTITY_OR_UNIT_UNVERIFIED");
+        assertThat(fixture.path("ttlSeconds").asInt()).isGreaterThan(fixture.path("consumerFreshnessSeconds").asInt());
+    }
+
+    @Test void publicSegmentReportsAppliedMlDurationInsteadOfOriginalProviderStep() {
+        var walking=new com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService(r->{throw new AssertionError("호출 금지");},json,false,4,0,"");
+        var prepared=walking.prepare(List.of(route),new Coordinate(127,37.5),new Coordinate(127.1,37.6),now);
+        var result=new ConditionalDepartureEvaluator(null,null,256,60,5000).evaluate(1,now,now,now.plusSeconds(2000),List.of(),
+                at->compare(route,false,at)).withWalking(prepared.evidence());
+        var dto=ScheduleEvaluationV2.from(result,"ml-fixture",null,null,0,"READ_ONLY",now,now,now.plusSeconds(2000),
+                now,now.plusSeconds(60),null,null,null,List.of(),null,List.of(route));
+        assertThat(dto.segments()).singleElement().satisfies(s->{
+            assertThat(s.durationSource()).isEqualTo("ML_PREVIEW");
+            assertThat(s.durationSeconds()).isEqualTo(30);
+        });
+    }
+
     @ParameterizedTest @ValueSource(strings={"stopOrder","arrivalTimeBasis","sourceGeneratedAt","detourCode"})
     void missingRequiredEvidenceIsNotZeroWaiting(String field) {
         obs.remove(field); assertThat(estimate(0).seconds()).isNull();

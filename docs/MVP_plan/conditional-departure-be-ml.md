@@ -1,10 +1,22 @@
 # BE/ML 담당 작업서 — 조건부 출발 조정
 
+## 2026-09-17 BE 계약 정정
+
+사용자가 지정한 [카카오맵 공식 도보 문서](https://developers.kakao.com/docs/ko/kakaomap/rest-api#walking)를 기준으로 `GET https://dapi.kakao.com/v2/routing/walk`를 사용한다. 이전 제휴 API·service·priority·default_speed 설명은 이 정정으로 대체한다. REST API 키와 `start_x/start_y/end_x/end_y`, WGS84, `route_mode=SHORTEST`를 사용하며 운영 기본값은 OFF다.
+
+- `durationSource`: `KAKAO_WALKING_API`, `PUBLIC_TRANSIT_STEP`, `PROVIDER_TOTAL_FALLBACK`, `ML_PREVIEW`, `TIMETABLE`. 최종 계산에 사용된 출처를 표시한다.
+- `endpointEvidence`: nullable 객체. `verified`, `source`, `masterVersion`, `mappingVersion`, `policyVersion`, `distanceMeters`, `coordinateType`, `judgment`, `reason`을 보존한다. HTTP 실패와 좌표 검증 실패는 구분한다.
+- `legRole`: `ACCESS_WALK`, `TRANSFER_WALK`, `EGRESS_WALK`, `RIDE`. 승하차 없는 WALK는 표시상 `ACCESS_WALK`로 정규화하고 `WALK_NO_TRANSIT_ENDPOINT`로 별도 API 호출을 생략한다.
+- provider 전체시간 fallback에서는 개별 `segments[].durationSeconds=null`이다. 전체 `durationSeconds`를 구간별로 중복 배분하지 않는다.
+- `causes`: `eventId`, `source`, `segmentIds`, `effect`, `confirmed`를 최종 BE 계약으로 유지한다. `effect=BLOCKED|POTENTIAL_IMPACT`이며 `confirmed`는 실제 영향 검증 결과다. FE !147 최신 파서는 이 필드들의 호환 읽기를 지원한다. 확인되지 않은 설명·사건 revision은 만들어 넣지 않는다.
+
+기계 계약과 비어 있지 않은 도보·사건 예제는 `docs/contracts/schedule-evaluation-v2.schema.json`, `docs/contracts/examples/conditional-departure/details/`를 따른다. 상세 검증·DT 소비 조건은 `docs/contracts/conditional-departure-be-runtime.md`에 기록한다.
+
 ## 1. 목표
 
 사용자 출발 계획 P를 먼저 평가하고, `ETA >= D`일 때만 `T=D-10분`을 목표로 실행 가능한 출발과 경로를 탐색한다. 계산, 저장, 수락, 재평가, 모델 fallback과 알림 전송을 버전·최신성·품질 근거와 함께 제공한다.
 
-공통 계약은 `docs/handoffs/conditional-departure-integration.md`를 따른다.
+공통 계약은 `docs/MVP_plan/conditional-departure-integration.md`를 따른다.
 
 ## 2. 현재 코드에서 반드시 보존할 것
 
@@ -312,15 +324,15 @@ claim
 
 호출 규격:
 
-- `GET https://apis-navi.kakaomobility.com/affiliate/walking/v1/directions`
-- `origin`과 `destination`은 `경도,위도`
-- Header는 KakaoAK 인증과 제휴 등록 `service` 식별자를 사용한다.
-- 기본 요청은 `priority=DISTANCE`, `summary=false`다.
-- 사용자 보행속도 정책이 없으면 `default_speed`를 임의 변경하지 않는다.
+- `GET https://dapi.kakao.com/v2/routing/walk`
+- `start_x/end_x`는 경도, `start_y/end_y`는 위도이며 입력·출력 좌표계는 WGS84다.
+- Header는 `Authorization: KakaoAK ${KAKAO_REST_API_KEY}`를 사용한다.
+- 요청 옵션은 `route_mode=SHORTEST`다.
+- `status=OK`의 `route.properties.totalTime`(초), `totalDistance`(미터)를 검증한다. service·summary·default_speed는 보내지 않는다.
 
 카카오 stop DTO에는 현재 이름만 있으므로 존재하지 않는 x/y를 가정하지 않는다. path endpoint는 후보일 뿐이며 마스터 좌표와 유일하게 검증돼야 한다. 지하철 역 중심점만 확보된 경우 출입구 좌표로 표현하지 않고 `STATION_CENTER_ONLY` 품질을 남긴다. 허용 거리 임계값은 corpus로 결정하고 설정·정책 버전으로 관리한다.
 
-후보마다 접근·이탈 최대 두 호출이 가능하지만 모든 후보를 무조건 호출하지 않는다. 선택 경로와 상위 평가 후보를 우선하고 평가 session 전체 호출 budget과 cache를 둔다. cache key는 API·endpoint policy 버전, 반올림 좌표, priority, defaultSpeed를 포함하며 반올림 정밀도와 TTL은 실측 후 정한다.
+후보마다 접근·이탈 최대 두 호출이 가능하지만 모든 후보를 무조건 호출하지 않는다. 선택 경로와 상위 평가 후보를 우선하고 평가 session 전체 호출 budget과 cache를 둔다. 현재 cache는 평가 session 안에서 정확한 좌표, routeMode, endpoint policy를 키로 사용한다. API 버전은 adapter로 고정하고 결과 유효기간은 cache-seconds 설정으로 제한한다. 좌표 반올림과 평가 간 공유 cache는 실측 전 적용하지 않는다.
 
 fallback 순서:
 

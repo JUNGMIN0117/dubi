@@ -136,6 +136,12 @@ public class Notification extends BaseTimeEntity {
         this.status = NotificationStatus.FAILED;
     }
 
+    /** 재시도 사이 알림 설정/기기 상태가 바뀌면 기존 notificationId를 유지하면서 발송을 종료한다. */
+    public void markSuppressed(SuppressReason reason) {
+        this.status = NotificationStatus.SUPPRESSED;
+        this.suppressReason = reason;
+    }
+
     /**
      * 읽음 처리. 이미 읽었으면 시각을 덮어쓰지 않는다 —
      * 같은 요청이 두 번 와도 처음 읽은 시각이 유지되어야 하고(멱등),

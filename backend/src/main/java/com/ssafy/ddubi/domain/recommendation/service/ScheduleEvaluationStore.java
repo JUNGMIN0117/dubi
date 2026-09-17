@@ -47,14 +47,14 @@ public class ScheduleEvaluationStore {
     /** lazy 엔티티를 외부 I/O로 넘기지 않는 입력 스냅샷. updatedAt은 기존 일정 수정 계약의 버전이다. */
     public record Job(long scheduleId, long userId, LocalDateTime version, Instant departure, Instant arriveBy,
                       Coordinate origin, Coordinate destination, String token, long eventRevision,
-                      Cache cache, String previousJson, Importance importance) { }
+                      Cache cache, String previousJson, Importance importance, long inputRevision) { }
 
     /** 소유권·상태 확인 후 짧게 lease를 잡는다. 프로세스가 죽으면 120초 뒤 다른 작업이 회수한다. */
     @Transactional
     public Job claim(long scheduleId, Long userId, Instant now) {
         lockSchedule(scheduleId);
         Schedule s = owned(scheduleId, userId);
-        if (s.getStatus() != ScheduleStatus.UPCOMING || !instant(s.getArriveBy()).isAfter(now))
+        if (!"NOT_STARTED".equals(s.getJourneyState()) || s.getStatus() != ScheduleStatus.UPCOMING || !instant(s.getArriveBy()).isAfter(now))
             throw new BusinessException(ErrorCode.INVALID_STATE, "진행 예정 일정만 평가할 수 있습니다.");
         if (s.getPlannedDepartAt() == null)
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "일정의 출발시각을 입력해 주세요.");
@@ -66,13 +66,13 @@ public class ScheduleEvaluationStore {
             throw new BusinessException(ErrorCode.INVALID_STATE, "이 일정은 이미 계산 중입니다.");
         String token = UUID.randomUUID().toString();
         jdbc.update("UPDATE schedule_evaluation SET lease_token=?,lease_until=? WHERE schedule_id=?", token, ts(now.plusSeconds(120)), scheduleId);
-        boolean sameInput = Objects.equals(databaseTime(state.get("input_updated_at")), s.getUpdatedAt());
+        boolean sameInput = state.get("input_revision") instanceof Number n && n.longValue()==s.getInputRevision();
         Cache cache = sameInput ? read((String) state.get("candidates_json"), Cache.class) : null;
         return new Job(scheduleId, s.getUser().getId(), s.getUpdatedAt(), instant(s.getPlannedDepartAt()), instant(s.getArriveBy()),
                 new Coordinate(s.getOrigin().getLng().doubleValue(), s.getOrigin().getLat().doubleValue()),
                 new Coordinate(s.getDestination().getLng().doubleValue(), s.getDestination().getLat().doubleValue()),
                 token, ((Number) state.get("event_revision")).longValue(), cache,
-                sameInput ? (String) state.get("result_json") : null, s.getImportance());
+                sameInput ? (String) state.get("result_json") : null, s.getImportance(), s.getInputRevision());
     }
 
     /**
@@ -86,6 +86,10 @@ public class ScheduleEvaluationStore {
         Schedule s = owned(job.scheduleId(), job.userId());
         var state = jdbc.queryForMap("SELECT * FROM schedule_evaluation WHERE schedule_id=? FOR UPDATE", job.scheduleId());
         if (!Objects.equals(job.token(), state.get("lease_token")) || !s.getUpdatedAt().equals(job.version())
+                || s.getInputRevision()!=job.inputRevision()
+                || databaseTime(state.get("lease_until"))==null || !databaseTime(state.get("lease_until")).isAfter(local(now))
+                || ((Number)state.get("event_revision")).longValue()!=job.eventRevision()
+                || !"NOT_STARTED".equals(s.getJourneyState())
                 || s.getStatus() != ScheduleStatus.UPCOMING || Boolean.TRUE.equals(state.get("stopped"))
                 || !instant(s.getArriveBy()).isAfter(now)) {
             release(job, now);
@@ -124,10 +128,10 @@ public class ScheduleEvaluationStore {
             Recommendation recommendation = recommendations.saveAndFlush(Recommendation.builder().schedule(s)
                     .route(routes.getReferenceById(cache.routeIds().get(chosenResult.journeyKey())))
                     .departAt(local(chosenResult.departureAt())).eta(local(chosenResult.estimatedArrivalAt()))
-                    .durationMin(Math.toIntExact((seconds + 59) / 60)).bufferMin(0).percentileUsed(null)
+                    .durationMin(Math.toIntExact((seconds + 59) / 60)).bufferMin(outcome.conditional()==null?0:outcome.conditional().appliedBufferSeconds()/60).percentileUsed(null)
                     // 응답에 실은 등급과 행에 남는 등급이 갈라지지 않도록 같은 값을 쓴다.
                     .confidence(persistence.confidence()).reasons(write(stored)).segmentStatusSnapshot(write(outcome.evidence()))
-                    .dataCheckedAt(local(outcome.checkedAt())).policyVersion("sched-v1").triggerType(outcome.trigger()).build());
+                    .dataCheckedAt(local(outcome.checkedAt())).policyVersion(outcome.policyVersion()).triggerType(outcome.trigger()).build());
             recommendationId = recommendation.getId();
         }
         var saved = stored.withRecommendationId(recommendationId);
@@ -136,14 +140,36 @@ public class ScheduleEvaluationStore {
         jdbc.update("UPDATE schedule_evaluation SET input_updated_at=?,candidates_json=?,result_json=?,next_check_at=?,"
                         + "lease_token=NULL,lease_until=NULL,last_error=NULL,notification_json=?,notification_key=? WHERE schedule_id=?",
                 job.version(), write(cache), write(saved), ts(nextAt), notificationJson, notificationKey, job.scheduleId());
+        Instant validUntil=ScheduleEvaluationV2.validity(outcome.conditional(),outcome.evidence(),outcome.checkedAt(),nextAt);
+        jdbc.update("UPDATE schedule_evaluation SET input_revision=?,valid_until=?,failure_count=0,failed_input_revision=NULL,retry_exhausted=false WHERE schedule_id=?",
+                job.inputRevision(),ts(validUntil),job.scheduleId());
+        // 같은 입력 revision이어도 새 평가가 기존 제안을 대체하면 이전 대기/발송 lease는 무효다.
+        jdbc.update("UPDATE evaluation_notification_outbox SET status='CANCELED',lease_token=NULL,lease_until=NULL WHERE schedule_id=? AND status IN ('PENDING','SENDING')",job.scheduleId());
+        if(notificationJson!=null && notificationKey!=null) {
+            String dedup=java.util.HexFormat.of().formatHex(digest(job.scheduleId()+":"+job.inputRevision()+":"+job.eventRevision()+":"+notificationKey));
+            jdbc.update("INSERT IGNORE INTO evaluation_notification_outbox(schedule_id,evaluation_id,input_revision,event_revision,dedup_key,payload_json,next_attempt_at,valid_until,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    job.scheduleId(),job.token(),job.inputRevision(),job.eventRevision(),dedup,notificationJson,ts(now),ts(validUntil),ts(now));
+            // 아직 보내지 못한 같은 의미의 알림은 최신 평가로 교체한다. SENT와 소진한 재시도는 되살리지 않는다.
+            jdbc.update("UPDATE evaluation_notification_outbox SET evaluation_id=?,payload_json=?,valid_until=?,status='PENDING' WHERE dedup_key=? AND status='CANCELED' AND attempts<5",
+                    job.token(),notificationJson,ts(validUntil),dedup);
+            // 새 outbox로 이행한 결과는 legacy dispatcher 대상에서 제거하여 이중 발송을 막는다.
+            jdbc.update("UPDATE schedule_evaluation SET notification_json=NULL,notification_key=NULL WHERE schedule_id=?",job.scheduleId());
+        }
         return saved;
     }
 
-    /** 4xx를 같은 요청으로 즉시 반복하지 않는다. 실패는 별도 상태로 남기고 이전 결과를 최신처럼 표시하지 않는다. */
+    /** 외부 오류는 동일 입력에서 최대 5회, 30~480초 backoff다. 사건/입력 변경은 새 예산을 연다. */
     @Transactional
     public void fail(Job job, String reason, Instant now) {
-        jdbc.update("UPDATE schedule_evaluation SET lease_token=NULL,lease_until=NULL,last_error=?,next_check_at=? WHERE schedule_id=? AND lease_token=?",
-                reason, ts(now.plusSeconds(60)), job.scheduleId(), job.token());
+        var rows=jdbc.queryForList("SELECT * FROM schedule_evaluation WHERE schedule_id=? AND lease_token=? FOR UPDATE",job.scheduleId(),job.token());
+        if(rows.isEmpty()) return;
+        var state=rows.get(0);
+        boolean stale="STALE_RECOMMENDATION".equals(reason);
+        int attempts=stale?0:state.get("failed_input_revision") instanceof Number revision && revision.longValue()==job.inputRevision()
+                ? ((Number)state.get("failure_count")).intValue()+1:1;
+        Instant next=stale?now:now.plusSeconds(Math.min(480,30L<<Math.min(attempts-1,4)));
+        jdbc.update("UPDATE schedule_evaluation SET lease_token=NULL,lease_until=NULL,last_error=?,next_check_at=?,failure_count=?,failed_input_revision=?,retry_exhausted=? WHERE schedule_id=? AND lease_token=?",
+                reason,ts(next),attempts,job.inputRevision(),attempts>=5,job.scheduleId(),job.token());
     }
 
     /** 외부 조회가 필요 없는 최근 결과 API. 일정 수정·취소 뒤 예전 결과는 반환하지 않는다. */
@@ -152,29 +178,71 @@ public class ScheduleEvaluationStore {
         Schedule schedule = owned(scheduleId, userId);
         var rows = jdbc.queryForList("SELECT * FROM schedule_evaluation WHERE schedule_id=?", scheduleId);
         var response = new LinkedHashMap<String, Object>();
-        if (schedule.getStatus() != ScheduleStatus.UPCOMING || !instant(schedule.getArriveBy()).isAfter(Instant.now())) { response.put("state", "STOPPED"); return response; }
+        if (!"NOT_STARTED".equals(schedule.getJourneyState()) || schedule.getStatus() != ScheduleStatus.UPCOMING || !instant(schedule.getArriveBy()).isAfter(Instant.now())) { response.put("state", "STOPPED"); return response; }
         if (schedule.getPlannedDepartAt() == null) { response.put("state", "DEPARTURE_REQUIRED"); return response; }
         if (!rows.isEmpty() && Boolean.TRUE.equals(rows.get(0).get("stopped"))) { response.put("state", "STOPPED"); return response; }
         if (!rows.isEmpty() && rows.get(0).get("last_error") != null) {
             response.put("state", "FAILED"); response.put("lastError", rows.get(0).get("last_error")); return response;
         }
-        if (rows.isEmpty() || !Objects.equals(databaseTime(rows.get(0).get("input_updated_at")), schedule.getUpdatedAt())) { response.put("state", "PENDING"); return response; }
+        if(!rows.isEmpty() && databaseTime(rows.get(0).get("lease_until"))!=null
+                && databaseTime(rows.get(0).get("lease_until")).isAfter(local(Instant.now()))) { response.put("state","RUNNING"); return response; }
+        if (rows.isEmpty() || !(rows.get(0).get("input_revision") instanceof Number version) || version.longValue()!=schedule.getInputRevision()) { response.put("state", "PENDING"); return response; }
         var row = rows.get(0);
+        LocalDateTime lease=databaseTime(row.get("lease_until"));
+        if(lease!=null && lease.isAfter(local(Instant.now()))) { response.put("state","RUNNING"); return response; }
         response.put("state", Boolean.TRUE.equals(row.get("stopped")) ? "STOPPED" : row.get("last_error") != null ? "FAILED"
                 : row.get("result_json") == null ? "PENDING"
-                : !databaseTime(row.get("next_check_at")).isAfter(local(Instant.now())) ? "STALE" : "READY");
+                : databaseTime(row.get("valid_until"))==null || !databaseTime(row.get("valid_until")).isAfter(local(Instant.now())) ? "STALE" : "READY");
         response.put("lastError", row.get("last_error"));
-        response.put("result", read((String) row.get("result_json"), ScheduleEvaluationWorkflow.Outcome.class));
+        var outcome=read((String)row.get("result_json"),ScheduleEvaluationWorkflow.Outcome.class);
+        if(outcome!=null && ((Number)row.get("event_revision")).longValue()!=outcome.eventRevision()) response.put("state","STALE");
+        response.put("result",outcome);
         response.put("nextCheckAt", databaseTime(row.get("next_check_at")).atZone(KST).toOffsetDateTime());
         return response;
+    }
+
+    /** 구형 저장 JSON은 v1 조회로 보존한다. v2 계약을 충족하지 않으면 재계산 대기로 표시한다. */
+    @Transactional(readOnly=true)
+    public Object latestV2(long scheduleId,long userId) {
+        var status=latest(scheduleId,userId);
+        if(status.get("result") instanceof ScheduleEvaluationWorkflow.Outcome outcome && outcome.conditional()!=null) {
+            var value=response(outcome,userId);
+            var map=json.convertValue(value,new com.fasterxml.jackson.core.type.TypeReference<LinkedHashMap<String,Object>>(){});
+            map.put("state",status.get("state")); return map;
+        }
+        if(status.containsKey("result")) {
+            status.remove("result"); status.remove("nextCheckAt"); status.put("state","PENDING");
+        }
+        status.put("schemaVersion","schedule-evaluation-v2");
+        return status;
+    }
+
+    /** DB 경로 ID와 입력 원본을 서버 저장값으로만 보충한다. 후보 순번을 DB ID처럼 노출하지 않는다. */
+    @Transactional(readOnly=true)
+    public ScheduleEvaluationV2 response(ScheduleEvaluationWorkflow.Outcome outcome,long userId) {
+        Schedule s=owned(outcome.scheduleId(),userId);
+        var row=jdbc.queryForMap("SELECT * FROM schedule_evaluation WHERE schedule_id=?",s.getId());
+        var current=read((String)row.get("result_json"),ScheduleEvaluationWorkflow.Outcome.class);
+        if(current==null || !current.evaluationId().equals(outcome.evaluationId())
+                || !(row.get("input_revision") instanceof Number revision) || revision.longValue()!=s.getInputRevision())
+            throw new BusinessException(ErrorCode.STALE_RECOMMENDATION);
+        Cache cache=read((String)row.get("candidates_json"),Cache.class);
+        var proposed=outcome.suggestion().proposed();
+        return ScheduleEvaluationV2.from(outcome.conditional(),outcome.evaluationId(),s.getId(),
+                row.get("input_revision") instanceof Number n?n.longValue():null,outcome.eventRevision(),outcome.trigger().name(),
+                s.getUserInputDepartAt()==null?null:instant(s.getUserInputDepartAt()),outcome.plannedDepartAt(),outcome.arriveBy(),outcome.checkedAt(),
+                databaseTime(row.get("valid_until")).atZone(KST).toInstant(),databaseTime(row.get("next_check_at")).atZone(KST).toInstant(),
+                cache==null?null:cache.routeIds().get(outcome.selectedKey()),
+                cache==null||proposed==null?null:cache.routeIds().get(proposed.journeyKey()),outcome.evidence().reasons(),outcome.evidence(),cache==null?List.of():cache.search().candidates());
     }
 
     /** 입력 수정과 출발/완료를 동시에 확인할 수 있도록 bounded 대상만 조회한다. 입력 없는 기존 일정은 건너뛴다. */
     public List<Long> due(Instant now) {
         return jdbc.queryForList("SELECT s.id FROM schedule s LEFT JOIN schedule_evaluation e ON e.schedule_id=s.id "
-                + "WHERE s.status='UPCOMING' AND s.planned_depart_at IS NOT NULL AND s.arrive_by>? "
+                + "WHERE s.journey_state='NOT_STARTED' AND s.status='UPCOMING' AND s.planned_depart_at IS NOT NULL AND s.arrive_by>? "
                 + "AND (e.stopped IS NULL OR e.stopped=false) AND (e.lease_until IS NULL OR e.lease_until<=?) "
-                + "AND (e.schedule_id IS NULL OR (e.last_error IS NULL AND (e.input_updated_at IS NULL OR e.input_updated_at<>s.updated_at)) OR e.next_check_at<=?) "
+                + "AND (e.schedule_id IS NULL OR e.retry_exhausted=false OR e.failed_input_revision<>s.input_revision) "
+                + "AND (e.schedule_id IS NULL OR (e.last_error IS NULL AND (e.input_revision IS NULL OR e.input_revision<>s.input_revision)) OR e.next_check_at<=?) "
                 + "ORDER BY COALESCE(e.next_check_at,s.created_at),s.id LIMIT 20", Long.class, ts(now), ts(now), ts(now));
     }
 
@@ -196,7 +264,9 @@ public class ScheduleEvaluationStore {
     /** 실제 출발 확인은 추측하지 않는다. 사용자가 명시적으로 확인할 때만 감시를 중단한다. */
     @Transactional
     public void stop(long scheduleId, long userId) {
-        lockSchedule(scheduleId); owned(scheduleId, userId);
+        lockSchedule(scheduleId); Schedule departed=owned(scheduleId,userId);
+        departed.depart(local(Instant.now())); schedules.flush();
+        jdbc.update("UPDATE evaluation_notification_outbox SET status='CANCELED',lease_token=NULL,lease_until=NULL WHERE schedule_id=? AND status IN ('PENDING','SENDING')",scheduleId);
         jdbc.update("INSERT IGNORE INTO schedule_evaluation(schedule_id,next_check_at) VALUES (?,?)", scheduleId, ts(Instant.now()));
         jdbc.update("UPDATE schedule_evaluation SET stopped=true,lease_token=NULL,lease_until=NULL,notification_json=NULL WHERE schedule_id=?", scheduleId);
     }
@@ -208,13 +278,16 @@ public class ScheduleEvaluationStore {
         var pending = jdbc.queryForList("SELECT * FROM schedule_evaluation WHERE schedule_id=? FOR UPDATE", scheduleId);
         if (pending.isEmpty()) throw new BusinessException(ErrorCode.STALE_RECOMMENDATION);
         var row = pending.get(0);
+        if(evaluationId.equals(row.get("accepted_evaluation_id"))) return;
         var result = read((String) row.get("result_json"), ScheduleEvaluationWorkflow.Outcome.class);
         // 저장(기록)은 허용해도 수락(사용자 출발시각 실제 변경)은 막는다. 모델이 승인되기 전까지
         // 검증 안 된 숫자로 사용자를 실제로 움직이게 하지 않는다. complete()의 판정과 다른 것이 의도다.
-        if (result != null && result.preview() != null)
+        if (result != null && (result.preview() == null || !result.preview().productionReady()))
             throw new BusinessException(ErrorCode.INVALID_STATE, "검증용 ML 결과는 일정에 적용할 수 없습니다.");
         if (result == null || !result.evaluationId().equals(evaluationId) || result.suggestion().proposed() == null
-                || !Objects.equals(databaseTime(row.get("input_updated_at")), s.getUpdatedAt())
+                || !(row.get("input_revision") instanceof Number rev) || rev.longValue()!=s.getInputRevision()
+                || !"NOT_STARTED".equals(s.getJourneyState())
+                || databaseTime(row.get("valid_until"))==null || !databaseTime(row.get("valid_until")).isAfter(local(now))
                 || row.get("last_error") != null || Boolean.TRUE.equals(row.get("stopped")) || s.getStatus() != ScheduleStatus.UPCOMING
                 || ((Number) row.get("event_revision")).longValue() != result.eventRevision()
                 || result.suggestion().proposed().departureAt().isBefore(now) || result.checkedAt().plusSeconds(60).isBefore(now))
@@ -223,14 +296,16 @@ public class ScheduleEvaluationStore {
         Cache cache = read((String) row.get("candidates_json"), Cache.class);
         jdbc.update("UPDATE route SET is_selected=false WHERE schedule_id=?", scheduleId);
         jdbc.update("UPDATE route SET is_selected=true WHERE id=? AND schedule_id=?", cache.routeIds().get(proposed.journeyKey()), scheduleId);
-        s.changePlannedDepartAt(local(proposed.departureAt())); s.markCustomizedIfRepeatInstance();
+        jdbc.update("UPDATE schedule_evaluation SET accepted_evaluation_id=? WHERE schedule_id=?",evaluationId,scheduleId);
+        jdbc.update("UPDATE evaluation_notification_outbox SET status='CANCELED' WHERE schedule_id=? AND status IN ('PENDING','SENDING')",scheduleId);
+        s.acceptDeparture(local(proposed.departureAt())); s.markCustomizedIfRepeatInstance();
         schedules.flush();
         // 새로운 입력으로 다음 평가를 요구한다. 이전 실행은 lease가 사라져 결과를 저장하지 못한다.
         RouteCandidate selectedCandidate = cache.search().candidates().stream()
                 .filter(c -> RouteEvidenceAssembler.key(c).equals(proposed.journeyKey())).findFirst().orElseThrow();
-        jdbc.update("UPDATE schedule_evaluation SET candidates_json=?,input_updated_at=?,result_json=NULL,next_check_at=?,lease_token=NULL,lease_until=NULL,notification_json=NULL WHERE schedule_id=?",
+        jdbc.update("UPDATE schedule_evaluation SET candidates_json=?,input_updated_at=?,input_revision=?,result_json=NULL,next_check_at=?,lease_token=NULL,lease_until=NULL,notification_json=NULL WHERE schedule_id=?",
                 write(new Cache(cache.search(), cache.routeIds(), proposed.journeyKey(), selectedCandidate)),
-                s.getUpdatedAt(), ts(now), scheduleId);
+                s.getUpdatedAt(),s.getInputRevision(), ts(now), scheduleId);
     }
 
     /**
@@ -269,6 +344,10 @@ public class ScheduleEvaluationStore {
                 chosen == null ? List.of() : chosen.reasons());
     }
 
+    private byte[] digest(String key) {
+        try { return java.security.MessageDigest.getInstance("SHA-256").digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+        catch(java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
     Schedule owned(long id, Long userId) {
         Schedule s = schedules.findById(id).orElseThrow(() -> new BusinessException(ErrorCode.SCHEDULE_NOT_FOUND));
         if (userId != null && !s.isOwnedBy(userId)) throw new BusinessException(ErrorCode.FORBIDDEN_RESOURCE);

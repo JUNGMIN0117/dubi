@@ -24,6 +24,7 @@ from sources.base import SourceSpec, now_kst
 from sources.subway_schedule import pause_until, SkippedNonService
 from request_budget import RetryScheduled, RetryWait, RequestBudget
 from notice_dedup import NoticeDedup, publish_notices
+from poll_status import build_poll_status
 
 log = logging.getLogger("collector")
 
@@ -53,18 +54,92 @@ def fetch_with_retry(spec: SourceSpec, settings: Settings, client: httpx.Client)
     return spec.fetch(settings, client)
 
 
-def run_cycle(spec: SourceSpec, settings: Settings, client: httpx.Client, publisher: Publisher, notice_gate=None) -> int:
+def _run_cycle(spec: SourceSpec, settings: Settings, client: httpx.Client, publisher: Publisher, notice_gate=None):
     records = fetch_with_retry(spec, settings, client)
     collected_at = now_kst()
     if settings.source == "topis_notice":
         gate = notice_gate or NoticeDedup(settings.extra.get("TOPIS_NOTICE_DEDUP_PATH", str(Path(__file__).resolve().parents[1] / "data" / "topis_notice_dedup.sqlite3")), spec.topic)
         stats = publish_notices(records, gate, publisher, lambda record: build_event(spec, record, collected_at))
         log.info("topis dedup fetched=%d new=%d changed=%d unchanged=%d pending=%d missingId=%d", *stats.values())
-        return stats["new"] + stats["changed"]
+        return stats["new"] + stats["changed"], records
     for record in records:
         event = build_event(spec, record, collected_at)
         publisher.publish(spec.topic, record.key, event)
-    return len(records)
+    return len(records), records
+
+
+def run_cycle(spec: SourceSpec, settings: Settings, client: httpx.Client, publisher: Publisher, notice_gate=None) -> int:
+    count, _ = _run_cycle(spec, settings, client, publisher, notice_gate)
+    return count
+
+
+def run_cycle_with_status(spec: SourceSpec, settings: Settings, client: httpx.Client, publisher: Publisher, notice_gate=None) -> int:
+    """한 사이클의 데이터와 별도로 SUCCESS/EMPTY/실패 상태를 항상 남긴다."""
+    started_at = now_kst()
+    try:
+        count, records = _run_cycle(spec, settings, client, publisher, notice_gate)
+    except SkippedNonService as exc:
+        publisher.publish(
+            "source.poll-status",
+            f"{spec.name}:{settings.source}",
+            build_poll_status(
+                source=spec.name,
+                scope_key=settings.source,
+                started_at=started_at,
+                finished_at=now_kst(),
+                status="SKIPPED_NON_SERVICE",
+                row_count=0,
+                error_code="SKIPPED_NON_SERVICE",
+                next_allowed_at=exc.resume_at,
+            ),
+        )
+        raise
+    except (RetryScheduled, RetryWait) as exc:
+        publisher.publish(
+            "source.poll-status",
+            f"{spec.name}:{settings.source}",
+            build_poll_status(
+                source=spec.name,
+                scope_key=settings.source,
+                started_at=started_at,
+                finished_at=now_kst(),
+                status="RATE_LIMITED" if isinstance(exc, RetryWait) else "FAILED",
+                row_count=0,
+                error_code=type(exc).__name__.upper(),
+            ),
+        )
+        raise
+    except Exception as exc:
+        publisher.publish(
+            "source.poll-status",
+            f"{spec.name}:{settings.source}",
+            build_poll_status(
+                source=spec.name,
+                scope_key=settings.source,
+                started_at=started_at,
+                finished_at=now_kst(),
+                status="FAILED",
+                row_count=0,
+                error_code=type(exc).__name__.upper(),
+            ),
+        )
+        raise
+    publisher.publish(
+        "source.poll-status",
+        f"{spec.name}:{settings.source}",
+        build_poll_status(
+            source=spec.name,
+            scope_key=getattr(records, "scope_key", settings.source),
+            started_at=started_at,
+            finished_at=now_kst(),
+            status=getattr(records, "status", "SUCCESS"),
+            row_count=len(records),
+            complete_snapshot=bool(getattr(records, "complete_snapshot", False)),
+            page_count=int(getattr(records, "page_count", 0)),
+            error_code=getattr(records, "error_code", None),
+        ),
+    )
+    return count
 
 
 def main() -> int:
@@ -106,7 +181,7 @@ def main() -> int:
             wait_seconds = interval
             waiting_for_retry = False
             try:
-                count = run_cycle(spec, settings, client, publisher, notice_gate)
+                count = run_cycle_with_status(spec, settings, client, publisher, notice_gate)
                 # 사이클마다 전송 확인을 기다려 sent/failed 가 이 사이클의 실제 결과를 반영하게 한다.
                 # pending 은 브로커 응답을 아직 못 받은 건수(큐에서 재시도 중) — 유실이 아니다
                 pending = publisher.flush(timeout_seconds=10.0)

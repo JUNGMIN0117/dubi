@@ -277,7 +277,9 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
             pool.submit(() -> store.wakeSegments(List.of("BUS:1:2:3"), now.plusSeconds(11)))
                     .get(10, java.util.concurrent.TimeUnit.SECONDS);
             var previous = store.read(job.previousJson(), ScheduleEvaluationWorkflow.Outcome.class);
-            store.complete(job, job.cache().search(), false, previous, now.plusSeconds(600), null, null, now.plusSeconds(12));
+            assertThatThrownBy(() -> store.complete(job, job.cache().search(), false, previous, now.plusSeconds(600), null, null, now.plusSeconds(12)))
+                    .isInstanceOf(BusinessException.class);
+            store.fail(job,"STALE_RECOMMENDATION",now.plusSeconds(12));
             assertThat(store.due(now.plusSeconds(12))).contains(scheduleId);
             var stop = pool.submit(() -> store.stop(scheduleId, owner));
             var event = pool.submit(() -> store.wakeSegments(List.of("BUS:1:2:3"), now.plusSeconds(13)));

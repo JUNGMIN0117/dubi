@@ -4,10 +4,34 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from app import create_app
 from tools.extend_reference_bundle import normalize, deduplicate, required_dates
+
+
+@pytest.mark.parametrize('source,prefix,zero_missing', [
+    ('OA-21217', '운행시간', True),
+    ('OA-21218', '재차인원합', False),
+    ('OA-21219', '승차_승객_수', False),
+    ('OA-21220', '버스운행횟수', False),
+])
+def test_source_specific_zero_and_absent_observations(source, prefix, zero_missing):
+    """실제 승객·운행 0을 결측으로 잃거나 미관측 운행시간 0을 정답으로 쓰는 회귀를 막는다."""
+    raw = {'기준_날짜': '20260713', '노선_ID': '001', '출발_정류장_ID': '002',
+           '도착_정류장_ID': '003', '정류장_ID': '002',
+           '출발_정류장_순서': '7', '정류장_순서': '7'}
+    raw.update({f'{prefix}_{h}시': '0' for h in range(24)})
+    raw.update({f'{prefix}_1시': '', f'{prefix}_2시': '-1', f'{prefix}_3시': '12'})
+    normalized, rejected, _ = normalize(pd.DataFrame([raw], dtype='string'), source)
+    row = normalized.iloc[0]
+    assert rejected.empty
+    assert bool(pd.isna(row.h00)) == zero_missing
+    if not zero_missing:
+        assert row.h00 == 0
+    assert pd.isna(row.h01) and pd.isna(row.h02)
+    assert row.h03 == 12
 
 
 def test_zero_travel_is_missing_but_zero_passengers_is_observation():

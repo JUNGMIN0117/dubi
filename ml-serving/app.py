@@ -21,6 +21,8 @@ from environment_schema import EnvironmentRequest
 from environment_model import EnvironmentModel
 from schemas import BatchRequest, BatchResponse, InvalidRequest, ServiceUnavailable
 from serving_runtime import InferenceQueue, QueueBusy, RuntimeSettings
+from static_bus_predictor import StaticBusPredictor
+from static_bus_schema import StaticBatchResponse
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_BUNDLE = Path(__file__).resolve().parent.parent / 'artifacts/ml-serving/20260908-v12'
@@ -48,7 +50,7 @@ def reference_health(model, today):
                 missing_reference_file_count=len(model.bundle.get('missing_files',[])))
 
 
-def create_app(predictor=None, settings=None, today=None):
+def create_app(predictor=None, settings=None, today=None, static_predictor=None):
     """테스트에서는 객체를 주입하며 실서비스에서는 환경변수로 묶음 경로를 고정한다.
 
 로딩 실패를 정상값으로 숨기지 않고 readiness 503으로 노출한다. 예외 원문에는
@@ -59,6 +61,14 @@ def create_app(predictor=None, settings=None, today=None):
         policy = settings if settings is not None else RuntimeSettings.from_env(os.environ)
         application.state.inference_queue = InferenceQueue(policy)
         application.state.environment_model = None
+        # v13은 별도 경로/시험 flag로만 등록한다. 기존 v12 활성 포인터를 바꾸지 않는다.
+        application.state.static_predictor = static_predictor
+        if static_predictor is None and os.environ.get('ML_STATIC_BUNDLE_DIR'):
+            try:
+                application.state.static_predictor = StaticBusPredictor(os.environ['ML_STATIC_BUNDLE_DIR'],
+                    test_apply=os.environ.get('ML_STATIC_TEST_APPLY', 'false').lower() == 'true')
+            except Exception as error:
+                LOGGER.error('STATIC_MODEL_LOAD_FAILED type=%s', type(error).__name__)
         environment_path = os.environ.get('ML_ENVIRONMENT_BUNDLE_DIR')
         if environment_path:
             try: application.state.environment_model = EnvironmentModel(environment_path)
@@ -140,6 +150,32 @@ def create_app(predictor=None, settings=None, today=None):
             return dict(prepared=prepared,prediction=prediction)
         except QueueBusy: raise HTTPException(status_code=503,detail='MODEL_BUSY') from None
         except Exception: raise HTTPException(status_code=503,detail='MODEL_UNAVAILABLE') from None
+
+    @application.get('/v2/bus/health')
+    async def static_health():
+        """v12 reference 유효기간과 독립적으로 고정 묶음 준비 여부를 확인한다."""
+        model = application.state.static_predictor
+        if model is None:
+            raise HTTPException(status_code=503, detail='MODEL_NOT_READY')
+        day = today() if today else datetime.now(ZoneInfo('Asia/Seoul')).date()
+        if not model.start <= day <= model.end:
+            raise HTTPException(status_code=503, detail='DATE_UNSUPPORTED')
+        return dict(status='READY_FOR_PREVIEW', approval=model.mode, **model.metadata())
+
+    @application.post('/v2/bus/predictions:batch', response_model=StaticBatchResponse,
+                      responses={422: {'model': InvalidRequest}, 503: {'model': ServiceUnavailable}})
+    async def static_predict(request: BatchRequest):
+        """이력 조회 없는 신규 계약. training_sample_count를 v12 history_sample_count로 바꾸지 않는다."""
+        model = application.state.static_predictor
+        if model is None:
+            raise HTTPException(status_code=503, detail='MODEL_NOT_READY')
+        try:
+            return await application.state.inference_queue.run(model.predict, request)
+        except QueueBusy:
+            raise HTTPException(status_code=503, detail='MODEL_BUSY') from None
+        except Exception as error:
+            LOGGER.error('STATIC_PREDICTION_FAILED type=%s', type(error).__name__)
+            raise HTTPException(status_code=503, detail='MODEL_UNAVAILABLE') from None
 
     return application
 

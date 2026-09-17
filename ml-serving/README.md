@@ -1,4 +1,31 @@
-# v12 버스 모델 로컬 예측 서비스
+# 버스 모델 로컬 예측 서비스 (v12 / v13)
+
+## 이력 독립 v13 추가 (2026-09-18)
+
+별도 request-only 버스 모델의 입력·학습 범위·검증 상태는
+[v13 계약](../docs/contracts/bus-static-v13.md)을 따른다. v12 활성 포인터는 그대로 유지한다.
+신규 모델 묶음은 `ML_STATIC_BUNDLE_DIR`로만 등록하며 `POST /v2/bus/predictions:batch`,
+`GET /v2/bus/health`로 확인한다. 기본은 SHADOW이며 자동 운영 승격은 없다.
+
+```powershell
+$env:ML_STATIC_BUNDLE_DIR='C:/Users/SSAFY/Desktop/S15P21E202/artifacts/ml-serving/20260918-v13-static-cpu'
+$env:ML_STATIC_TEST_APPLY='false'
+ml-serving/.venv/Scripts/python.exe -m uvicorn app:app --app-dir ml-serving --host 127.0.0.1 --port 8000
+```
+
+학습은 `tools/train_static_bus.py --data <model_features> --master <master.json.gz>
+--output <새 디렉터리> --version <새 버전> --supported-from YYYY-MM-DD
+--supported-until YYYY-MM-DD --device cuda`로 실행한다. 기존 정규화 표본을 재사용하며
+출력 디렉터리는 이미 있으면 거절한다. GPU 오류 후 CPU를 선택할 때는 `--device cpu`를
+명시하고 별도 버전/출력 경로에 남긴다. CPU 최대 16개, GPU 사용 시 0만 허용한다.
+검증용 표본은 CPU에서 실행할 수 있다. 실제 학습 결과를 확인하기 전에 완료로 취급하지 않는다.
+
+저장된 카카오 매핑 보고서와 새 묶음의 마스터 버전이 일치하면
+`tools/evaluate_static_bus.py --bundle <묶음> --mapping <mapping.json>
+--departure 2026-09-18T09:00:00+09:00 --output <report.json>`로 공식 서울 edge
+커버리지·전체 대안 성공 여부·단일 edge 지연을 확인한다. 실제 도착 정확도 검증과 구분한다.
+
+## 기존 v12 상태
 
 Jira [S15P21E202-46](https://ssafy.atlassian.net/browse/S15P21E202-46).
 GPU 서버의 최종 LightGBM 모델을 **CPU로 실행해 실제 구간 예측값을 확인**한다.

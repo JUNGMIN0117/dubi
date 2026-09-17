@@ -6,7 +6,7 @@ import java.util.*;
 import org.springframework.stereotype.Component;
 
 /**
- * 검색의 canonical BUS 경로를 v12 HTTP PREVIEW에 연결한다. 입력은 서울 공식 ID와 순번,
+ * 검색의 canonical BUS 경로를 버전이 고정된 HTTP PREVIEW에 연결한다. 입력은 서울 공식 ID와 순번,
  * 시각은 검색 기준시각에서 앞 edge의 예측 초를 누적한 KST 시간대다. 일정 출발 평가는
  * JourneyEvaluationService가 별도로 수행한다. 학습 대응/운영 승인을 임의로 올리지 않는다.
  */
@@ -36,15 +36,15 @@ public class BusPreviewPredictionAdapter implements BusPredictionPort {
                 if(estimate.applicationFailure()!=null) throw new Unavailable(estimate.applicationFailure());
                 if(estimate.modelVersion()==null || version!=null && !version.equals(estimate.modelVersion()))
                     throw new Unavailable("ML_MODEL_VERSION_MISMATCH");
-                if(estimate.historySampleCount()==null || estimate.historySampleCount()<1)
+                if(estimate.evidenceSampleCount()==null || estimate.evidenceSampleCount()<1)
                     throw new Unavailable("ML_HISTORY_INSUFFICIENT");
                 version=estimate.modelVersion(); computed=estimate.computedAt();
-                output.add(new EdgeMean(edge.segmentId(),edge.sequence(),estimate.seconds(),estimate.historySampleCount()));
+                output.add(new EdgeMean(edge.segmentId(),edge.sequence(),estimate.seconds(),estimate.evidenceSampleCount()));
                 cursor=cursor.plusSeconds((long)Math.ceil(estimate.seconds()));
             }
             if(computed==null) throw new Unavailable("MAPPING_NOT_VERIFIED");
-            // v12 HTTP는 특성 버전·원천 가용시각·예측 유효시각을 제공하지 않는다. 임의 값으로
-            // 운영 포트 증거를 채우지 않고 null로 남긴다. 소비자는 수치 PREVIEW만 따로 공개한다.
+            // 검색 응답의 운영 승인은 시험 적용과 별개다. v13 TEST_APPLY도 productionReady를
+            // 올리지 않으며 이 경계는 기존처럼 별도 PREVIEW 수치만 제공한다.
             return Optional.of(new Batch(version,null,input.digest(),"ADJACENT_BUS_MEAN_SECONDS",false,false,
                     null,computed,null,output));
         };

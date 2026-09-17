@@ -19,6 +19,14 @@ public class BusPreviewClient {
     private final ObjectMapper json;
     private final HttpClient http;
     private final Duration timeout;
+    @Value("${ddubi.recommendation.ml-preview-api-version:v1}")
+    private String apiVersion = "v1";
+    @Value("${ddubi.recommendation.ml-static-test-apply:false}")
+    private boolean staticTestApply;
+    @Value("${ddubi.recommendation.ml-static-master-version:}")
+    private String staticMasterVersion = "";
+    @Value("${ddubi.recommendation.ml-static-model-version:}")
+    private String staticModelVersion = "";
 
     public BusPreviewClient(ObjectMapper json,
             @Value("${ddubi.recommendation.ml-preview-base-url:}") String baseUrl,
@@ -33,12 +41,24 @@ public class BusPreviewClient {
                         LocalDate date, int hour) { }
     /** 모델 출처·계산시각·결측 품질까지 저장한다. 실패의 seconds는 null이며 0초로 변환하지 않는다. */
     public record Estimate(Double seconds, String reason, String modelVersion, Instant computedAt,
-                           Integer missingFeatureCount, Integer historySampleCount, Boolean dataInsufficient) {
+                           Integer missingFeatureCount, Integer historySampleCount, Boolean dataInsufficient,
+                           Integer trainingSampleCount, String featureVersion, String masterVersion, Instant validUntil) {
+        /** v12 호출자 호환 생성자. 8주 조회 횟수를 v13 학습 표본 수로 변환하지 않는다. */
+        public Estimate(Double seconds, String reason, String modelVersion, Instant computedAt,
+                        Integer missingFeatureCount, Integer historySampleCount, Boolean dataInsufficient) {
+            this(seconds, reason, modelVersion, computedAt, missingFeatureCount, historySampleCount,
+                    dataInsufficient, null, null, null, null);
+        }
+        /** 소비자가 평균시간 근거 수를 사용할 때에도 원래 두 종류의 값은 개별 필드에 보존한다. */
+        public Integer evidenceSampleCount() { return trainingSampleCount != null ? trainingSampleCount : historySampleCount; }
         /**
          * HTTP 호출 성공과 실제 시간 교체 자격을 분리한다. 모델은 결측 대체값으로 숫자를 만들 수
          * 있으므로 표본 부족을 PREVIEW 승인 사유로 덮지 않는다. 원래 반환 수치는 진단에 보존한다.
          */
         public String applicationFailure() {
+            if ("ML_SHADOW_ONLY".equals(reason)) return reason;
+            if (trainingSampleCount != null && (trainingSampleCount < 1 || validUntil == null || !validUntil.isAfter(Instant.now())))
+                return "ML_STATIC_EVIDENCE_INVALID";
             if (Boolean.TRUE.equals(dataInsufficient)) return "ML_HISTORY_INSUFFICIENT";
             if (seconds == null) return reason;
             if (!Double.isFinite(seconds) || seconds < 0) return "ML_INVALID_DURATION";
@@ -59,7 +79,8 @@ public class BusPreviewClient {
                     "provider_to_stop_id", input.toStopId(), "from_stop_sequence", input.sequence(),
                     "service_date", input.date().toString(), "hour_slot", input.hour());
             String body = json.writeValueAsString(Map.of("request_id", requestId, "segments", List.of(row)));
-            var request = HttpRequest.newBuilder(URI.create(baseUrl.replaceAll("/+$", "") + "/v1/bus/predictions:batch"))
+            if (!Set.of("v1", "v2").contains(apiVersion)) return Estimate.unavailable("ML_API_VERSION_INVALID");
+            var request = HttpRequest.newBuilder(URI.create(baseUrl.replaceAll("/+$", "") + "/" + apiVersion + "/bus/predictions:batch"))
                     .timeout(timeout).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build();
             var response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -74,6 +95,7 @@ public class BusPreviewClient {
                     || !rows.isArray() || rows.size() != 1 || !"edge".equals(rows.get(0).path("segment_key").asText()))
                 return Estimate.unavailable("ML_INVALID_RESPONSE");
             var result = rows.get(0);
+            if ("v2".equals(apiVersion)) return parseStatic(value, result, input);
             if ("UNAVAILABLE".equals(result.path("status").asText())) {
                 String reason = result.path("reason").asText();
                 return Estimate.unavailable(Set.of("UNSUPPORTED_PROVIDER", "REFERENCE_DATE_UNSUPPORTED", "UNSEEN_PROVIDER_ID").contains(reason)
@@ -106,5 +128,48 @@ public class BusPreviewClient {
         } catch (Exception failure) {
             return Estimate.unavailable("ML_UNAVAILABLE");
         }
+    }
+
+    /**
+     * v13 응답은 고정 모델·마스터 버전과 실제 인접 조합 검증 증거가 있어야 한다.
+     * Python과 Backend 양쪽 TEST_APPLY 설정이 켜졌을 때만 PREVIEW 시간 교체를 허용한다.
+     * productionReady=false는 유지한다. 검증 실패는 부분 합산하지 않고 기존 step fallback으로 전파한다.
+     */
+    private Estimate parseStatic(com.fasterxml.jackson.databind.JsonNode value,
+                                 com.fasterxml.jackson.databind.JsonNode result, Input input) {
+        if ("UNAVAILABLE".equals(result.path("status").asText())) {
+            String reason = result.path("reason").asText();
+            return Estimate.unavailable(Set.of("UNSUPPORTED_PROVIDER", "DATE_UNSUPPORTED", "EDGE_NOT_VERIFIED", "INVALID_DURATION")
+                    .contains(reason) ? reason : "ML_INVALID_RESPONSE");
+        }
+        var p = result.path("prediction");
+        Instant now = Instant.now();
+        Instant computed = Instant.parse(value.path("computed_at").asText());
+        Instant valid = Instant.parse(value.path("valid_until").asText());
+        String version = value.path("model_version").asText();
+        String master = value.path("master_version").asText();
+        String approval = value.path("approval").asText();
+        if (!"PREVIEW".equals(result.path("status").asText())
+                || !Set.of("SHADOW", "TEST_APPLY").contains(approval)
+                || !("TEST_APPLY".equals(approval) ? "TEST_APPLY" : "SHADOW_ONLY").equals(result.path("reason").asText())
+                || !"bus-request-static-v13.1".equals(value.path("feature_version").asText())
+                || value.path("data_version").asText().isBlank()
+                || staticModelVersion.isBlank() || !staticModelVersion.equals(version)
+                || staticMasterVersion.isBlank() || !staticMasterVersion.equals(master)
+                || input.date().isBefore(LocalDate.parse(value.path("supported_from").asText()))
+                || input.date().isAfter(LocalDate.parse(value.path("supported_until").asText()))
+                || computed.isAfter(now.plusSeconds(5)) || computed.isBefore(now.minusSeconds(300))
+                || !valid.isAfter(now) || !valid.isAfter(computed) || valid.isAfter(computed.plusSeconds(300))
+                || !p.path("training_ids_verified").isBoolean() || !p.path("training_ids_verified").asBoolean()
+                || !p.path("training_sample_count").canConvertToInt() || !p.path("training_sample_count").isIntegralNumber()
+                || p.path("training_sample_count").asInt() < 1
+                || !p.path("missing_feature_count").isIntegralNumber() || p.path("missing_feature_count").asInt(-1) != 0
+                || !p.path("data_insufficient").isBoolean() || p.path("data_insufficient").asBoolean()
+                || !p.path("mean_seconds").isNumber()) return Estimate.unavailable("ML_STATIC_EVIDENCE_INVALID");
+        double seconds = p.path("mean_seconds").asDouble();
+        if (!Double.isFinite(seconds) || seconds <= 0 || seconds > 86400) return Estimate.unavailable("ML_INVALID_DURATION");
+        boolean apply = staticTestApply && "TEST_APPLY".equals(approval);
+        return new Estimate(seconds, apply ? "ML_TEST_APPLY" : "ML_SHADOW_ONLY", version, computed,
+                0, null, false, p.path("training_sample_count").asInt(), value.path("feature_version").asText(), master, valid);
     }
 }

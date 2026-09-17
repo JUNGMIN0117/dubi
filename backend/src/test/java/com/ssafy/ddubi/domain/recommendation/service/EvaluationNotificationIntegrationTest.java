@@ -48,7 +48,7 @@ import static org.mockito.Mockito.when;
  * <p>배관 전체를 통과시킨다 — 평가가 outbox 에 쓰고, dispatcher 가 읽어
  * {@code NotificationService} 로 넘기고, 알림 행이 생기는 데까지.
  */
-@TestPropertySource(properties = "ddubi.recommendation.auto-notify-enabled=true")
+@TestPropertySource(properties = {"ddubi.recommendation.auto-notify-enabled=true", "ddubi.recommendation.shadow-preview-notify-enabled=true"})
 class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -61,6 +61,7 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
     @Autowired UserRepository users;
     @Autowired DeviceTokenService deviceTokens;
     @Autowired JdbcTemplate jdbc;
+    @Autowired EvaluationOutboxStore outbox;
     @MockitoBean PublicTransitRouteClient routeClient;
     @MockitoBean BusPreviewClient mlClient;
 
@@ -91,17 +92,85 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
     }
 
     private String outboxJson() {
-        return jdbc.queryForObject("SELECT notification_json FROM schedule_evaluation WHERE schedule_id=?",
+        return jdbc.queryForObject("SELECT payload_json FROM evaluation_notification_outbox WHERE schedule_id=? ORDER BY id LIMIT 1",
                 String.class, scheduleId);
     }
 
     private String outboxKey() {
-        return jdbc.queryForObject("SELECT notification_key FROM schedule_evaluation WHERE schedule_id=?",
+        return jdbc.queryForObject("SELECT dedup_key FROM evaluation_notification_outbox WHERE schedule_id=? ORDER BY id LIMIT 1",
                 String.class, scheduleId);
     }
 
+    private void dispatch() {
+        for(Long id:jdbc.queryForList("SELECT id FROM evaluation_notification_outbox WHERE schedule_id=?",Long.class,scheduleId)) dispatcher.dispatchOutbox(id);
+    }
     private List<Notification> sent() {
         return notifications.findAll();
+    }
+
+    @Test void retryKeepsNotificationIdAndSendsOutsideTransaction() {
+        schedule(600); workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        when(pushSender.send(any())).thenAnswer(call->{
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return PushResult.failed("TEMPORARY");
+        });
+        dispatch();
+        long notificationId=sent().get(0).getId();
+        assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox",String.class)).isEqualTo("PENDING");
+        jdbc.update("UPDATE evaluation_notification_outbox SET next_attempt_at=?",ScheduleEvaluationStore.ts(now.minusSeconds(1)));
+        when(pushSender.send(any())).thenReturn(PushResult.ok()); dispatch();
+        assertThat(sent()).singleElement().satisfies(n->{assertThat(n.getId()).isEqualTo(notificationId);assertThat(n.getStatus()).isEqualTo(NotificationStatus.SENT);});
+    }
+
+    @Test void retryAfterAlarmDisabledIsCanceledWithoutAnotherPush() {
+        schedule(600); workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        when(pushSender.send(any())).thenReturn(PushResult.failed("TEMPORARY")); dispatch();
+        jdbc.update("UPDATE user SET is_alarm=false WHERE id=?",owner);
+        jdbc.update("UPDATE evaluation_notification_outbox SET next_attempt_at=?",ScheduleEvaluationStore.ts(now.minusSeconds(1)));
+        dispatch();
+        assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox",String.class)).isEqualTo("CANCELED");
+        org.mockito.Mockito.verify(pushSender,org.mockito.Mockito.times(1)).send(any());
+    }
+
+    @Test void canceledInputInvalidatesPendingOutboxAtCommit() {
+        schedule(600); workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        scheduleService.cancel(owner,scheduleId);
+        assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox",String.class)).isEqualTo("CANCELED");
+        dispatch(); org.mockito.Mockito.verifyNoInteractions(pushSender);
+    }
+
+    @Test void replacementEvaluationUpdatesPendingPayloadAndRejectsPreviousLease() {
+        schedule(600);
+        var first=workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        long id=jdbc.queryForObject("SELECT id FROM evaluation_notification_outbox",Long.class);
+        var previous=outbox.claim(id,Instant.now());
+        var latest=workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(1));
+        assertThat(latest.evaluationId()).isNotEqualTo(first.evaluationId());
+        assertThat(outbox.current(previous,Instant.now())).isFalse();
+        assertThat(jdbc.queryForObject("SELECT evaluation_id FROM evaluation_notification_outbox",String.class)).isEqualTo(latest.evaluationId());
+        when(pushSender.send(any())).thenAnswer(call->{
+            var message=call.getArgument(0,com.ssafy.ddubi.global.push.PushMessage.class);
+            assertThat(message.data()).containsEntry("evaluationId",latest.evaluationId())
+                    .containsEntry("decision",latest.conditional().decision().name()).containsKey("notificationId");
+            return PushResult.ok();
+        });
+        dispatch();
+        assertThat(sent()).singleElement().satisfies(n->assertThat(n.getStatus()).isEqualTo(NotificationStatus.SENT));
+    }
+
+    @Test void expiredWorkerCannotSendOrAckReclaimedLease() {
+        schedule(600); workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        long id=jdbc.queryForObject("SELECT id FROM evaluation_notification_outbox",Long.class);
+        Instant claimAt=Instant.now();
+        var first=outbox.claim(id,claimAt);
+        jdbc.update("UPDATE evaluation_notification_outbox SET lease_until=?",ScheduleEvaluationStore.ts(claimAt.minusSeconds(1)));
+        var second=outbox.claim(id,claimAt);
+        assertThat(outbox.current(first,claimAt)).isFalse(); assertThat(outbox.current(second,claimAt)).isTrue();
+        outbox.finish(first,"SENT",null,claimAt);
+        assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox",String.class)).isEqualTo("SENDING");
+        jdbc.update("UPDATE evaluation_notification_outbox SET attempts=5,lease_until=?",ScheduleEvaluationStore.ts(now.minusSeconds(1)));
+        assertThat(outbox.claim(id,claimAt)).isNull();
+        assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox",String.class)).isEqualTo("FAILED");
     }
 
     // ------------------------------------------------------------------
@@ -114,10 +183,10 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
 
         workflow.evaluate(scheduleId, owner, TriggerType.INITIAL, now);
 
-        assertThat(outboxKey()).as("평가가 outbox 에 남긴다").startsWith("ON_TIME_UNLIKELY:");
+        assertThat(outboxKey()).as("평가가 outbox 에 남긴다").hasSize(64);
         assertThat(sent()).as("dispatcher 를 돌리기 전에는 아직 안 보낸다").isEmpty();
 
-        dispatcher.dispatch(scheduleId);
+        dispatch();
 
         assertThat(sent()).singleElement().satisfies(notification -> {
             assertThat(notification.getType()).isEqualTo(NotificationType.ON_TIME_UNLIKELY);
@@ -138,12 +207,12 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
     void doesNotRepeatWhileNothingChanges() {
         schedule(600);
         workflow.evaluate(scheduleId, owner, TriggerType.INITIAL, now);
-        dispatcher.dispatch(scheduleId);
+        dispatch();
         String firstKey = outboxKey();
 
         workflow.evaluate(scheduleId, owner, TriggerType.REFRESH, now.plusSeconds(60));
-        dispatcher.dispatch(scheduleId);
-        dispatcher.dispatch(scheduleId);
+        dispatch();
+        dispatch();
 
         assertThat(outboxKey()).as("상황이 같으면 키도 같다").isEqualTo(firstKey);
         assertThat(sent()).hasSize(1);
@@ -155,9 +224,9 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
         schedule(7200);
 
         workflow.evaluate(scheduleId, owner, TriggerType.INITIAL, now);
-        dispatcher.dispatch(scheduleId);
+        dispatch();
 
-        assertThat(outboxKey()).startsWith("ROUTE_CHANGE:");
+        assertThat(outboxKey()).hasSize(64);
         assertThat(sent()).singleElement().satisfies(notification -> {
             assertThat(notification.getType()).isEqualTo(NotificationType.ROUTE_CHANGE);
             assertThat(notification.getTitle()).isEqualTo("더 빠른 경로가 있어요");
@@ -174,7 +243,7 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
     void enablingNotificationDoesNotUnblockAccept() {
         schedule(600);
         var result = workflow.evaluate(scheduleId, owner, TriggerType.INITIAL, now);
-        dispatcher.dispatch(scheduleId);
+        dispatch();
 
         assertThat(sent()).hasSize(1);
         assertThatThrownBy(() -> store.accept(scheduleId, owner, result.evaluationId(), now))
@@ -190,11 +259,11 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
         assertThat(outboxKey()).isNotNull();
 
         store.stop(scheduleId, owner);
-        dispatcher.dispatch(scheduleId);
+        dispatch();
 
         // 발송을 막는 것은 notification_json 이고 stop 은 그것을 지운다. notification_key 는
         // 남지만 dispatcher 가 json 부터 보므로 나가지 않는다.
-        assertThat(outboxJson()).as("대기 중이던 알림 내용이 사라진다").isNull();
+        assertThat(jdbc.queryForObject("SELECT status FROM evaluation_notification_outbox WHERE schedule_id=?",String.class,scheduleId)).isEqualTo("CANCELED");
         assertThat(sent()).isEmpty();
     }
 }

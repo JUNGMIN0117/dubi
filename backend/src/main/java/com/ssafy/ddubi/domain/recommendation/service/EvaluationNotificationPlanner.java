@@ -21,11 +21,9 @@ import java.util.Optional;
  * 환경에서만 켜고, 발표 전에는 설정 한 줄로 되돌린다. 코드를 고쳐야 끌 수 있으면 급할 때
  * 못 끈다.
  *
- * <h3>왜 두 가지뿐인가</h3>
- * 평가기는 <b>같은 출발시각</b>의 최소시간만 계산하고 조기 출발을 역산하지 않는다
- * ({@code suggestion.proposed() == comparison.fastest()}). 그래서 "N분 일찍 나가세요"
- * (EARLY_DEPART)는 지금 만들 수 없다 — 없는 근거로 시각을 지어내면 사용자가 그걸 믿고
- * 일찍 나간다. 출발 역산이 붙으면 그때 추가한다.
+ * <h3>조건부 탐색과 기존 경로 안내</h3>
+ * ADVANCE는 재평가로 확인한 출발·도착시각을 EARLY_DEPART에 사용한다. 나머지는 아래 기존 안내를
+ * 유지한다. v2 PREVIEW는 shadow 설정을 명시적으로 켠 검증 환경에서만 발송하며 본문에 검증용을 표시한다.
  *
  * <pre>
  * 선택 경로가 LATE_ESTIMATE/BLOCKED   → ON_TIME_UNLIKELY
@@ -43,12 +41,14 @@ public class EvaluationNotificationPlanner {
 
     private final boolean enabled;
     private final Duration meaningfulGain;
+    private final boolean shadowPreview;
 
     public EvaluationNotificationPlanner(
             @Value("${ddubi.recommendation.auto-notify-enabled:false}") boolean enabled,
-            @Value("${ddubi.recommendation.notify-route-gain:5m}") Duration meaningfulGain) {
+            @Value("${ddubi.recommendation.notify-route-gain:5m}") Duration meaningfulGain,
+            @Value("${ddubi.recommendation.shadow-preview-notify-enabled:false}") boolean shadowPreview) {
         this.enabled = enabled;
-        this.meaningfulGain = meaningfulGain;
+        this.meaningfulGain = meaningfulGain; this.shadowPreview=shadowPreview;
     }
 
     /** 보낼 알림과 그 식별 키. 키가 그대로면 dispatcher 가 다시 보내지 않는다. */
@@ -62,12 +62,19 @@ public class EvaluationNotificationPlanner {
      * 알림에는 scheduleId 가 있으므로 화면은 최신 추천 조회로 근거를 찾아갈 수 있다.
      */
     public Optional<Planned> plan(ScheduleEvaluationStore.Job job, ScheduleEvaluationWorkflow.Outcome outcome) {
-        if (!enabled) {
+        if (!enabled || outcome.conditional()!=null && !shadowPreview && (outcome.preview()==null || !outcome.preview().productionReady())) {
             return Optional.empty();
         }
         Result selected = outcome.selected();
         Result fastest = outcome.suggestion().proposed();
 
+        if(outcome.conditional()!=null && fastest!=null
+                && outcome.conditional().decision()==com.ssafy.ddubi.domain.recommendation.evaluation.ConditionalDeparturePolicy.Decision.ADVANCE_DEPARTURE
+                && Duration.between(fastest.departureAt(),job.departure()).compareTo(meaningfulGain)>=0) {
+            String key="EARLY_DEPART:"+fastest.journeyKey()+":"+(fastest.departureAt().getEpochSecond()/300);
+            return Optional.of(new Planned(command(job,outcome,NotificationType.EARLY_DEPART,"출발 계획을 확인해 주세요",
+                    at(fastest.departureAt())+" 출발 시 "+at(fastest.estimatedArrivalAt())+" 도착 예상입니다.",key),key));
+        }
         if (selected != null && late(selected.assessment())) {
             return Optional.of(lateness(job, outcome, selected, fastest));
         }
@@ -128,8 +135,10 @@ public class EvaluationNotificationPlanner {
                 .scheduleId(outcome.scheduleId())
                 .type(type)
                 .title(title)
-                .body(body)
+                .body(outcome.preview()!=null&&!outcome.preview().productionReady()?"[검증용] "+body:body)
                 .suppressKey(suppressKey)
+                .evaluationId(outcome.evaluationId())
+                .decision(outcome.conditional()==null?null:outcome.conditional().decision().name())
                 .build();
     }
 

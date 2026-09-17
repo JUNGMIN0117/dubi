@@ -22,7 +22,7 @@ public class ScheduleEvaluationWakeup {
         var schedules = jdbc.queryForList("SELECT id FROM schedule WHERE id=? FOR UPDATE", Long.class, scheduleId);
         if (schedules.isEmpty()) return;
         jdbc.update("UPDATE schedule_evaluation e JOIN schedule s ON s.id=e.schedule_id "
-                + "SET e.next_check_at=?,e.event_revision=e.event_revision+1 "
+                + "SET e.next_check_at=?,e.event_revision=e.event_revision+1,e.failure_count=0,e.retry_exhausted=false "
                 + "WHERE e.schedule_id=? AND s.status='UPCOMING' AND e.stopped=false AND s.arrive_by>? AND EXISTS "
                 + "(SELECT 1 FROM route r JOIN route_segment rs ON rs.route_id=r.id "
                 + "JOIN route_segment_edge edge ON edge.route_segment_id=rs.id "

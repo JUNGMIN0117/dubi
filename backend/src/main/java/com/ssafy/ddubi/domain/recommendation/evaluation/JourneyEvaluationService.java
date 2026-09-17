@@ -98,6 +98,14 @@ public class JourneyEvaluationService {
         private Session(long deadlineNanos, long mlDeadlineNanos, boolean absolute) { deadline=deadlineNanos; mlDeadline=mlDeadlineNanos; }
         /** 테스트·재현용: 절대 nanoTime 기준 마감을 직접 지정한다. */
         static Session withDeadlines(long deadlineNanos, long mlDeadlineNanos) { return new Session(deadlineNanos, mlDeadlineNanos, true); }
+        /**
+         * ML 호출 한 번을 끝까지 기다려도 전체 예산을 넘기지 않는지 본다.
+         * 수동 재계산은 예산이 10초인데 호출 한 건이 7초까지 걸릴 수 있어, 늦게 시작하면 예산을 넘긴다.
+         * 남은 시간이 부족하면 호출을 시작하지 않고 기존 fallback(과거 평균·경로 API 원본)으로 간다.
+         */
+        boolean roomForMlCall(long timeoutMillis) {
+            return System.nanoTime() + Duration.ofMillis(timeoutMillis).toNanos() <= deadline;
+        }
     }
     public Session newSession() { return new Session(20000, mlBudgetShare); }
     /**
@@ -157,7 +165,8 @@ public class JourneyEvaluationService {
                             BusPreviewClient.Estimate estimate = cache.get(input);
                             if (estimate == null) {
                                 // 선조회 뒤 앞 edge 예측으로 진입 시간대가 바뀐 edge만 개별 호출한다. 개수·시간 한도를 넘으면 예산 소진.
-                                if (session.mlIndividualCalls >= INDIVIDUAL_CALL_LIMIT || System.nanoTime() >= session.mlDeadline) {
+                                if (session.mlIndividualCalls >= INDIVIDUAL_CALL_LIMIT || System.nanoTime() >= session.mlDeadline
+                                        || !session.roomForMlCall(client.timeoutMillis())) {
                                     exhausted = true; estimate = BusPreviewClient.Estimate.unavailable("ML_BUDGET_EXHAUSTED");
                                 } else {
                                     session.mlIndividualCalls++;
@@ -371,7 +380,7 @@ public class JourneyEvaluationService {
         }
         inputs.removeIf(session.cache::containsKey);
         if (inputs.isEmpty()) return false;
-        if (System.nanoTime() >= session.mlDeadline) return true;
+        if (System.nanoTime() >= session.mlDeadline || !session.roomForMlCall(client.timeoutMillis())) return true;
         var results = client.predictBatch(new ArrayList<>(inputs), contract());
         for (var entry : results.entrySet()) { trackModel(session, entry.getValue()); session.cache.put(entry.getKey(), entry.getValue()); }
         return false;

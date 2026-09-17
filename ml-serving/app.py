@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 import logging
 import os
 from pathlib import Path
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -24,7 +26,29 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_BUNDLE = Path(__file__).resolve().parent.parent / 'artifacts/ml-serving/20260908-v12'
 
 
-def create_app(predictor=None, settings=None):
+def local_bundle():
+    """명시 환경값이 없을 때만 검증 후 기록한 로컬 포인터를 읽는다. 경로 이탈/깨진 포인터는 실패다."""
+    pointer=DEFAULT_BUNDLE.parent/'active-bundle.json'
+    if not pointer.exists(): return DEFAULT_BUNDLE
+    import json
+    name=json.loads(pointer.read_text(encoding='utf-8'))['directory']
+    if not isinstance(name,str) or Path(name).name!=name:
+        raise BundleError('BUNDLE_PATH_INVALID')
+    target=(DEFAULT_BUNDLE.parent/name).resolve()
+    if not target.is_relative_to(DEFAULT_BUNDLE.parent.resolve()): raise BundleError('BUNDLE_PATH_INVALID')
+    return target
+
+
+def reference_health(model, today):
+    """서울 운행일 기준 유효 범위와 원천 파일 결측을 구분한다. 결측을 정상 관측으로 채우지 않는다."""
+    metadata=model.metadata()
+    start=date.fromisoformat(metadata['supported_from']); end=date.fromisoformat(metadata['supported_until'])
+    state='NOT_STARTED' if today<start else 'EXPIRED' if today>end else 'CURRENT'
+    return dict(metadata,reference_status=state,reference_days_remaining=max(0,(end-today).days),
+                missing_reference_file_count=len(model.bundle.get('missing_files',[])))
+
+
+def create_app(predictor=None, settings=None, today=None):
     """테스트에서는 객체를 주입하며 실서비스에서는 환경변수로 묶음 경로를 고정한다.
 
 로딩 실패를 정상값으로 숨기지 않고 readiness 503으로 노출한다. 예외 원문에는
@@ -43,7 +67,7 @@ def create_app(predictor=None, settings=None):
         if predictor is None:
             try:
                 application.state.predictor = Predictor(
-                    os.environ.get('ML_BUNDLE_DIR', DEFAULT_BUNDLE), cache_mib=policy.cache_mib)
+                    os.environ['ML_BUNDLE_DIR'] if os.environ.get('ML_BUNDLE_DIR') else local_bundle(), cache_mib=policy.cache_mib)
             except Exception as error:
                 LOGGER.error('MODEL_LOAD_FAILED type=%s', type(error).__name__)
         try:
@@ -66,11 +90,14 @@ def create_app(predictor=None, settings=None):
 
     @application.get('/health/ready')
     async def ready():
-        """모델과 참조 무결성 검사를 통과한 경우만 준비 상태를 반환한다."""
+        """무결성과 오늘 KST 참조 범위를 함께 확인한다. 만료 묶음은 503이며 과거 Replay API는 별도로 유지한다."""
         model = application.state.predictor
         if model is None:
             raise HTTPException(status_code=503, detail='MODEL_NOT_READY')
-        return {'status': 'READY_FOR_PREVIEW', **model.metadata()}
+        health=reference_health(model,today() if today else datetime.now(ZoneInfo('Asia/Seoul')).date())
+        if health['reference_status']!='CURRENT':
+            return JSONResponse(status_code=503,content={'status':'REFERENCE_DATE_UNSUPPORTED',**health})
+        return {'status': 'READY_FOR_PREVIEW', **health}
 
     @application.post('/v1/bus/predictions:batch', response_model=BatchResponse,
                       responses={422: {'model': InvalidRequest}, 503: {'model': ServiceUnavailable}})

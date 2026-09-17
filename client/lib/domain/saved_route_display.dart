@@ -21,8 +21,10 @@ class SavedRouteDisplay {
   final int distinct;
 
   /// 개발자 진단용 한 줄. 일반 사용자 화면에는 쓰지 않는다.
+  /// 화면 순번은 1부터 다시 매기므로 서버가 준 순위를 여기에 남겨 원본과 대조할 수 있게 한다.
   String get diagnosticsLine =>
-      '전체 후보 $total · 중복 제거 후 $distinct · 표시 ${visible.length}';
+      '전체 후보 $total · 중복 제거 후 $distinct · 표시 ${visible.length}'
+      ' · 서버 순위 ${visible.map((r) => r.rankNo).join(',')}';
 
   static const int maxVisible = 5;
 

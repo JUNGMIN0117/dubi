@@ -132,8 +132,14 @@ void main() {
         second.visible.map((r) => r.routeId));            // 같은 입력이면 같은 결과
   });
 
-  test('진단 문구는 전체·중복 제거 후·표시 수만 담는다', () {
+  test('진단 문구는 전체·중복 제거 후·표시 수와 서버 순위를 담는다', () {
     final display = SavedRouteDisplay.from(fixture33());
-    expect(display.diagnosticsLine, '전체 후보 33 · 중복 제거 후 16 · 표시 5');
+    final ranks = display.visible.map((r) => r.rankNo).join(',');
+    expect(
+      display.diagnosticsLine,
+      '전체 후보 33 · 중복 제거 후 16 · 표시 5 · 서버 순위 $ranks',
+    );
+    // 화면 순번(1~5)과 서버 순위는 다를 수 있다. 진단에서 원본을 확인할 수 있어야 한다.
+    expect(display.visible.map((r) => r.rankNo).toList(), isNot([1, 2, 3, 4, 5]));
   });
 }

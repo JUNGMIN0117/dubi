@@ -4030,9 +4030,15 @@ class _SavedRouteList extends StatelessWidget {
             child: Text('아직 평가된 추천 경로가 없어요.'),
           )
         else ...[
-          for (final route in routes) ...[
-            _SavedRouteTile(route: route, onTap: onSelected),
-            if (route != routes.last) const SizedBox(height: 8),
+          // 화면 순번은 1부터 다시 매긴다. 중복을 묶은 뒤 서버 순위(1,2,6,8,10)를 그대로
+          // 보여주면 사용자에게는 번호가 건너뛴 것처럼 보인다. 서버 순위는 개발자 진단에 남는다.
+          for (var i = 0; i < routes.length; i++) ...[
+            _SavedRouteTile(
+              route: routes[i],
+              displayRank: i + 1,
+              onTap: onSelected,
+            ),
+            if (i != routes.length - 1) const SizedBox(height: 8),
           ],
           // 후보 수와 묶인 개수는 개발자 진단에서만 본다. 일반 사용자 화면에는 숫자를 내보내지 않는다.
           ValueListenableBuilder<bool>(
@@ -4055,7 +4061,14 @@ class _SavedRouteList extends StatelessWidget {
 }
 
 class _SavedRouteTile extends StatelessWidget {
-  const _SavedRouteTile({required this.route, required this.onTap});
+  const _SavedRouteTile({
+    required this.route,
+    required this.displayRank,
+    required this.onTap,
+  });
+
+  /// 화면에 보이는 순번(1부터). 서버가 준 순위와 다를 수 있다.
+  final int displayRank;
 
   final SavedRouteSummary route;
   final ValueChanged<SavedRouteSummary>? onTap;
@@ -4103,7 +4116,7 @@ class _SavedRouteTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          route.selected ? '선택된 추천 경로' : '${route.rankNo}순위 경로',
+                          route.selected ? '선택된 추천 경로' : '$displayRank순위 경로',
                           style: const TextStyle(
                             fontWeight: FontWeight.w900,
                             color: DdubiColors.navy,
@@ -5361,6 +5374,7 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
   KakaoMapController? _controller;
   StreamSubscription<CameraMoveEndEvent>? _cameraMoveSubscription;
   List<_ProjectedRouteSegment> _projectedSegments = const [];
+  var _projectionGeneration = 0;
 
   LatLng get _center {
     final bounds = widget.routeMap.bounds;
@@ -5458,29 +5472,51 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
     }
   }
 
+  /// 지도 좌표를 화면 좌표로 바꿔 경로선을 그린다.
+  ///
+  /// 지도가 돌려주는 값은 기기 물리 픽셀이고 캔버스는 논리 픽셀을 쓴다. 화면 배율로 나누지
+  /// 않으면 선이 실제 위치에서 배율만큼 밀려 강 위 같은 엉뚱한 곳에 그려진다.
+  /// 지도를 움직이는 동안 먼저 시작한 계산이 뒤늦게 반영되면 선이 끊겨 보이므로, 세대 번호로
+  /// 가장 최근 계산만 반영한다.
   Future<void> _refreshProjectedSegments() async {
     final controller = _controller;
     if (controller == null || kIsWeb) return;
+    final generation = ++_projectionGeneration;
+    final pixelRatio = View.of(context).devicePixelRatio;
     final projected = <_ProjectedRouteSegment>[];
     try {
       for (final segment in widget.routeMap.segments) {
-        final points = <Offset>[];
-        for (final coordinate in segment.coordinates) {
-          final point = await controller.toScreenPoint(
-            position: LatLng(
-              latitude: coordinate.latitude,
-              longitude: coordinate.longitude,
+        final rawPoints = await Future.wait(
+          segment.coordinates.map(
+            (coordinate) => controller.toScreenPoint(
+              position: LatLng(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+              ),
             ),
-          );
-          if (point != null) points.add(point);
-        }
+          ),
+        );
+        final points = rawPoints
+            .whereType<Offset>()
+            .map((point) => point / pixelRatio)
+            .toList(growable: false);
         projected.add(
           _ProjectedRouteSegment(mode: segment.mode, points: points),
         );
       }
-      if (mounted) setState(() => _projectedSegments = projected);
+      if (mounted && generation == _projectionGeneration) {
+        setState(() => _projectedSegments = projected);
+      }
     } catch (error) {
       debugPrint('Saved route coordinate projection failed: $error');
+    }
+  }
+
+  /// 지도를 만지는 순간 이전 화면 좌표는 더 이상 맞지 않는다. 지우고 이동이 끝나면 다시 그린다.
+  void _hideProjectedRoute(PointerDownEvent _) {
+    _projectionGeneration++;
+    if (_projectedSegments.isNotEmpty) {
+      setState(() => _projectedSegments = const []);
     }
   }
 
@@ -5498,13 +5534,16 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: KakaoMapConfig.isReady
-                ? KakaoMap(
-                    initialPosition: _center,
-                    initialLevel: kIsWeb ? 5 : 13,
-                    onMapCreated: _onMapCreated,
-                  )
-                : const ColoredBox(color: Color(0xFFEAF2EC)),
+            child: Listener(
+              onPointerDown: _hideProjectedRoute,
+              child: KakaoMapConfig.isReady
+                  ? KakaoMap(
+                      initialPosition: _center,
+                      initialLevel: kIsWeb ? 5 : 13,
+                      onMapCreated: _onMapCreated,
+                    )
+                  : const ColoredBox(color: Color(0xFFEAF2EC)),
+            ),
           ),
           if (hasCoordinates)
             Positioned.fill(
@@ -5606,35 +5645,11 @@ class _SavedRoutePolylinePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (projectedSegments.isNotEmpty) {
-      for (final segment in projectedSegments) {
-        _drawSegment(canvas, segment.mode, segment.points);
-      }
-      return;
-    }
-    final bounds = routeMap.bounds;
-    if (bounds == null) return;
-    const padding = 28.0;
-    final width = size.width - padding * 2;
-    final height = size.height - padding * 2;
-    final lngRange = bounds.maxLng - bounds.minLng;
-    final latRange = bounds.maxLat - bounds.minLat;
-
-    Offset point(RouteCoordinate coordinate) => Offset(
-      padding +
-          (lngRange == 0
-              ? width / 2
-              : (coordinate.longitude - bounds.minLng) / lngRange * width),
-      padding +
-          (latRange == 0
-              ? height / 2
-              : (bounds.maxLat - coordinate.latitude) / latRange * height),
-    );
-
-    for (final segment in routeMap.segments) {
-      if (segment.coordinates.length < 2) continue;
-      final points = segment.coordinates.map(point).toList(growable: false);
-      _drawSegment(canvas, segment.mode, points);
+    // 지도 투영으로 얻은 화면 좌표만 그린다. 예전에는 좌표 범위를 위젯 크기에 비례 배치하는
+    // 임시 방식으로도 그렸는데, 실제 지도 타일과 맞지 않아 경로가 강 위 같은 엉뚱한 곳에
+    // 그려졌다. 투영 전에는 아무것도 그리지 않고 지도만 보여준다.
+    for (final segment in projectedSegments) {
+      _drawSegment(canvas, segment.mode, segment.points);
     }
   }
 

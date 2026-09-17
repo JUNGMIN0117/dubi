@@ -363,7 +363,11 @@ void main() {
     router.go('/schedules');
     await tester.pumpAndSettle();
     bool? navigationResult;
-    final navigation = router.push<bool>('/schedules/new').then((result) {
+    // 도착 기본값 19:30보다 현재 시각이 늦어도 출발 < 도착인 저장 시나리오를 유지한다.
+    final navigation = router.push<bool>(
+      '/schedules/new',
+      extra: DateTime.now().add(const Duration(days: 2)),
+    ).then((result) {
       navigationResult = result;
       return result;
     });

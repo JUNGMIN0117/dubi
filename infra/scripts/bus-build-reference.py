@@ -138,20 +138,28 @@ def actual_reference(source,target,min_samples,min_dates):
     return dict(counters)
 
 
-def route_proposals(source,target,parent_version):
+def route_proposals(source,target,parent_version,existing_routes=()):
     routes=[]
+    existing={(r['namespace'],str(r['routeId'])) for r in existing_routes}
+    already_present=[]
     with source.open(encoding='utf-8') as f:
         for line in f:
             r=json.loads(line)
+            identity=(r['namespace'],str(r['providerRouteId']))
+            if identity in existing:
+                # 기존 노선의 정류장/순서가 동일하다는 판정이 아니라 중복 추가 금지다.
+                already_present.append(dict(namespace=identity[0],routeId=identity[1],
+                    status='ALREADY_IN_MASTER_REQUIRES_EDGE_REVIEW'))
+                continue
             stops=[dict(namespace=r['namespace'],stopId=s['stopId'],sequence=s['sequence'],stopName=s['stopName'],
                         longitude=s['longitude'],latitude=s['latitude'],direction=None,boardingAllowed=None,
                         evidence=dict(sheet=s['sourceSheet'],row=s['sourceRow'])) for s in r['stops']]
             routes.append(dict(namespace=r['namespace'],routeId=r['providerRouteId'],routeName=r['stops'][0]['routeName'],
                 stops=stops,sourceSnapshotDate=r['sourceSnapshotDate'],ambiguousSequences=r['ambiguousSequences']))
     save(target/'master-additions-candidate.json',dict(schemaVersion=1,parentMasterVersion=parent_version,
-        productionReady=False,routes=routes,blockedBy=['DIRECTION_UNKNOWN','BOARDING_PERMISSION_UNKNOWN',
+        productionReady=False,routes=routes,alreadyPresent=already_present,blockedBy=['DIRECTION_UNKNOWN','BOARDING_PERMISSION_UNKNOWN',
                                                      'EFFECTIVE_DATE_UNVERIFIED','ID_POLICY_APPROVAL_REQUIRED']))
-    return dict(routes=len(routes),stops=sum(len(r['stops']) for r in routes))
+    return dict(routes=len(routes),stops=sum(len(r['stops']) for r in routes),alreadyPresent=len(already_present))
 
 
 def run(args):
@@ -190,7 +198,7 @@ def run(args):
                 part,res=checkpoint(target,paths,crosswalk,overlap,i);parts.append(part);results.append(res)
                 print(json.dumps(dict(stage='PART_COMPLETE',part=i,result=res)),flush=True)
             actual=actual_reference(args.actual,target,args.min_samples,args.min_dates)
-            additions=route_proposals(args.route_proposals,target,master['version'])
+            additions=route_proposals(args.route_proposals,target,master['version'],master['routes'])
             # 파트들은 날짜 비중복 또는 사전 중복제거됨. 평균은 totalSeconds 합 / observedDates 합으로 읽는다.
             # 큰 재복사 없이 읽기 전용 파트들에 대한 합산 SQL 계약을 저장한다.
             union=' UNION ALL '.join(f'SELECT * FROM part{i}.hourly_reference' for i in range(len(parts)))

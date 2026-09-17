@@ -11,7 +11,7 @@
     {
       "path": "bus/metropolitan-bus-v6.crosswalk.json.manifest.json",
       "version": "METRO-BUS-20260917-SEOUL-0902",
-      "sha256": "3a97e1457de3ce0c1952cea0bd9109a83205cf8c7bf5915406648a3ae6932cb5",
+      "sha256": "172533760e7674fd8db93c48c9944b7e9f25dbdaa4991db024a04ebdce882398",
       "source": "bus/metropolitan-bus-v6.json.manifest.json",
       "referenceDate": null
     },
@@ -25,14 +25,14 @@
     {
       "path": "bus/metropolitan-bus-v6.json.manifest.json",
       "version": "METRO-BUS-20260917-SEOUL-0902",
-      "sha256": "9e97e812fc1d7f843bf93d41b8009e78d3896d82f188ad975df8617209741fde",
+      "sha256": "f5c0a7b5424ef153404ab7e5417ae09a012ab83fb72614c39d44ba31d20de120",
       "source": "bus/metropolitan-bus-v6.json.manifest.json",
       "referenceDate": null
     },
     {
       "path": "bus/metropolitan-bus-v6.json.sources.json",
       "version": "METRO-BUS-20260917-SEOUL-0902",
-      "sha256": "bbdfe4ae31288b8eb3e63fe9fe981378ace15084d850e7dfd56b4288005e1c48",
+      "sha256": "a05d5f518c7382eccee53a688ef0bd510b935ca3eac16996625c2eeb04730423",
       "source": "bus/metropolitan-bus-v6.json.manifest.json",
       "referenceDate": null
     },

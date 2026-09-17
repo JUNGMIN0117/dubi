@@ -48,4 +48,16 @@ class ReferenceTests(unittest.TestCase):
             self.assertIsNone(output['weatherBucket'])
 
 
+class ProposalRefreshTest(unittest.TestCase):
+    def test_existing_route_is_not_added_or_approved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source=root/'proposals.jsonl'
+            source.write_text(json.dumps(dict(namespace='SEOUL_BUS',providerRouteId='r'))+'\n',encoding='utf-8')
+            result=m.route_proposals(source,root,'new',[dict(namespace='SEOUL_BUS',routeId='r')])
+            self.assertEqual(result,dict(routes=0,stops=0,alreadyPresent=1))
+            output=json.loads((root/'master-additions-candidate.json').read_text(encoding='utf-8'))
+            self.assertFalse(output['productionReady'])
+            self.assertEqual(output['alreadyPresent'][0]['status'],'ALREADY_IN_MASTER_REQUIRES_EDGE_REVIEW')
+
+
 if __name__=='__main__': unittest.main()

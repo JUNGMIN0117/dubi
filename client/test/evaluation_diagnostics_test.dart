@@ -1,5 +1,7 @@
 import 'package:ddubi/domain/evaluation_diagnostics.dart';
 import 'package:ddubi/domain/schedule_evaluation.dart';
+import 'package:ddubi/presentation/evaluation_diagnostics_panel.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ScheduleEvaluationV2 _evaluation(
@@ -98,5 +100,39 @@ void main() {
     expect(diagnostics.historicalSummary, HistoricalApplication.notAttempted);
     expect(diagnostics.modelVersion, 'v12');
     expect(diagnostics.dataVersion, 'metro-20260910');
+  });
+
+  testWidgets('진단 패널은 원본 코드가 많아도 화면을 덮지 않게 줄여 보여준다', (tester) async {
+    // 실기기에서 부족한 정보 174건이 그대로 뿌려져 화면을 덮었다.
+    final many = [for (var i = 0; i < 174; i++) 'BUS:10010060$i:101000082:101000084:MISSING'];
+    final evaluation = ScheduleEvaluationV2.fromJson({
+      'schemaVersion': 'schedule-evaluation-v2',
+      'state': 'READY',
+      'decision': 'KEEP_DEPARTURE',
+      'quality': {
+        'preview': true,
+        'productionEligible': false,
+        'realtimeApplied': false,
+        'walkingApiCoverage': 'BOTH',
+        'costCoverage': 'COMPLETE',
+        'missingInputs': many,
+        'fallbackReasons': <String>[],
+      },
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: EvaluationDiagnosticsPanel(evaluation: evaluation),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('missingInputs(174)'), findsOneWidget);
+    expect(find.textContaining('외 154건'), findsOneWidget);
+    expect(find.textContaining('BUS:100100600:'), findsOneWidget);
+    expect(find.textContaining('BUS:100100173:'), findsNothing);
   });
 }

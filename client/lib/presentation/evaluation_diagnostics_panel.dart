@@ -34,7 +34,7 @@ class EvaluationDiagnosticsPanel extends StatelessWidget {
       'quality: preview=${quality.preview} productionEligible=${quality.productionEligible} '
           'realtimeApplied=${quality.realtimeApplied} walkingApiCoverage=${quality.walkingApiCoverage} '
           'costCoverage=${quality.costCoverage}',
-      'missingInputs(${quality.missingInputs.length})=${quality.missingInputs.isEmpty ? '-' : quality.missingInputs.join(', ')}',
+      'missingInputs(${quality.missingInputs.length})=${_bounded(quality.missingInputs)}',
       if (evaluation.search != null)
         'search: domain=${evaluation.search!.domain ?? '-'} evaluated=${evaluation.search!.evaluatedCount ?? '-'} '
             'complete=${evaluation.search!.complete ?? '-'} incompleteReason=${evaluation.search!.incompleteReason ?? '-'}',
@@ -51,9 +51,14 @@ class EvaluationDiagnosticsPanel extends StatelessWidget {
             step.maxMissingFeatures != null)
           '  model=${step.modelVersion ?? '-'} historySamples(min)=${step.minHistorySamples ?? '-'} '
               'missingFeatures(max)=${step.maxMissingFeatures ?? '-'}',
-        for (final code in step.rawCodes) '  raw ${step.step}:$code',
+        for (final code in step.rawCodes.take(_maxItems))
+          '  raw ${step.step}:$code',
+        if (step.rawCodes.length > _maxItems)
+          '  raw ${step.step}: 외 ${step.rawCodes.length - _maxItems}건',
       ],
-      for (final code in diagnostics.globalCodes) 'raw $code',
+      for (final code in diagnostics.globalCodes.take(_maxItems)) 'raw $code',
+      if (diagnostics.globalCodes.length > _maxItems)
+        'raw 외 ${diagnostics.globalCodes.length - _maxItems}건',
     ];
     final legLines = <String>[
       for (final leg in evaluation.legs)
@@ -105,6 +110,16 @@ class EvaluationDiagnosticsPanel extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 한 화면에서 읽을 수 있는 양으로 자른다. 진단 화면이 원본 코드 수백 건에 덮이면
+  /// 정작 필요한 적용 여부·모델 버전을 볼 수 없다. 전체 개수는 항상 함께 적는다.
+  static const int _maxItems = 20;
+
+  static String _bounded(List<String> values) {
+    if (values.isEmpty) return '-';
+    if (values.length <= _maxItems) return values.join(', ');
+    return '${values.take(_maxItems).join(', ')} … 외 ${values.length - _maxItems}건';
   }
 
   static String _iso(DateTime? value) => value?.toIso8601String() ?? '-';

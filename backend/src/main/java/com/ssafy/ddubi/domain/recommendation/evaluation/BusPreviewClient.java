@@ -9,6 +9,7 @@ import java.security.MessageDigest;
 import java.time.*;
 import java.util.*;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -35,11 +36,17 @@ public class BusPreviewClient {
     private final Duration timeout;
     private final int maxBatchSegments;
 
+    /**
+     * Spring 주입용 생성자. 배치 크기를 지정하는 생성자가 따로 있으므로 어느 쪽으로 주입할지 여기서 명시한다.
+     * 표시가 없으면 public 생성자가 둘이라 Spring이 고르지 못하고 기동 자체가 실패한다.
+     */
+    @Autowired
     public BusPreviewClient(ObjectMapper json,
             @Value("${ddubi.recommendation.ml-preview-base-url:}") String baseUrl,
             @Value("${ddubi.recommendation.ml-preview-timeout-ms:5000}") int timeoutMs) {
         this(json, baseUrl, timeoutMs, 200);
     }
+    /** 배치 크기를 직접 정하는 생성자. 테스트가 작은 배치로 분할 동작을 확인할 때 쓴다. */
     public BusPreviewClient(ObjectMapper json, String baseUrl, int timeoutMs, int maxBatchSegments) {
         if (timeoutMs < 1 || timeoutMs > 5000) throw new IllegalArgumentException("ML timeout 범위 오류");
         if (maxBatchSegments < 1 || maxBatchSegments > 1000) throw new IllegalArgumentException("ML 배치 크기 범위 오류");

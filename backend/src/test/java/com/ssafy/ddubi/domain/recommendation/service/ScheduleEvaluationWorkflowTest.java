@@ -76,7 +76,7 @@ class ScheduleEvaluationWorkflowTest {
                         "cdep-v1", 0, null, null));
         when(remapper.refresh(cached)).thenReturn(remapped);
         when(evidence.read(anyList(), eq(now))).thenReturn(snapshot);
-        when(conditional.evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy())))
+        when(conditional.evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy()), anyLong()))
                 .thenAnswer(call -> {
                     List<RouteCandidate> candidates = call.getArgument(0);
                     var results = candidates.stream().map(c -> new MlRoutePreview.Candidate(result(c, current), "API_ONLY", 0, 1, 0, 0)).toList();
@@ -114,8 +114,21 @@ class ScheduleEvaluationWorkflowTest {
         when(routes.search(any())).thenReturn(fresh);
         workflow.evaluate(1, 2L, TriggerType.REFRESH, now);
         verify(routes, times(1)).search(any());
-        verify(conditional, times(2)).evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy()));
+        verify(conditional, times(2)).evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy()), anyLong());
         verify(store).complete(eq(job), eq(fresh), eq(true), any(), any(), isNull(), isNull(), any());
+    }
+
+    @Test void computeBudgetFollowsTriggerAndCaller() {
+        var old = search(now.minusSeconds(30), candidate(7, "old", "100", 1));
+        var job = prepare(old, old, Assessment.ON_TIME_ESTIMATE, Assessment.ON_TIME_ESTIMATE);
+        when(store.claim(eq(1L), isNull(), eq(now))).thenReturn(job);
+        workflow.evaluate(1, 2L, TriggerType.INITIAL, now);          // 최초 등록: 넉넉한 예산
+        verify(conditional).evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy()), eq(30000L));
+        workflow.evaluate(1, 2L, TriggerType.REFRESH, now);          // 사용자 수동 갱신: 짧은 예산
+        verify(conditional).evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy()), eq(10000L));
+        workflow.evaluate(1, null, TriggerType.REFRESH, now);        // 서버 자동 갱신
+        verify(conditional).evaluate(anyList(), eq(snapshot), eq(now), eq(job.departure()), eq(job.arriveBy()), eq(15000L));
+        assertThat(ScheduleEvaluationWorkflow.Budget.DEFAULT.forTrigger(TriggerType.EVENT, null)).isEqualTo(15000L);
     }
 
     @Test void unchangedCandidatesDoNotCreateAnotherStoredRouteSet() {

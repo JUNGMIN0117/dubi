@@ -54,3 +54,21 @@
 - `BusHistoricalReferenceService.gateStatus()`는 설정(enabled, dataVersion, expectedRows/Chunks, 정책)과 마지막 gate 결과만 반환한다. `gateState`는 NOT_EVALUATED/PASSED/FAILED, `gateReason`은 TOTALS_MISMATCH, VERSION_MISMATCH, `STATUS_UNAVAILABLE:<예외 클래스명>`이며 `observedRows/observedChunks`, `gateCheckedAt`, `policyValid`를 함께 준다. 비밀값·경로·예외 메시지는 담지 않는다. 이 조회는 COUNT를 다시 실행하지 않는다.
 - 노출 경로: 인증 사용자용 `GET /api/v1/routes/data-status`의 `busHistoricalFallback`, 내부 키용 `GET /internal/bus-references/{version}/gate`(`requestedVersion`, `matchesConfiguredVersion` 포함). 기동 로그에는 `버스 과거 평균 gate 통과/불일치/확인 실패` 한 줄이 남는다.
 - gate PASSED는 적재 수량이 설정과 같다는 뜻이며 어떤 경로에 실제 적용됐다는 뜻이 아니다. 실제 적용은 평가 결과의 `BUS_HISTORICAL_REFERENCE` source와 `HISTORICAL_REFERENCE_*` 사유로만 확인한다.
+
+## 진단 구분과 예산 분리 (2026-09-18 추가, 로컬 검증만 완료)
+
+응답 `quality.fallbackReasons`(후보 reason)에서 ML 실패와 과거 자료 부족을 같은 코드로 합치지 않는다.
+
+| 상황 | step 코드 |
+|---|---|
+| ML 적용(운영 계약) | `step-N:ML_APPLIED` + `ML_MODEL_VERSION:<v>` |
+| ML 시험 적용(테스트 환경, 이력 있는 구간만) | `step-N:ML_TEST_APPLIED` |
+| ML 기록만(SHADOW) | `step-N:ML_SHADOW_RECORDED`, `step-N:ML_NOT_APPLIED:SHADOW_MODE` |
+| ML 미적용 | `step-N:ML_NOT_APPLIED:<ML_BUDGET_EXHAUSTED|ML_TIMEOUT|ML_HTTP_ERROR|ML_INVALID_RESPONSE|ML_PRODUCTION_CONTRACT_NOT_MET|…>` |
+| 과거 평균 적용 | `step-N:HISTORICAL_REFERENCE_APPLIED` (+ 버전·표본 기록 코드) |
+| 과거 평균 미적용 | `step-N:HISTORICAL_REFERENCE_<원인>` 와 함께 `step-N:HISTORICAL_REFERENCE_NOT_APPLIED:<원인>` (예: `EXACT_KEY_UNAVAILABLE`=자료 없음, `BUDGET_EXHAUSTED`=시간 부족) |
+| 경로 API 원본 값 사용 | `step-N:API_FALLBACK` |
+
+- `ML_BUDGET_EXHAUSTED`·`HISTORICAL_REFERENCE_BUDGET_EXHAUSTED`(시간 부족)와 `HISTORICAL_REFERENCE_EXACT_KEY_UNAVAILABLE`(자료 없음)은 회귀 테스트로 구분을 고정했다(`BusHistoricalReferenceServiceTest.missingReferenceDataAndExhaustedBudgetAreDistinctDiagnostics`, `MlApplyModeTest.exhaustedMlBudgetIsReportedAsBudgetNotAsMissingData…`).
+- 예산: 트리거별 세션 예산(첫 계산 30초 / 자동 갱신 15초 / 수동 10초, `DDUBI_RECOMMENDATION_BUDGET_*_MILLIS`) 중 ML 비율(`DDUBI_RECOMMENDATION_ML_BUDGET_SHARE`, 기본 0.6)을 넘긴 뒤에는 ML을 더 부르지 않고 과거 평균 계산에 시간을 남긴다. ML은 평가 시작 시 한 배치로 선조회해 33개 후보를 순차 호출하던 구조를 없앴다(뒤 후보가 예산을 잃지 않음).
+- 앱: 일반 화면은 번역 문구만("계산 시간이 부족해 ML 예측 미적용" ≠ "과거 자료 적용 조건이 맞지 않아 기본 경로시간 유지"), 개발자 진단(디버그 빌드 또는 더보기 > 개발자 옵션)에서만 위 원본 코드·모델 버전·자료 버전을 그대로 보여준다.

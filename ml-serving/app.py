@@ -29,6 +29,19 @@ DEFAULT_BUNDLE = Path(__file__).resolve().parent.parent / 'artifacts/ml-serving/
 
 
 
+
+def _enable_request_logging():
+    """요청 시작·종료 기록이 실제로 보이게 한다.
+
+    uvicorn 은 자기 로거에만 핸들러를 달아서, 이 모듈 로거는 기본이 WARNING 이고 핸들러가 없다.
+    그대로 두면 단계별 시간을 남겨도 어디에도 출력되지 않는다(2026-09-18 배포에서 확인).
+    """
+    LOGGER.setLevel(logging.INFO)
+    if not LOGGER.handlers and not logging.getLogger().handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(levelname)s:     %(message)s'))
+        LOGGER.addHandler(handler)
+
 def _log_end(request_id, segments, timings, start, outcome):
     """요청 한 건의 단계별 시간을 한 줄로 남긴다. 값이 없으면 -1 로 두어 측정 못한 구간을 구분한다.
 
@@ -93,6 +106,7 @@ def create_app(predictor=None, settings=None, today=None):
         finally:
             await application.state.inference_queue.close()
 
+    _enable_request_logging()
     application = FastAPI(title='DDUBI 버스 모델 예측 확인', version='1.0.0', lifespan=lifespan)
 
     @application.exception_handler(RequestValidationError)

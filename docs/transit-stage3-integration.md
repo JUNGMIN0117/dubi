@@ -23,3 +23,11 @@ workbench `data_staging/recommendation-20260917` 아래 원본 traversal과 기�
 
 ## 다음 연결 순서
 새 버스 결과 완료·무결성 검증 → 날씨 독립 참고자료 BE 계약 구현/연동 → 지하철 참고·도로 검증 후보 연결 → 실제 서버 평가·알림·FE 응답 대조. 서버 쓰기 단계는 대상·버전·롤백을 확인하고 승인 후 진행한다.
+
+## 참고자료 저장·조회 구현 (후속)
+- 종무형 dd48879의 통합 테스트 fixture 보완까지 추가 통합.
+- V11에 별도 bus_reference_chunk/row 테이블, 내부 청크 저장·정확키 조회 API 구현. 기존 기준선 및 V1~V10 변경 없음. 운영 활성화/자동 추천 적용 없음.
+- 변환 도구는 실제 stage3 SQLite에서 시간대 평균을 보존한 1000행 청크를 생성한다. pilot complete=false이며 전체 내보내기 완료가 아니다.
+- Python33개, BE참고자료6개(실제1000행 DTO 검증 포함), 기존 workflow/preview12개 통과.
+- 실제 MySQL 통합2개는 Docker 엔진 연결 실패로 실행 전 오류. Docker Desktop 시작을 시도했으나 엔진 파이프가 생성되지 않음. DB 검증 통과로 간주하지 않는다.
+- 계약/한계는 docs/contracts/bus-reference-staging.md. FE 공개, 전체 내보내기/서버적재, 지하철·도로 연결은 남아 있다.

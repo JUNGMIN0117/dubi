@@ -5,16 +5,32 @@ import 'package:flutter/material.dart';
 import '../domain/schedule_evaluation.dart';
 import 'evaluation_diagnostics_panel.dart';
 
+/// 부족한 입력을 일반 사용자 문구로 옮긴다. 상단 결론 한 줄과 카드가 같은 표현을 쓴다.
+String evaluationMissingInputLabel(String value) => switch (value) {
+  _ when value.startsWith('BUS:') => '일부 버스 구간의 실시간 정보가 부족해요',
+  _ when value.startsWith('SUB:') => '일부 지하철 구간의 운행정보가 부족해요',
+  'SUBWAY_TIMETABLE_NOT_CONFIGURED' => '지하철 시간표가 연결되지 않았어요',
+  'ML_NOT_CONFIGURED' => '기본 경로 소요시간을 쓰고 있어요',
+  'PLANNED_DEPART_AT' => '출발 예정시각이 없어요',
+  'BUS_ARRIVAL' => '버스 도착 정보가 부족해요',
+  'ROUTE_PROVIDER' => '경로 정보가 부족해요',
+  _ => '일부 교통정보를 확인하지 못했어요',
+};
+
 class ScheduleEvaluationCard extends StatefulWidget {
   const ScheduleEvaluationCard({
     super.key,
     required this.repository,
     required this.scheduleId,
     this.developerDiagnostics = false,
+    this.headline,
   });
 
   final ScheduleEvaluationRepository repository;
   final String scheduleId;
+
+  /// 화면 위쪽 결론 한 줄에 같은 결과를 전달하는 통로. 없으면 카드만 그린다.
+  final ValueNotifier<ScheduleEvaluationV2?>? headline;
 
   /// 개발자 진단 패널 표시 여부. 디버그 빌드나 더보기 > 개발자 옵션에서만 켜진다.
   final bool developerDiagnostics;
@@ -147,6 +163,8 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
           error = null;
           retryCount = 0;
         });
+        // 상단 결론 한 줄은 이 카드가 읽은 결과를 그대로 쓴다. 따로 조회하지 않는다.
+        widget.headline?.value = latest;
       }
     } on ScheduleEvaluationFailure catch (failure) {
       failed = true;
@@ -413,6 +431,16 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
   ScheduleEvaluationV2 get evaluation => widget.evaluation;
   Timer? _expiry;
 
+  /// 보조 시각(입력·계획·목표·마지막 확인)을 펼쳤는지. 기본은 접힘이다.
+  bool _showTimeDetails = false;
+
+  /// 접어둘 시각이 하나라도 있는지. 없으면 "자세히" 자체를 띄우지 않는다.
+  /// 상세 화면(compact=false)은 입력·계획 출발을 "확인 불가"로라도 항상 보여준다.
+  bool get _hasFoldedTimes =>
+      !widget.compact ||
+      evaluation.targetArriveAt != null ||
+      evaluation.computedAt != null;
+
   @override
   void initState() {
     super.initState();
@@ -457,18 +485,26 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            if (evaluation.quality.preview) const Chip(label: Text('검증용')),
-            if (stale) const Chip(label: Text('갱신 필요')),
-            if (diagnostics && evaluation.isLegacy)
-              const Chip(label: Text('구버전 응답')),
-            if (evaluation.hasHistoricalReference)
-              const Chip(label: Text('과거 평균 기반 추정')),
-          ],
-        ),
+        // 짧은 배지는 뜻이 전달되지 않아 문장으로 바꿨다. 판단 기준은 그대로다.
+        if (evaluation.quality.preview ||
+            stale ||
+            (diagnostics && evaluation.isLegacy) ||
+            evaluation.hasHistoricalReference) ...[
+          for (final note in [
+            if (evaluation.quality.preview) '아직 시험 중인 예측이에요.',
+            if (stale) '결과가 오래됐어요. 다시 계산해 주세요.',
+            if (evaluation.hasHistoricalReference) '일부 구간은 과거 평균으로 계산했어요.',
+            if (diagnostics && evaluation.isLegacy) '구버전 응답이에요.',
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                note,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B85)),
+              ),
+            ),
+          const SizedBox(height: 4),
+        ],
         Text(
           stale
               ? '이전 결과입니다. 최신 결과를 다시 확인해 주세요.'
@@ -488,12 +524,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           ),
         ],
         const SizedBox(height: 8),
-        if (!widget.compact) ...[
-          _timeRow('사용자 입력 출발', evaluation.userInputDepartAt),
-          _timeRow('현재 계획 출발', evaluation.plannedDepartAt),
-        ],
-        if (evaluation.targetArriveAt != null)
-          _timeRow('평가 목표 도착', evaluation.targetArriveAt),
+        // 기본은 두 줄(제안 출발·예상 도착)만 남긴다. 나머지 시각은 "자세히"로 접는다.
         if (usable && evaluation.proposedDepartAt != null)
           _timeRow('제안 출발', evaluation.proposedDepartAt),
         if (usable) _timeRow('예상 도착', evaluation.estimatedArrivalAt),
@@ -502,14 +533,37 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           _timeRow('과거 평균 기반 참고 도착', evaluation.estimatedArrivalAt),
           const Text('과거 자료로 계산한 참고 추정입니다. 현재 운행상황이나 정시 도착을 보장하지 않습니다.'),
         ],
-        if (evaluation.computedAt != null)
-          _timeRow('마지막 확인', evaluation.computedAt),
-        if (!widget.compact && diagnostics && evaluation.validUntil != null)
-          _timeRow('유효 시각', evaluation.validUntil),
-        if (!widget.compact &&
-            diagnostics &&
-            evaluation.nextEvaluationAt != null)
-          _timeRow('다음 확인', evaluation.nextEvaluationAt),
+        if (_hasFoldedTimes) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const Key('evaluationTimeDetailsToggle'),
+              onPressed: () => setState(() => _showTimeDetails = !_showTimeDetails),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(_showTimeDetails ? '자세히 접기' : '자세히'),
+            ),
+          ),
+          if (_showTimeDetails) ...[
+            if (!widget.compact) ...[
+              _timeRow('사용자 입력 출발', evaluation.userInputDepartAt),
+              _timeRow('현재 계획 출발', evaluation.plannedDepartAt),
+            ],
+            if (evaluation.targetArriveAt != null)
+              _timeRow('평가 목표 도착', evaluation.targetArriveAt),
+            if (evaluation.computedAt != null)
+              _timeRow('마지막 확인', evaluation.computedAt),
+            if (!widget.compact && diagnostics && evaluation.validUntil != null)
+              _timeRow('유효 시각', evaluation.validUntil),
+            if (!widget.compact &&
+                diagnostics &&
+                evaluation.nextEvaluationAt != null)
+              _timeRow('다음 확인', evaluation.nextEvaluationAt),
+          ],
+        ],
         const SizedBox(height: 8),
         Text(_qualityMessage(evaluation.quality)),
         if (evaluation.hasHistoricalReference)
@@ -620,21 +674,10 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
     return '$walking · $realtime';
   }
 
-  static String _inputLabel(String value) => switch (value) {
-    _ when value.startsWith('BUS:') => '일부 버스 구간의 실시간 정보 부족',
-    _ when value.startsWith('SUB:') => '일부 지하철 구간의 운행정보 부족',
-    'SUBWAY_TIMETABLE_NOT_CONFIGURED' => '지하철 시간표 미연결',
-    'ML_NOT_CONFIGURED' => '기본 경로 소요시간 사용',
-    'PLANNED_DEPART_AT' => '출발 예정시각',
-    'BUS_ARRIVAL' => '버스 도착 정보',
-    'ROUTE_PROVIDER' => '경로 정보',
-    _ => '일부 교통정보 확인 불가',
-  };
-
   static String _groupMissing(List<String> inputs) {
     final groups = <String, int>{};
     for (final input in inputs.toSet()) {
-      final label = _inputLabel(input);
+      final label = evaluationMissingInputLabel(input);
       groups[label] = (groups[label] ?? 0) + 1;
     }
     return groups.entries

@@ -194,7 +194,7 @@ void main() {
       await tester.pumpWidget(_summary(fixtures[entry.key]!));
       expect(find.text(entry.value), findsOneWidget, reason: entry.key);
     }
-    expect(find.text('갱신 필요'), findsOneWidget);
+    expect(find.text('결과가 오래됐어요. 다시 계산해 주세요.'), findsOneWidget);
   });
 
   testWidgets('null ETA와 경로가 없어도 사고 원인을 추측하지 않는다', (tester) async {
@@ -229,7 +229,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('검증용'), findsOneWidget);
+    expect(find.text('아직 시험 중인 예측이에요.'), findsOneWidget);
     final button = tester.widget<FilledButton>(
       find.byKey(const Key('acceptEvaluationButton')),
     );

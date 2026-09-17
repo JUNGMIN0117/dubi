@@ -13,6 +13,18 @@
 # 뚜비 내부 구간 ID(segmentIds)로 변환되고, 구간 상태는 segment.status 로 흘러 Redis 에 저장된다.
 
 topics:
+  source.poll-status:
+    description: 수집 사이클별 정상 빈 응답, 부분 성공, 실패, 호출 제한, 비운행 생략 상태
+    partitions: 3
+    replicationFactor: 1
+    retentionHours: 504
+    retentionBytes: 1073741824
+    schema: events/source-poll-status.schema.json
+    key: source와 scopeKey
+    producer: collector
+    consumers: [backend, archiver]
+    archive: true
+
   transport.raw:
     description: 정규화 전후 교통 수집 이벤트 (bus, subway, traffic 수집기)
     partitions: 3

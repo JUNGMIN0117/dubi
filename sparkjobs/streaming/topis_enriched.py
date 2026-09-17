@@ -1,0 +1,103 @@
+"""Kafka TOPIS notices -> GMS/Kakao normalized DataFrame -> Redis JSON and optional HDFS Parquet."""
+import json
+import logging
+import os
+import sys
+from urllib.parse import urlsplit
+
+from pyspark.sql import SparkSession, functions as F, types as T
+from common.kafka_source import read_events_stream
+from common.redis_sink import write_latest_with_row_ttl
+from common.settings import Settings
+from common.topis_enrichment import GmsClient, KakaoGeocoder, normalize_notice
+from common.topis_runtime import supervise
+
+JOB = "topis_enriched"
+TOPIC = "city.raw"
+log = logging.getLogger(JOB)
+POINT = T.StructType([
+    T.StructField("order", T.IntegerType()), T.StructField("placeText", T.StringType()), T.StructField("role", T.StringType()),
+    T.StructField("geocodeQuery", T.StringType()), T.StructField("matchedPlaceName", T.StringType()), T.StructField("kakaoPlaceId", T.StringType()),
+    T.StructField("latitude", T.DoubleType()), T.StructField("longitude", T.DoubleType()), T.StructField("geocodeStatus", T.StringType()),
+    T.StructField("geocodeCandidateCount", T.IntegerType()), T.StructField("usableForBusMapping", T.BooleanType())])
+SCHEMA = T.StructType([
+    T.StructField(name, T.StringType()) for name in ("silverVersion","noticeId","sourceEventId","source","title","contentText","categoryName","createdAtText","updatedAtText","collectedAt","noticeContentHash","extractionModel","promptVersion","eventId","eventType","impactType","eventStatus","startAt","endAt","yearBasis","evidenceText","processingStatus")
+] + [T.StructField("yearInferred", T.BooleanType())] + [
+    T.StructField(name, T.ArrayType(T.StringType())) for name in ("roadNames","affectedBusRoutes","affectedBusStops","rejectionReasons","qualityFlags","missingFields")
+] + [T.StructField("routePoints", T.ArrayType(POINT))])
+
+
+def silver_uri(env):
+    value = env.get("TOPIS_SILVER_OUTPUT_URI", "").strip().rstrip("/")
+    if not value: return None
+    parsed = urlsplit(value)
+    if parsed.scheme not in ("hdfs", "file") or not parsed.path or (parsed.scheme == "hdfs" and not parsed.netloc):
+        log.error("Invalid TOPIS_SILVER_OUTPUT_URI; HDFS disabled while Redis remains enabled")
+        return None
+    return value
+
+
+def clients():
+    return (GmsClient(os.environ.get("GMS_API_KEY"), os.environ.get("GMS_BASE_URL", "https://gms.ssafy.io/gmsapi/"),
+                      os.environ.get("GMS_MODEL", "gpt-4o-mini"), int(os.environ.get("TOPIS_AI_TIMEOUT_SECONDS", "30"))),
+            KakaoGeocoder(os.environ.get("KAKAO_REST_API_KEY")))
+
+
+def enrich_batch(batch, gms, geocoder):
+    raw = [row.rawEventJson for row in batch.filter(F.col("eventType") == "topis.notice").select("rawEventJson").collect()]
+    unique, rows = {}, []
+    for value in raw:
+        try:
+            event = json.loads(value)
+            payload_raw = ((event.get("payload") or {}).get("raw") or {})
+            key = ((event.get("payload") or {}).get("providerNoticeId"), json.dumps(payload_raw, sort_keys=True, ensure_ascii=False))
+            unique[key] = event
+        except (ValueError, TypeError):
+            continue
+    for event in unique.values(): rows.extend(normalize_notice(event, gms, geocoder))
+    return batch.sparkSession.createDataFrame(rows, SCHEMA) if rows else batch.sparkSession.createDataFrame([], SCHEMA)
+
+
+def redis_rows(df):
+    eligible = df.filter(F.col("processingStatus").isin("VALID", "PARTIAL") & F.col("eventId").isNotNull())
+    collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    return eligible.select(F.concat(F.lit("traffic:latest:topis-event:"), "eventId").alias("redisKey"),
+        F.to_json(F.struct(*[F.col(x) for x in df.columns]), {"ignoreNullFields":"false"}).alias("redisValue"),
+        F.lit(2592000).alias("ttlSeconds"), collected.alias("occurredAtOrder"), collected.alias("collectedAtOrder"))
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    settings, target = Settings.from_env(), silver_uri(os.environ)
+    spark = SparkSession.builder.appName("ddubi-" + JOB).config("spark.sql.session.timeZone", "Asia/Seoul").getOrCreate()
+    gms, geocoder = clients()
+    events = read_events_stream(spark, settings, TOPIC)
+
+    def redis_batch(frame, batch_id):
+        normalized = enrich_batch(frame, gms, geocoder).cache()
+        try:
+            rows = redis_rows(normalized).cache()
+            try:
+                count = rows.count()
+                if count: write_latest_with_row_ttl(rows, settings.redis_host, settings.redis_port, settings.redis_password)
+                log.info("batch=%d topisRows=%d redisKeys=%d", batch_id, normalized.count(), count)
+            finally: rows.unpersist()
+        finally: normalized.unpersist()
+
+    def start_redis():
+        return events.writeStream.foreachBatch(redis_batch).option("checkpointLocation", settings.checkpoint_for(JOB)).trigger(processingTime="30 seconds").queryName(JOB).start()
+
+    start_silver = None
+    if target:
+        def silver_batch(frame, batch_id):
+            normalized = enrich_batch(frame, gms, geocoder).withColumn("eventDate", F.to_date("collectedAt"))
+            normalized.write.mode("overwrite").partitionBy("processingStatus", "eventDate").parquet(target + "/batches/batch=" + str(batch_id) + "/data")
+        def start_silver_query():
+            return events.writeStream.foreachBatch(silver_batch).option("checkpointLocation", settings.checkpoint_for(JOB + "_silver")).trigger(processingTime="10 minutes").queryName(JOB + "_silver").start()
+        start_silver = start_silver_query
+    else: log.warning("TOPIS_SILVER_OUTPUT_URI is empty; HDFS disabled while Redis remains enabled")
+    try: supervise(start_redis, start_silver)
+    finally: spark.stop()
+
+
+if __name__ == "__main__": main()

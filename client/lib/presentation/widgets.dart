@@ -156,6 +156,7 @@ class RouteCard extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     final tone = switch (route.kind) {
+      RouteKind.candidate => DdubiColors.blue,
       RouteKind.recommended => DdubiColors.green,
       RouteKind.fastest => DdubiColors.navy,
       RouteKind.safest => const Color(0xFF7257E8),

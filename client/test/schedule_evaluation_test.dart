@@ -57,6 +57,26 @@ void main() {
     expect(evaluation.canAcceptAt(DateTime(2026, 9, 18)), isFalse);
   });
 
+  test('상태 응답과 읽기 전용 응답의 누락 또는 null ID를 허용한다', () {
+    final pending = ScheduleEvaluationV2.fromJson({
+      'schemaVersion': 'schedule-evaluation-v2',
+      'state': 'PENDING',
+    });
+    final readOnly = ScheduleEvaluationV2.fromJson({
+      'schemaVersion': 'schedule-evaluation-v2',
+      'evaluationId': 'synthetic-read-only',
+      'scheduleId': null,
+      'state': 'READY',
+      'decision': 'ROUTE_UNAVAILABLE',
+    });
+
+    expect(pending.evaluationId, isNull);
+    expect(pending.scheduleId, isNull);
+    expect(pending.state, EvaluationState.pending);
+    expect(readOnly.evaluationId, 'synthetic-read-only');
+    expect(readOnly.scheduleId, isNull);
+  });
+
   test('Z와 +09:00 시각 및 날짜 경계를 같은 절대시각으로 보존한다', () async {
     final evaluation = await _fixture('keep');
 

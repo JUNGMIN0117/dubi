@@ -32,6 +32,7 @@ import 'schedule_evaluation_card.dart';
 import '../domain/schedule_evaluation.dart';
 import '../domain/transit_reference.dart';
 import 'transit_reference_panel.dart';
+import '../core/diagnostics/developer_diagnostics.dart';
 
 export 'notification_center.dart';
 
@@ -3814,9 +3815,14 @@ class ScheduleDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           if (repository is ScheduleEvaluationRepository)
-            ScheduleEvaluationCard(
-              repository: repository as ScheduleEvaluationRepository,
-              scheduleId: schedule.id,
+            // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.
+            ValueListenableBuilder<bool>(
+              valueListenable: DeveloperDiagnostics.enabled,
+              builder: (_, diagnostics, _) => ScheduleEvaluationCard(
+                repository: repository as ScheduleEvaluationRepository,
+                scheduleId: schedule.id,
+                developerDiagnostics: diagnostics,
+              ),
             )
           else
             const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
@@ -3882,7 +3888,18 @@ class ScheduleDetailScreen extends StatelessWidget {
     if (confirmed != true) return;
     try {
       await repository.cancelSchedule(schedule.id);
+      // 서버는 soft 취소(status=CANCELED)라 목록 API가 취소 일정도 돌려준다.
+      // 목록·홈은 저장소에서 취소 일정을 걸러내므로 여기서는 목록으로 돌아가기만 한다.
       if (context.mounted) context.go('/schedules');
+    } on ScheduleCommandFailure catch (failure) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(cancelFailureMessage(failure))),
+      );
+      // 이미 없는 일정은 더 시도할 수 없다. 목록으로 돌아가 실제 상태를 다시 읽는다.
+      if (failure.kind == ScheduleCommandFailureKind.notFound) {
+        context.go('/schedules');
+      }
     } on Object {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3890,6 +3907,20 @@ class ScheduleDetailScreen extends StatelessWidget {
       );
     }
   }
+
+  /// 취소 실패를 원인별로 다른 문구로 안내한다. 남의 일정·없는 일정·완료된 일정·연결 문제를 한 문구로 합치지 않는다.
+  @visibleForTesting
+  static String cancelFailureMessage(ScheduleCommandFailure failure) =>
+      switch (failure.kind) {
+        ScheduleCommandFailureKind.unauthenticated =>
+          '로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.',
+        ScheduleCommandFailureKind.forbidden => '다른 사용자의 일정은 취소할 수 없어요.',
+        ScheduleCommandFailureKind.notFound => '이미 삭제된 일정이에요. 목록을 다시 불러왔어요.',
+        ScheduleCommandFailureKind.conflict => '이미 완료된 일정은 취소할 수 없어요.',
+        ScheduleCommandFailureKind.network =>
+          '연결이 불안정해 일정을 취소하지 못했어요. 잠시 후 다시 시도해주세요.',
+        ScheduleCommandFailureKind.unknown => '일정을 취소하지 못했어요. 잠시 후 다시 시도해주세요.',
+      };
 
   Future<void> _recordArrival(BuildContext context, Schedule schedule) async {
     final confirmed = await showDialog<bool>(
@@ -7719,6 +7750,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 14),
             _helpCard(context),
             const SizedBox(height: 14),
+            _developerOptionsCard(),
+            const SizedBox(height: 14),
             _logoutCard(context),
           ],
         ),
@@ -8635,6 +8668,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             Icon(Icons.chevron_right_rounded, color: Color(0xFF667085)),
           ],
+        ),
+      ),
+    ),
+  );
+
+  /// 개발자 옵션. 켜면 일정 상세의 이동 예측 카드에 모델 버전·적용 여부·원본 코드가 붙는다.
+  /// 디버그 빌드는 기본 켜짐, 릴리스는 기본 꺼짐이며 앱을 다시 시작하면 빌드 기본값으로 돌아간다.
+  Widget _developerOptionsCard() => Material(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(22),
+    child: ValueListenableBuilder<bool>(
+      valueListenable: DeveloperDiagnostics.enabled,
+      builder: (_, enabled, _) => SwitchListTile(
+        key: const Key('developerDiagnosticsSwitch'),
+        value: enabled,
+        onChanged: (value) => DeveloperDiagnostics.enabled.value = value,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 17, vertical: 6),
+        title: const Text(
+          '개발자 진단 표시',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: const Text(
+          '이동 예측 카드에 모델 버전·적용 여부·원본 코드를 함께 보여줘요. 일반 사용에는 필요 없어요.',
         ),
       ),
     ),

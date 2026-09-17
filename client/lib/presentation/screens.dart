@@ -28,6 +28,7 @@ import 'help_inquiry_screen.dart';
 import 'micro_animations.dart';
 import 'more_page_widgets.dart';
 import 'widgets.dart';
+import 'departure_headline.dart';
 import 'schedule_evaluation_card.dart';
 import '../domain/schedule_evaluation.dart';
 import '../domain/saved_route_display.dart';
@@ -1325,6 +1326,7 @@ class HomeScreen extends StatelessWidget {
                     schedules: data.summary.todaySchedules,
                     routes: routes,
                     evaluation: data.evaluation,
+                    scheduleId: schedule?.id,
                   );
           },
         );
@@ -1350,11 +1352,15 @@ class _MobileHomeContent extends StatelessWidget {
     required this.schedules,
     required this.routes,
     this.evaluation,
+    this.scheduleId,
   });
 
   final List<Schedule> schedules;
   final List<RouteOption> routes;
   final ScheduleEvaluationV2? evaluation;
+
+  /// 결론 한 줄을 누르면 열 일정. 다음 일정이 없으면 누를 수 없다.
+  final String? scheduleId;
 
   @override
   Widget build(BuildContext context) {
@@ -1412,11 +1418,13 @@ class _MobileHomeContent extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           if (evaluation != null) ...[
-            InfoCard(
-              child: ScheduleEvaluationSummary(
-                evaluation: evaluation!,
-                compact: true,
-              ),
+            // 홈은 결론 한 줄만 보여주고, 자세한 근거는 일정 상세에서 본다.
+            DepartureHeadline(
+              evaluation: evaluation,
+              compact: true,
+              onTap: scheduleId == null
+                  ? null
+                  : () => context.push('/schedules/$scheduleId'),
             ),
             const SizedBox(height: 16),
           ],
@@ -1937,11 +1945,12 @@ class _WebHomeContent extends StatelessWidget {
       ),
       const SizedBox(height: 20),
       if (evaluation != null) ...[
-        InfoCard(
-          child: ScheduleEvaluationSummary(
-            evaluation: evaluation!,
-            compact: true,
-          ),
+        DepartureHeadline(
+          evaluation: evaluation,
+          compact: true,
+          onTap: summary.nextSchedule == null
+              ? null
+              : () => context.push('/schedules/${summary.nextSchedule!.id}'),
         ),
         const SizedBox(height: 20),
       ],
@@ -3567,7 +3576,8 @@ class ScheduleDetailScreen extends StatelessWidget {
   }) {
     return AppPage(
       title: '일정 상세',
-      child: ListView(
+      child: _EvaluationHeadlineScope(
+        builder: (headline) => ListView(
         key: const Key('scheduleRouteOverview'),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: [
@@ -3644,6 +3654,14 @@ class ScheduleDetailScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+          // 사용자가 가장 먼저 알고 싶은 "몇 시에 나가면 되는지"를 맨 위에 둔다.
+          if (repository is ScheduleEvaluationRepository) ...[
+            ValueListenableBuilder<ScheduleEvaluationV2?>(
+              valueListenable: headline,
+              builder: (_, value, _) => DepartureHeadline(evaluation: value),
+            ),
+            const SizedBox(height: 10),
+          ],
           Container(
             padding: const EdgeInsets.fromLTRB(8, 10, 16, 10),
             decoration: BoxDecoration(
@@ -3756,53 +3774,12 @@ class ScheduleDetailScreen extends StatelessWidget {
                       _openSavedRoute(c, schedule, savedRoute, routeRepository),
           ),
           const SizedBox(height: 16),
-          const Text(
-            '오늘의 이동 변수',
-            style: TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w900,
-              color: DdubiColors.navy,
+          // 네 칸 모두 "확인 필요"만 나오던 자리다. 값이 붙기 전까지는 한 줄로만 알린다.
+          const InfoCard(
+            child: Text(
+              '오늘의 이동 변수(날씨·혼잡도·도로 통제·지하철 지연)는 아직 확인되지 않았어요.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
             ),
-          ),
-          const SizedBox(height: 10),
-          const Row(
-            children: [
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.wb_sunny_rounded,
-                  label: '날씨',
-                  value: '확인 필요',
-                  color: Color(0xFFFFB323),
-                ),
-              ),
-              SizedBox(width: 7),
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.groups_rounded,
-                  label: '혼잡도',
-                  value: '확인 필요',
-                  color: Color(0xFF4D80E8),
-                ),
-              ),
-              SizedBox(width: 7),
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.directions_car_rounded,
-                  label: '도로 통제',
-                  value: '확인 필요',
-                  color: Color(0xFF00A873),
-                ),
-              ),
-              SizedBox(width: 7),
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.directions_subway_rounded,
-                  label: '지하철 지연',
-                  value: '확인 필요',
-                  color: Color(0xFF00A873),
-                ),
-              ),
-            ],
           ),
           const SizedBox(height: 14),
           if (repository is ScheduleEvaluationRepository)
@@ -3813,6 +3790,7 @@ class ScheduleDetailScreen extends StatelessWidget {
                 repository: repository as ScheduleEvaluationRepository,
                 scheduleId: schedule.id,
                 developerDiagnostics: diagnostics,
+                headline: headline,
               ),
             )
           else
@@ -3854,6 +3832,7 @@ class ScheduleDetailScreen extends StatelessWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -4350,52 +4329,6 @@ class _FinalRouteSummary extends StatelessWidget {
 
   Widget _divider() =>
       Container(width: 1, height: 50, color: const Color(0xFFE4ECEF));
-}
-
-class _RouteVariable extends StatelessWidget {
-  const _RouteVariable({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 3),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .09),
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Column(
-      children: [
-        Icon(icon, size: 23, color: color),
-        const SizedBox(height: 5),
-        Text(
-          label,
-          maxLines: 1,
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF617083),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w900,
-            color: DdubiColors.navy,
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 class ScheduleEditScreen extends StatelessWidget {
@@ -9618,4 +9551,31 @@ class _SettingsPermissionRow extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// 일정 상세 안에서 "결론 한 줄"과 아래 이동 예측 카드가 같은 결과를 쓰게 묶어준다.
+///
+/// 결론을 따로 조회하면 카드와 다른 값이 보일 수 있다. 조회는 카드 한 곳에서만 하고
+/// 그 결과를 이 통로로 위쪽에 전달한다.
+class _EvaluationHeadlineScope extends StatefulWidget {
+  const _EvaluationHeadlineScope({required this.builder});
+
+  final Widget Function(ValueNotifier<ScheduleEvaluationV2?>) builder;
+
+  @override
+  State<_EvaluationHeadlineScope> createState() =>
+      _EvaluationHeadlineScopeState();
+}
+
+class _EvaluationHeadlineScopeState extends State<_EvaluationHeadlineScope> {
+  final ValueNotifier<ScheduleEvaluationV2?> _headline = ValueNotifier(null);
+
+  @override
+  void dispose() {
+    _headline.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_headline);
 }

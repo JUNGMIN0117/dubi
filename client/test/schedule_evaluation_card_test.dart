@@ -181,8 +181,9 @@ void main() {
 
   testWidgets('실행 상태와 stale 상태를 각각 다른 문구와 배지로 표시한다', (tester) async {
     final cases = <String, String>{
-      'pending': '예측을 준비하고 있습니다.',
-      'running': '최신 경로와 도착시각을 계산하고 있습니다.',
+      // 서버가 첫 계산(예산 30초) 중이면 상한 안내를 보여준다.
+      'pending': ScheduleEvaluationCard.initialComputingMessage,
+      'running': ScheduleEvaluationCard.initialComputingMessage,
       'failed': '최신 예측을 계산하지 못했습니다.',
       'stopped': '이 일정의 출발 전 감시가 종료됐습니다.',
       'departure_required': '일정 수정에서 출발 예정시각을 입력해 주세요.',

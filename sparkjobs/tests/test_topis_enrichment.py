@@ -2,10 +2,11 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common.topis_enrichment import ExternalServiceError, InvalidAIResponse, normalize_notice
+from common.topis_enrichment import ExternalServiceError, InvalidAIResponse, KakaoGeocoder, normalize_notice
 
 
 class FakeGms:
@@ -52,6 +53,30 @@ def event(**changes):
 
 
 class TopisEnrichmentTests(unittest.TestCase):
+    @patch("common.topis_enrichment.requests.get")
+    def test_geocoder_rejects_single_non_seoul_candidate(self, get):
+        response = Mock(status_code=200)
+        response.json.return_value = {"documents": [{"id": "busan", "place_name": "중앙시장",
+            "address_name": "부산광역시 중구 중앙동", "road_address_name": "", "x": "129.03", "y": "35.10"}]}
+        get.return_value = response
+        result = KakaoGeocoder("key").search("중앙시장")
+        self.assertEqual(result["geocodeStatus"], "NOT_FOUND")
+        self.assertEqual(result["geocodeMatchBasis"], "NO_SEOUL_CANDIDATE")
+        self.assertFalse(result["usableForBusMapping"])
+        self.assertIsNone(result["latitude"])
+
+    @patch("common.topis_enrichment.requests.get")
+    def test_geocoder_uses_only_seoul_candidates(self, get):
+        response = Mock(status_code=200)
+        response.json.return_value = {"documents": [
+            {"id": "busan", "place_name": "중앙시장", "address_name": "부산광역시 중구", "road_address_name": "", "x": "129.03", "y": "35.10"},
+            {"id": "seoul", "place_name": "중앙시장", "address_name": "서울특별시 중구", "road_address_name": "", "x": "127.00", "y": "37.56"}]}
+        get.return_value = response
+        result = KakaoGeocoder("key").search("중앙시장")
+        self.assertEqual(result["kakaoPlaceId"], "seoul")
+        self.assertEqual(result["geocodeStatus"], "MATCHED")
+        self.assertTrue(result["usableForBusMapping"])
+
     def test_infers_year_and_uses_road_representative_radius(self):
         row = normalize_notice(envelope(), FakeGms([event()]), FakeGeocoder())[0]
         self.assertEqual(row["startAt"], "2026-09-19T14:00:00+09:00")

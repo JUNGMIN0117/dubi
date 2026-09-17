@@ -10,6 +10,7 @@ from common.kafka_source import read_events_stream
 from common.redis_sink import write_latest_with_row_ttl
 from common.settings import Settings
 from common.topis_enrichment import GmsClient, KakaoGeocoder, normalize_notice
+from common.topis_redis import build_reconciliation_plans, reconcile_topis_latest
 from common.topis_runtime import supervise
 
 JOB = "topis_enriched"
@@ -74,8 +75,9 @@ def redis_rows(df):
                          (F.col("eventStatus") != "ENDED") & F.col("eventId").isNotNull() &
                          (valid_until > F.current_timestamp()))
     collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    json_fields = [F.col(x) for x in df.columns] + [F.col("collectedAt").alias("_latestOrderAt")]
     return eligible.select(F.concat(F.lit("traffic:latest:topis-event:"), "eventId").alias("redisKey"),
-        F.to_json(F.struct(*[F.col(x) for x in df.columns]), {"ignoreNullFields":"false"}).alias("redisValue"),
+        F.to_json(F.struct(*json_fields), {"ignoreNullFields":"false"}).alias("redisValue"),
         F.least(F.lit(2592000), F.greatest(F.lit(60), valid_until.cast("long") - F.current_timestamp().cast("long"))).cast("int").alias("ttlSeconds"),
         collected.alias("occurredAtOrder"), collected.alias("collectedAtOrder"))
 
@@ -90,11 +92,14 @@ def main():
     def redis_batch(frame, batch_id):
         normalized = enrich_batch(frame, gms, geocoder).cache()
         try:
+            plans = build_reconciliation_plans(normalized.select(
+                "noticeId", "eventId", "eventStatus", "validUntil", "processingStatus", "collectedAt").collect())
             rows = redis_rows(normalized).cache()
             try:
                 count = rows.count()
                 if count: write_latest_with_row_ttl(rows, settings.redis_host, settings.redis_port, settings.redis_password)
-                log.info("batch=%d topisRows=%d redisKeys=%d", batch_id, normalized.count(), count)
+                deleted = reconcile_topis_latest(plans, settings.redis_host, settings.redis_port, settings.redis_password)
+                log.info("batch=%d topisRows=%d redisKeys=%d redisDeleted=%d", batch_id, normalized.count(), count, deleted)
             finally: rows.unpersist()
         finally: normalized.unpersist()
 

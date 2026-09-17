@@ -89,6 +89,7 @@ class KakaoGeocoder:
     def search(self, place_text, extra_queries=None):
         queries = ["서울특별시 " + place_text, place_text] + list(extra_queries or [])
         queries = list(dict.fromkeys(query.strip() for query in queries if query and query.strip()))
+        saw_non_seoul = False
         for query in queries:
             if query in self.cache:
                 result = self.cache[query]
@@ -105,8 +106,10 @@ class KakaoGeocoder:
                 except (AttributeError, ValueError) as exc:
                     raise ExternalServiceError("Kakao geocoder returned invalid JSON") from exc
                 self.cache[query] = result
-            seoul = [x for x in result if "서울" in (x.get("address_name", "") + x.get("road_address_name", ""))]
-            candidates = seoul or result
+            # 이 잡은 서울 버스 경로에만 사용한다. "서울" 접두어 검색이 타 지역의
+            # 동명 장소만 돌려줘도 전체 결과로 fallback하지 않는다.
+            candidates = [x for x in result if "서울" in (x.get("address_name", "") + x.get("road_address_name", ""))]
+            saw_non_seoul = saw_non_seoul or bool(result and not candidates)
             if candidates:
                 def canonical(value):
                     value = re.sub(r"\s+", "", value or "")
@@ -122,7 +125,9 @@ class KakaoGeocoder:
                         "usableForBusMapping": matched}
         return {"geocodeQuery": queries[-1], "matchedPlaceName": None, "kakaoPlaceId": None,
                 "latitude": None, "longitude": None, "geocodeStatus": "NOT_FOUND",
-                "geocodeCandidateCount": 0, "geocodeMatchBasis": "NO_CANDIDATE", "usableForBusMapping": False}
+                "geocodeCandidateCount": 0,
+                "geocodeMatchBasis": "NO_SEOUL_CANDIDATE" if saw_non_seoul else "NO_CANDIDATE",
+                "usableForBusMapping": False}
 
 
 def _clean_text(value):

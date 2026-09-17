@@ -48,11 +48,15 @@ GMS는 행사 종류, 영향 종류, 시간, 도로명, 장소 순서, 영향 �
 GMS/Kakao의 일시 장애는 Spark 배치를 실패시켜 같은 Kafka 오프셋을 재시도한다. 형식이 잘못된 AI
 응답은 잡 전체를 멈추지 않고 `INVALID_AI_RESPONSE`로 HDFS 검토 대상에 남긴다. Kakao가 후보를
 여러 개 주면 좌표는 보존하되 `AMBIGUOUS`, `routeMappingReady=false`로 표시해 자동 버스 결합에서 뺀다.
+검색 결과에 서울 주소 후보가 하나도 없으면 타 지역의 동명 장소를 대신 선택하지 않고
+`NOT_FOUND`, `usableForBusMapping=false`로 남긴다.
 
 ## 저장과 장애 분리
 
 - Redis: `traffic:latest:topis-event:{eventId}`에 정규화 행 전체를 JSON으로 저장한다. 종료된 행사와
-  이미 `validUntil`이 지난 행은 쓰지 않는다. TTL은 최대 30일이며 행사 종료 6시간 뒤를 넘지 않는다.
+  이미 `validUntil`이 지난 행은 쓰지 않는다. 새 개정본에서 `ENDED`·만료됐거나 행사 수가 줄어
+  최신 event ID 목록에서 사라진 기존 키는 즉시 삭제한다. 늦게 도착한 과거 Kafka 행은 더 최신인
+  Redis 키를 삭제할 수 없다. TTL은 최대 30일이며 행사 종료 6시간 뒤를 넘지 않는다.
 - HDFS: `TOPIS_SILVER_OUTPUT_URI`가 설정된 경우 같은 스키마를 Parquet으로 저장한다.
 - HDFS 경로가 비어 있거나 HDFS 스트림이 실패해도 Redis 스트림은 계속 실행한다.
 - 기존 `traffic:latest:topis-notice:{providerNoticeId}`는 원문 호환 키이며 AI 결과 키와 역할이 다르다.

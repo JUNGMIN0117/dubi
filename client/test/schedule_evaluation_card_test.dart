@@ -119,6 +119,7 @@ void main() {
         'departure_required',
         'stale',
         'walking_fallback',
+        'be_contract',
       ])
         name: await _fixture(name),
     };
@@ -194,6 +195,13 @@ void main() {
     expect(find.text('예상 도착: 확인 불가'), findsOneWidget);
     expect(find.text('경로 구간'), findsNothing);
     expect(find.textContaining('사고'), findsNothing);
+  });
+
+  testWidgets('FULL 원인 근거는 확인 문구로 표시하고 내부 코드는 노출하지 않는다', (tester) async {
+    await tester.pumpWidget(_summary(fixtures['be_contract']!));
+
+    expect(find.text('이동 영향 원인이 확인되었습니다.'), findsOneWidget);
+    expect(find.textContaining('ROAD_CONTROL'), findsNothing);
   });
 
   testWidgets('PREVIEW 결과는 표시하되 제안 적용을 비활성화한다', (tester) async {

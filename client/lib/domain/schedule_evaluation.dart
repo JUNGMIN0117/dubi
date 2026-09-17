@@ -87,20 +87,32 @@ class EndpointEvidence {
     this.verified,
     this.source,
     this.mappingVersion,
+    this.policyVersion,
+    this.distanceMeters,
+    this.judgment,
     this.reason,
+    this.values = const {},
   });
 
   final bool? verified;
   final String? source;
   final String? mappingVersion;
+  final String? policyVersion;
+  final int? distanceMeters;
+  final String? judgment;
   final String? reason;
+  final Map<String, dynamic> values;
 
   factory EndpointEvidence.fromJson(Map<String, dynamic> json) =>
       EndpointEvidence(
         verified: json['verified'] as bool?,
         source: json['source']?.toString(),
         mappingVersion: json['mappingVersion']?.toString(),
+        policyVersion: json['policyVersion']?.toString(),
+        distanceMeters: (json['distanceMeters'] as num?)?.toInt(),
+        judgment: json['judgment']?.toString(),
         reason: json['reason']?.toString(),
+        values: Map.unmodifiable(Map<String, dynamic>.from(json)),
       );
 }
 
@@ -222,23 +234,50 @@ class EvaluationSearch {
 
 class EvaluationCause {
   const EvaluationCause({
-    this.code,
+    this.incidentKey,
+    this.revision,
     this.source,
+    this.officialNoticeAt,
+    this.affectedSegmentIds = const [],
+    this.reasonCode,
     this.description,
     this.evidenceLevel,
+    this.observedAt,
+    this.effect,
+    this.confirmed,
   });
 
-  final String? code;
+  final String? incidentKey;
+  final int? revision;
   final String? source;
+  final DateTime? officialNoticeAt;
+  final List<String> affectedSegmentIds;
+  final String? reasonCode;
   final String? description;
   final String? evidenceLevel;
+  final DateTime? observedAt;
+  final String? effect;
+  final bool? confirmed;
+
+  /// Transitional alias for callers that used the pre-v2 cause model.
+  String? get code => reasonCode;
 
   factory EvaluationCause.fromJson(Map<String, dynamic> json) =>
       EvaluationCause(
-        code: (json['code'] ?? json['type'])?.toString(),
+        incidentKey: (json['incidentKey'] ?? json['eventId'])?.toString(),
+        revision: (json['revision'] as num?)?.toInt(),
         source: json['source']?.toString(),
+        officialNoticeAt: _date(json['officialNoticeAt']),
+        affectedSegmentIds: _strings(
+          json['affectedSegmentIds'] ?? json['segmentIds'],
+        ),
+        reasonCode: (json['reasonCode'] ?? json['code'] ?? json['type'])
+            ?.toString(),
         description: (json['description'] ?? json['message'])?.toString(),
         evidenceLevel: json['evidenceLevel']?.toString(),
+        observedAt: _date(json['observedAt']),
+        effect: json['effect']?.toString(),
+        confirmed: json['confirmed'] as bool?,
       );
 }
 

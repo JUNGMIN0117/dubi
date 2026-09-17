@@ -317,8 +317,7 @@ class ScheduleEvaluationSummary extends StatelessWidget {
           ),
         if (evaluation.causes.isNotEmpty) ...[
           const SizedBox(height: 8),
-          for (final cause in evaluation.causes)
-            Text(cause.description ?? '이동 영향 원인을 확인했습니다.'),
+          for (final cause in evaluation.causes) Text(_causeMessage(cause)),
         ],
         if (evaluation.legs.isNotEmpty) ...[
           const Divider(),
@@ -343,6 +342,17 @@ class ScheduleEvaluationSummary extends StatelessWidget {
     return '${local.month}/${local.day} '
         '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  static String _causeMessage(EvaluationCause cause) {
+    final description = cause.description?.trim();
+    if (description != null && description.isNotEmpty) return description;
+
+    final evidenceLevel = cause.evidenceLevel?.toUpperCase();
+    if (evidenceLevel == 'FULL' || evidenceLevel == 'EXACT') {
+      return '이동 영향 원인이 확인되었습니다.';
+    }
+    return '이동 구간에 영향 가능성이 있습니다.';
   }
 
   static String _stateMessage(EvaluationState state) => switch (state) {

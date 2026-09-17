@@ -112,6 +112,48 @@ void main() {
     expect(egress.endpointEvidence?.reason, 'ENDPOINT_UNVERIFIED');
   });
 
+  test('합의된 BE 원인과 endpoint 근거 필드를 손실 없이 파싱한다', () async {
+    final evaluation = await _fixture('be_contract');
+    final cause = evaluation.causes.single;
+    final evidence = evaluation.legs.single.endpointEvidence!;
+
+    expect(cause.incidentKey, 'incident-42');
+    expect(cause.revision, 3);
+    expect(cause.source, 'OFFICIAL_NOTICE');
+    expect(cause.officialNoticeAt, DateTime.utc(2026, 9, 17, 14, 20));
+    expect(cause.affectedSegmentIds, ['segment-1', 'segment-2']);
+    expect(cause.evidenceLevel, 'FULL');
+    expect(cause.reasonCode, 'ROAD_CONTROL');
+    expect(cause.code, 'ROAD_CONTROL');
+    expect(cause.observedAt, DateTime.utc(2026, 9, 17, 14, 21));
+
+    expect(evidence.mappingVersion, 'bus-master-20260917');
+    expect(evidence.policyVersion, 'endpoint-policy-v2');
+    expect(evidence.distanceMeters, 18);
+    expect(evidence.judgment, 'MATCHED');
+    expect(evidence.values['providerCoordinate'], {
+      'latitude': 35.1,
+      'longitude': 129.1,
+    });
+  });
+
+  test('전환 중인 기존 BE 원인 필드도 합의 모델로 호환 파싱한다', () {
+    final cause = EvaluationCause.fromJson({
+      'eventId': 'legacy-event',
+      'source': 'COLLECTOR',
+      'segmentIds': ['segment-7'],
+      'effect': 'POTENTIAL_IMPACT',
+      'confirmed': false,
+      'code': 'DELAY_SUSPECTED',
+    });
+
+    expect(cause.incidentKey, 'legacy-event');
+    expect(cause.affectedSegmentIds, ['segment-7']);
+    expect(cause.reasonCode, 'DELAY_SUSPECTED');
+    expect(cause.effect, 'POTENTIAL_IMPACT');
+    expect(cause.confirmed, isFalse);
+  });
+
   test('구버전 응답은 검증용 비운영 결과로 안전하게 변환한다', () async {
     final evaluation = await _fixture('legacy');
 

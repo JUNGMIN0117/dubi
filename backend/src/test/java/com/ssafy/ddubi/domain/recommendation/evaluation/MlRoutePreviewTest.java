@@ -34,6 +34,20 @@ class MlRoutePreviewTest {
         return new BusPreviewClient.Estimate(seconds,"MODEL_NOT_PRODUCTION_READY","test-model",now,0,8,false);
     }
 
+    @Test void modelSwitchDuringDepartureSearchInvalidatesEarlierBestToo() {
+        var journeys=new JourneyEvaluationService(client,evidence,new RouteTimelineEvaluator(),mock(SubwayTimingService.class),
+                new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false));
+        var engine=new ConditionalDepartureEvaluator(journeys,mock(SubwayTimetable.class),256,60,5000);
+        when(client.predict(any())).thenAnswer(call->{
+            var input=(BusPreviewClient.Input)call.getArgument(0);
+            return new BusPreviewClient.Estimate(4000.0,"MODEL_NOT_PRODUCTION_READY",input.hour()==0?"version-a":"version-b",now,0,8,false);
+        });
+        var result=engine.evaluate(List.of(route(0,"1",600,0,1)),empty,now,now.plusSeconds(120),now.plusSeconds(3600));
+        assertThat(result.decision()).isEqualTo(ConditionalDeparturePolicy.Decision.DATA_INSUFFICIENT);
+        assertThat(result.original()).isNull(); assertThat(result.proposed()).isNull();
+        assertThat(result.originalComparison().predictions()).allMatch(p->!p.applied());
+    }
+
     @Test void mlReplacesApiMovementAndFastestWinsEvenWhenBothArriveOnTime() {
         when(client.predict(any())).thenAnswer(call -> estimate(((BusPreviewClient.Input)call.getArgument(0)).routeId().equals("1") ? 200 : 30));
         var result = service.compare(List.of(route(0,"1",10,10,1),route(1,"2",900,10,1)),empty,now,now,now.plusSeconds(1000));

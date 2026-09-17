@@ -34,7 +34,7 @@ public class DatabaseCleaner {
 
     /** 자식 → 부모 순서. FK 검사를 끄더라도 의도를 남기기 위해 순서를 유지한다. */
     private static final List<String> TABLES = List.of(
-            "schedule_evaluation", "report_detail", "report",
+            "evaluation_notification_outbox", "schedule_evaluation", "report_detail", "report",
             "notification",
             "recommendation",
             "route_segment_edge", "route_segment", "route", "route_request",

@@ -43,7 +43,9 @@ def response_for(name):
 
 def settings_for(name, path):
     return Settings(source=name, kafka_bootstrap_servers="unused", api_keys={POLICIES[name][0]: "test-secret"},
-                    extra={"API_BUDGET_PATH": str(path), "BUS_ROUTE_IDS": "100100118",
+                    extra={"API_BUDGET_PATH": str(path),
+                           "TOPIS_NOTICE_DEDUP_PATH": str(Path(path).with_name("topis-notice.db")),
+                           "BUS_ROUTE_IDS": "100100118",
                            "SUBWAY_LINES": "2호선", "SUBWAY_SKIP_ENABLED": "false", "CITY_AREA_IDENTIFIERS": "POI009"})
 
 

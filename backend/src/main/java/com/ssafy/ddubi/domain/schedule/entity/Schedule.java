@@ -80,7 +80,31 @@ public class Schedule extends BaseTimeEntity {
     private LocalDateTime plannedDepartAt;
 
     /** 사용자 등록/수정 또는 명시적 제안 수락에서만 변경한다. 추천 계산 자체는 호출하지 않는다. */
-    public void changePlannedDepartAt(LocalDateTime value) { this.plannedDepartAt = value; }
+    public void changePlannedDepartAt(LocalDateTime value) {
+        this.plannedDepartAt = value; this.userInputDepartAt = value; this.planSource = "USER_INPUT"; inputRevision++;
+    }
+
+    @Column(name="user_input_depart_at")
+    private LocalDateTime userInputDepartAt;
+    @Column(name="plan_source", nullable=false)
+    private String planSource = "LEGACY_UNKNOWN";
+    @Column(name="actual_depart_at")
+    private LocalDateTime actualDepartAt;
+    @Column(name="journey_state", nullable=false)
+    private String journeyState = "NOT_STARTED";
+    /** 입력 수정의 논리 버전. 동일 DB 시각 안의 변경도 반드시 구분한다. */
+    @Column(name="input_revision", nullable=false)
+    private long inputRevision;
+
+    /** 추천 수락은 최초 사용자 P를 보존하고 실행 계획만 바꾼다. */
+    public void acceptDeparture(LocalDateTime value) {
+        plannedDepartAt=value; planSource="ACCEPTED_RECOMMENDATION"; inputRevision++;
+    }
+    /** 최초 출발 사실만 보존한다. 동일 출발 요청의 재전송은 멱등이다. */
+    public void depart(LocalDateTime now) {
+        if (actualDepartAt!=null) return;
+        requireEditable(); actualDepartAt=now; journeyState="IN_PROGRESS"; inputRevision++;
+    }
 
     @Enumerated(EnumType.STRING)
     @Column(name = "importance", nullable = false)
@@ -131,7 +155,7 @@ public class Schedule extends BaseTimeEntity {
         if (status == ScheduleStatus.DONE) {
             throw new BusinessException(ErrorCode.INVALID_STATE, "이미 완료된 일정은 취소할 수 없습니다.");
         }
-        this.status = ScheduleStatus.CANCELED;
+        this.status = ScheduleStatus.CANCELED; this.journeyState="CANCELED"; inputRevision++;
     }
 
     /**
@@ -145,7 +169,7 @@ public class Schedule extends BaseTimeEntity {
         if (status == ScheduleStatus.CANCELED) {
             throw new BusinessException(ErrorCode.INVALID_STATE, "취소된 일정은 도착을 기록할 수 없습니다.");
         }
-        this.status = ScheduleStatus.DONE;
+        this.status = ScheduleStatus.DONE; this.journeyState="ARRIVED"; inputRevision++;
     }
 
     /** UPCOMING 이 아니면 수정을 거부한다 — 끝난·취소된 일정의 수정은 의미가 없다. */
@@ -164,26 +188,26 @@ public class Schedule extends BaseTimeEntity {
     }
 
     public void changeTitle(String title) {
-        this.title = title;
+        this.title = title; inputRevision++;
     }
 
     public void changeOrigin(LocationSnapshot origin) {
-        this.origin = origin;
+        this.origin = origin; inputRevision++;
     }
 
     public void changeDestination(LocationSnapshot destination) {
-        this.destination = destination;
+        this.destination = destination; inputRevision++;
     }
 
     public void changeArriveBy(LocalDateTime arriveBy) {
-        this.arriveBy = arriveBy;
+        this.arriveBy = arriveBy; inputRevision++;
     }
 
     public void changeImportance(Importance importance) {
-        this.importance = importance;
+        this.importance = importance; inputRevision++;
     }
 
     public void changeConsiderLastTrip(boolean considerLastTrip) {
-        this.considerLastTrip = considerLastTrip;
+        this.considerLastTrip = considerLastTrip; inputRevision++;
     }
 }

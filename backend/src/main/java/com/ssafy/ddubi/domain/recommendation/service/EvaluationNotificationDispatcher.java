@@ -16,9 +16,29 @@ public class EvaluationNotificationDispatcher {
     private final JdbcTemplate jdbc;
     private final ScheduleEvaluationStore store;
     private final NotificationService notifications;
+    private final EvaluationOutboxStore outbox;
 
-    public EvaluationNotificationDispatcher(JdbcTemplate jdbc, ScheduleEvaluationStore store, NotificationService notifications) {
-        this.jdbc = jdbc; this.store = store; this.notifications = notifications;
+    public EvaluationNotificationDispatcher(JdbcTemplate jdbc, ScheduleEvaluationStore store, NotificationService notifications, EvaluationOutboxStore outbox) {
+        this.jdbc = jdbc; this.store = store; this.notifications = notifications; this.outbox=outbox;
+    }
+
+    /** 독립 outbox claim→최신성 재검사→DB 준비→외부 발송→ack. 호출 예외도 제한 재시도로 기록한다. */
+    public void dispatchOutbox(long id) {
+        var delivery=outbox.claim(id,java.time.Instant.now());
+        if(delivery==null) return;
+        try {
+            var original=store.read(delivery.json(),NotificationCommand.class);
+            var command=new NotificationCommand(original.userId(),original.scheduleId(),original.recommendationId(),
+                    original.type(),original.title(),original.body(),delivery.dedup(),original.evaluationId(),original.decision());
+            if(!outbox.current(delivery,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
+            var prepared=notifications.prepareForOutbox(command,delivery.notificationId());
+            if(!outbox.attach(delivery,prepared.notification().getId())) return;
+            if(!outbox.current(delivery,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
+            var result=notifications.sendPrepared(prepared);
+            String status=result.getStatus().name();
+            outbox.finish(delivery,"SENT".equals(status)?"SENT":"SUPPRESSED".equals(status)?"CANCELED":"PUSH_FAILED",
+                    null,java.time.Instant.now());
+        } catch(RuntimeException failure) { outbox.finish(delivery,"DELIVERY_FAILED",null,java.time.Instant.now()); }
     }
 
     /**

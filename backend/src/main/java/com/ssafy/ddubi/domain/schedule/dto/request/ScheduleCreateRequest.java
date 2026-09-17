@@ -28,6 +28,7 @@ public record ScheduleCreateRequest(
         Importance importance,
 
         Boolean considerLastTrip,
+        @NotNull(message = "출발 예정시각은 필수입니다.")
         LocalDateTime plannedDepartAt
 ) {
     /** 구버전 내부 호출의 호환 생성자. 출발 미입력을 추천 출발로 추측하지 않는다. */

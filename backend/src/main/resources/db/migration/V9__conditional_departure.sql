@@ -1,4 +1,4 @@
--- 기존 V1~V6을 수정하지 않는 forward migration이다. 과거 계획의 입력 출처는 추측하지 않는다.
+-- 기존 V1~V8을 수정하지 않는 forward migration이다. 과거 계획의 입력 출처는 추측하지 않는다.
 ALTER TABLE schedule
     ADD COLUMN user_input_depart_at DATETIME(6) NULL,
     ADD COLUMN plan_source VARCHAR(40) NOT NULL DEFAULT 'LEGACY_UNKNOWN',

@@ -173,4 +173,30 @@ class BusWaitingServiceTest {
         assertThat(result.waitPredictions()).allMatch(MlRoutePreview.WaitPrediction::applied);
         assertThat(result.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(250));
     }
+    /** 선택 차량은 10초 뒤 도착하지만 관측은 20초 뒤 만료된다. ETA가 더 늦어도 TTL을 늘리지 않는다. */
+    @Test void appliedBusObservationExpiresFinalEvaluationAndSurvivesStoredJson() throws Exception {
+        row.put("validUntil",now.plusSeconds(20).toString());
+        obs.put("firstArrivalSeconds",10);
+        var evaluation=new ConditionalDepartureEvaluator(null,null,256,60,5000).evaluate(1,now,now,now.plusSeconds(2000),
+                List.of(),at->compare(route,true,at));
+        var stored=json.readValue(json.writeValueAsString(evaluation),ConditionalDepartureEvaluator.Evaluation.class);
+        assertThat(stored.proposedComparison().waitPredictions().get(0).validUntil()).isEqualTo(now.plusSeconds(20));
+        assertThat(ScheduleEvaluationV2.validity(stored,null,now,null)).isEqualTo(now.plusSeconds(20));
+        assertThat(ScheduleEvaluationV2.validity(stored,null,now,now.plusSeconds(5))).isEqualTo(now.plusSeconds(5));
+        // 이전 저장 JSON에는 만료 필드가 없다. 적용된 관측을 무기한 유효한 것으로 복원하지 않는다.
+        var legacy=json.valueToTree(evaluation);
+        for(String field:List.of("originalComparison","proposedComparison"))
+            ((ObjectNode)legacy.path(field).path("waitPredictions").get(0)).remove("validUntil");
+        var restored=json.treeToValue(legacy,ConditionalDepartureEvaluator.Evaluation.class);
+        assertThat(ScheduleEvaluationV2.validity(restored,null,now,null)).isEqualTo(now);
+    }
+
+    @Test void unappliedBusObservationDoesNotShortenProviderFallbackValidity() {
+        row.put("validUntil",now.plusSeconds(20).toString());
+        obs.put("firstArrivalSeconds",10);
+        var evaluation=new ConditionalDepartureEvaluator(null,null,256,60,5000).evaluate(1,now,now,now.plusSeconds(2000),
+                List.of(),at->compare(route,false,at));
+        assertThat(evaluation.proposedComparison().waitPredictions()).allMatch(w->!w.applied());
+        assertThat(ScheduleEvaluationV2.validity(evaluation,null,now,null)).isEqualTo(now.plusSeconds(60));
+    }
 }

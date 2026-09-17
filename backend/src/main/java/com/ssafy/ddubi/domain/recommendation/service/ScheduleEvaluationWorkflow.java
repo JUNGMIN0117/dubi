@@ -122,15 +122,19 @@ public class ScheduleEvaluationWorkflow {
         var job = store.claim(scheduleId, userId, now);
         try {
             var cache = job.cache();
-            boolean refresh = monitoring.refreshCandidates(now, cache == null ? null : cache.search().fetchedAt(), false);
-            RouteSearchResult search = refresh ? routes.search(new RouteSearchQuery(job.origin(), job.destination())) : cache.search();
-            if (!refresh && mappingRefresher != null) {
+            boolean providerRefreshed = monitoring.refreshCandidates(now, cache == null ? null : cache.search().fetchedAt(), false);
+            boolean candidatesChanged = providerRefreshed;
+            RouteSearchResult search = providerRefreshed ? routes.search(new RouteSearchQuery(job.origin(), job.destination())) : cache.search();
+            if (!providerRefreshed && mappingRefresher != null) {
                 var remapped = BusAlternativeExpansion.expand(mappingRefresher.refresh(search));
-                // 변경된 edge와 평가 증거를 함께 저장한다. 원본 fetchedAt을 유지하여 경로 TTL은 연장하지 않는다.
-                refresh = !remapped.equals(search);
+                // 매핑 변경은 DB 후보 교체만 요구한다. 외부 후보를 새로 조회한 것은 아니므로
+                // 아래 통제/지각 재조회 조건을 막지 않고 원본 fetchedAt도 유지한다.
+                candidatesChanged = !remapped.equals(search);
                 search = remapped;
             }
-            search = BusAlternativeExpansion.expand(search);
+            var expanded = BusAlternativeExpansion.expand(search);
+            candidatesChanged |= !expanded.equals(search);
+            search = expanded;
 
             var snapshot = evidence.read(search.candidates(), now);
             Instant departure = job.departure().isBefore(now) ? now : job.departure();
@@ -150,7 +154,7 @@ public class ScheduleEvaluationWorkflow {
             boolean previousAtRisk = previous != null && (previous.selected().assessment() == Assessment.BLOCKED
                     || previous.selected().assessment() == Assessment.LATE_ESTIMATE
                     || previous.selected().reasons().stream().anyMatch(r -> r.startsWith("ROAD_POTENTIAL_IMPACT:")));
-            if (!refresh && newlyAtRisk && !previousAtRisk) {
+            if (!providerRefreshed && newlyAtRisk && !previousAtRisk) {
                 search = BusAlternativeExpansion.expand(routes.search(new RouteSearchQuery(job.origin(), job.destination())));
 
                 snapshot = evidence.read(search.candidates(), now);
@@ -158,7 +162,7 @@ public class ScheduleEvaluationWorkflow {
                 calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
                 comparison = calculation.proposedComparison();
                 suggestion = calculation.suggestion();
-                selectedKey = selectedKey(job, search); selected = selected(suggestion, selectedKey); refresh = true;
+                selectedKey = selectedKey(job, search); selected = selected(suggestion, selectedKey); candidatesChanged = true;
             }
             var info = new ArrayList<CandidateInfo>();
             for (RouteCandidate c : search.candidates()) info.add(new CandidateInfo(RouteEvidenceAssembler.key(c), evidence.riskReasons(c, snapshot), c.segments().stream().map(s -> new RouteStep(s.mode().name(), s.fromName(), s.toName(), BusAlternativeExpansion.displayedVehicles(s))).toList()));
@@ -169,7 +173,7 @@ public class ScheduleEvaluationWorkflow {
             // 그때 dispatcher 는 아무것도 하지 않는다. EvaluationNotificationPlanner 참고.
             var planned = notifications.plan(job, result);
             Instant proposed = suggestion.proposed() == null ? null : suggestion.proposed().departureAt();
-            return store.complete(job, search, refresh, result, monitoring.nextEvaluation(now, job.arriveBy(), proposed),
+            return store.complete(job, search, candidatesChanged, result, monitoring.nextEvaluation(now, job.arriveBy(), proposed),
                     planned.map(p -> store.write(p.command())).orElse(null),
                     planned.map(EvaluationNotificationPlanner.Planned::key).orElse(null),
                     Instant.now());
@@ -191,7 +195,12 @@ public class ScheduleEvaluationWorkflow {
                 .orElse(suggestion.originalCandidates().get(0));
     }
 
-    /** 캐시 교체 시 차량·방향·정류장열로 기존 선택을 찾는다. 매칭 실패는 선택 소실로 따로 표시할 후속 UI 대상이다. */
+    /**
+     * 먼저 기존 canonical occurrence까지 일치하는 선택을 찾는다. 없으면 원본 차량·정류장·형상이
+     * 같고 이전에 비어 있던 매핑만 보강된 유일한 후보를 이어받는다. 기존 확정 edge의 교체나
+     * 여러 차량으로 갈라지는 선택은 자동 승인하지 않고 선택 소실로 남긴다.
+     * 성공한 새 후보는 complete에서 캐시의 selectedCandidate와 DB 선택을 함께 교체한다.
+     */
     private String selectedKey(ScheduleEvaluationStore.Job job, RouteSearchResult search) {
         if (job.cache() != null) {
             var previous = Optional.ofNullable(job.cache().selectedCandidate());
@@ -199,6 +208,10 @@ public class ScheduleEvaluationWorkflow {
                 String signature = signature(previous.get());
                 var matches = search.candidates().stream().filter(c -> signature(c).equals(signature)).toList();
                 if (matches.size() == 1) return RouteEvidenceAssembler.key(matches.get(0));
+                if (matches.isEmpty()) {
+                    var enriched = search.candidates().stream().filter(c -> canEnrichSelection(previous.get(), c)).toList();
+                    if (enriched.size() == 1) return RouteEvidenceAssembler.key(enriched.get(0));
+                }
             }
             return "previous-unavailable";
         }
@@ -209,6 +222,32 @@ public class ScheduleEvaluationWorkflow {
         return store.write(candidate.segments().stream().map(s -> Arrays.asList(s.mode(), s.providerRouteKey(),
                 s.fromName(), s.toName(), s.stopNames(), s.vehicles(), s.geometry(),
                 RouteEvidenceAssembler.pathIdentity(s))).toList());
+    }
+
+    /**
+     * 미매핑 캐시를 현재 마스터로 보강하는 호환 검사다. 외부 I/O와 상태 변경은 없다.
+     * 1. 원본 이동 증거를 비교 → 2. 기존 확정 occurrence를 보존 → 3. 새 매핑의 EXACT를 확인한다.
+     * 비어 있던 edge를 채우는 경우만 허용하며, 후보 유일성은 호출자가 전체 목록에서 확인한다.
+     */
+    private boolean canEnrichSelection(RouteCandidate previous, RouteCandidate current) {
+        if (previous.segments().size() != current.segments().size()) return false;
+        for (int i = 0; i < previous.segments().size(); i++) {
+            var before = previous.segments().get(i);
+            var after = current.segments().get(i);
+            if (!providerIdentity(before).equals(providerIdentity(after))) return false;
+            var oldPath = RouteEvidenceAssembler.pathIdentity(before);
+            var newPath = RouteEvidenceAssembler.pathIdentity(after);
+            // 같은 정류장 쌍도 순환 노선의 승차 순번이 다르면 다른 선택이다.
+            if (!oldPath.isEmpty() && !oldPath.equals(newPath)) return false;
+            if (oldPath.isEmpty() && !newPath.isEmpty()
+                    && after.mapping().status() != com.ssafy.ddubi.domain.route.mapping.TransitMappingStatus.EXACT) return false;
+        }
+        return true;
+    }
+
+    private List<Object> providerIdentity(RouteSegment segment) {
+        return Arrays.asList(segment.mode(), segment.providerRouteKey(), segment.fromName(), segment.toName(),
+                segment.stopNames(), segment.vehicles(), segment.geometry());
     }
 
 }

@@ -71,7 +71,7 @@ x-collector-env: &collector-env
   # 기본값을 여기(compose)에 두는 이유: 파일이 저장소에 있으니 지문도 같은 커밋에서 함께 바뀌어야 한다.
   # 파일을 새로 만들면 backend/transit-master/bus/metropolitan-bus-v6.crosswalk.json.manifest.json 의 sha256 으로 갱신
   BUS_CROSSWALK_PATH: ${BUS_CROSSWALK_PATH:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz}
-  BUS_CROSSWALK_SHA256: ${BUS_CROSSWALK_SHA256:-e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd}
+  BUS_CROSSWALK_SHA256: ${BUS_CROSSWALK_SHA256:-8014da5e1453d426789fa396622a0f0e4069ac484db76860348af517adc1f246}
 
 # Spark 3개 노드가 공유하는 마운트. 설정은 infra/spark/conf/ 디렉터리를 /opt/spark/conf 에 마운트
 # (파일 하나를 마운트하면 git pull 로 파일이 교체돼도 컨테이너는 옛 inode 를 계속 봐서 재생성 전엔 반영되지 않는다.
@@ -395,7 +395,7 @@ services:
       DDUBI_METROPOLITAN_BUS_IMPORT_ENABLED: ${DDUBI_METROPOLITAN_BUS_IMPORT_ENABLED:-false}
       DDUBI_METROPOLITAN_BUS_ARTIFACT: ${DDUBI_METROPOLITAN_BUS_ARTIFACT:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz}
       DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE: ${DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE:-}
-      DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64}   # metropolitan-bus-v6.json.manifest.json 의 sha256
+      DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-6999b0e67eb1af391de563291ce9cf4251b5ec271307e3f24de55d22d17318e2}   # metropolitan-bus-v6.json.manifest.json 의 sha256
       DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL: ${DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL:-http://ml-serving:8000}
       JAVA_OPTS: -Xms256m -Xmx512m
     volumes:

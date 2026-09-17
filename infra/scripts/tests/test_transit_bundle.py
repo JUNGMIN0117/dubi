@@ -35,5 +35,23 @@ class BundleTests(unittest.TestCase):
                 codeSha256='b'*64, outputs={'../outside':'a'*64})),encoding='utf-8')
             self.assertIn('OUTPUT_PATH_ESCAPE',bundle.verify(root)['failures'])
 
+    def test_part_provenance_formats(self):
+        for manifest in [dict(inputs={'raw':'a'*64},codeSha256='b'*64),
+                         dict(inputs={'sha256':{'raw':'a'*64,'build.py':'b'*64},'radius':300}),
+                         dict(inputs={'raw':'a'*64,'build.py':'b'*64})]:
+            self.assertEqual(bundle.provenance_failures(manifest),[])
+        self.assertTrue(bundle.provenance_failures(dict(inputs={'raw':'a'*64})))
+        self.assertTrue(bundle.provenance_failures(dict(inputs={'sha256':{}})))
+
+    def test_invalid_manifest_and_output_hash(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root)
+            manifest=root/'complete.json'
+            manifest.write_text('[]',encoding='utf-8')
+            self.assertFalse(bundle.verify(root)['integrityVerified'])
+            manifest.write_text(json.dumps(dict(sourceSha256='a'*64,codeSha256='b'*64,
+                outputs={'data':'bad'})),encoding='utf-8')
+            self.assertIn('INVALID_OUTPUT_ENTRY',bundle.verify(root)['failures'])
+
 
 if __name__=='__main__': unittest.main()

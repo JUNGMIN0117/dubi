@@ -82,6 +82,9 @@ public class JourneyEvaluationService {
                     boolean waitApplied = false;
                     if (!supported(edges)) {
                         reasons.add(leg.key() + ":UNVERIFIED_OR_UNSUPPORTED_BUS_MAPPING");
+                        if(segment.mapping()!=null && BusAlternativeExpansion.LIMITED.equals(segment.mapping().failureReason())) {
+                            reasons.add(leg.key()+":"+BusAlternativeExpansion.LIMITED); exhausted=true;
+                        }
                     } else {
                         // 대기 후 실제 탑승 예상시각을 버스 ML의 첫 edge 입력으로 사용한다.
                         Instant edgeCursor = canUseWait ? wait.boardingAt() : cursor;
@@ -111,8 +114,8 @@ public class JourneyEvaluationService {
                                 }
                             }
                             attempts.add(new Prediction(original.key(), leg.key(), edge.segmentId(), edgeCursor, input, estimate, false));
-                            if (session.mixedModel || estimate.seconds() == null || !Double.isFinite(estimate.seconds()) || estimate.seconds() < 0 || Boolean.TRUE.equals(estimate.dataInsufficient())) {
-                                reasons.add(leg.key() + ":" + (session.mixedModel ? "ML_MODEL_VERSION_MISMATCH" : estimate.reason())); complete = false; break;
+                            if (session.mixedModel || estimate.applicationFailure() != null) {
+                                reasons.add(leg.key() + ":" + (session.mixedModel ? "ML_MODEL_VERSION_MISMATCH" : estimate.applicationFailure())); complete = false; break;
                             }
                             long seconds = (long) Math.ceil(estimate.seconds());
                             total += seconds; edgeCursor = edgeCursor.plusSeconds(seconds);

@@ -11,6 +11,10 @@ import org.springframework.web.bind.annotation.*;
 public class InternalBusReferenceController {
     private final BusReferenceService service;
     public InternalBusReferenceController(BusReferenceService service) { this.service=service; }
+    @GetMapping("/status")
+    public ApiResponse<Map<String,Object>> status(@PathVariable String version) {
+        return ApiResponse.success(service.status(version));
+    }
     @PostMapping("/chunks/{chunk}")
     public ApiResponse<Map<String,Object>> upload(@PathVariable String version,@PathVariable int chunk,
             @RequestBody BusReferenceService.Upload request) {

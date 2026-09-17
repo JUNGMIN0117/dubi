@@ -17,6 +17,16 @@ class BusReferenceIntegrationTest extends IntegrationTestSupport {
     @Autowired BusReferenceService service;
     @Autowired MockMvc mvc;
     @Autowired com.fasterxml.jackson.databind.ObjectMapper json;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Test void failedMultiValuesInsertRollsBackChunkAndEveryRow() {
+        jdbc.execute("ALTER TABLE bus_reference_row ADD CONSTRAINT reference_test_failure CHECK (data_version <> 'rollback-v1' OR row_index <> 1)");
+        try {
+            var row=BusReferenceServiceTest.row(60,2,"HOURLY_SOURCE_MEAN");
+            assertThrows(RuntimeException.class,()->service.upload("rollback-v1",0,new BusReferenceService.Upload(List.of(row,row))));
+            assertEquals(0L,service.status("rollback-v1").get("totalRows"));
+            assertEquals(0L,service.status("rollback-v1").get("totalChunks"));
+        } finally {jdbc.execute("ALTER TABLE bus_reference_row DROP CHECK reference_test_failure");}
+    }
     @Test void authenticatedUploadAndLookup() throws Exception {
         var request=new BusReferenceService.Upload(List.of(BusReferenceServiceTest.row(60,2,"HOURLY_SOURCE_MEAN")));
         mvc.perform(post("/internal/bus-references/http-v1/chunks/0")

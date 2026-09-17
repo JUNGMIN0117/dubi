@@ -72,14 +72,25 @@ public class BusReferenceService {
             require(count==request.rows().size());
             return Map.of("receivedRows",count,"reused",true,"productionReady",false);
         }
-        var args=new ArrayList<Object[]>();
+        var args=new ArrayList<Object>();
+        var tuples=new ArrayList<String>();
         for(int i=0;i<request.rows().size();i++) {
             var r=request.rows().get(i);
-            args.add(new Object[]{version,chunk,i,r.masterVersion(),r.namespace(),r.routeId(),r.fromStopId(),
-                    r.toStopId(),r.fromOrder(),r.toOrder(),r.dow(),r.hourSlot(),r.sampleKind(),encode(r)});
+            Collections.addAll(args,version,chunk,i,r.masterVersion(),r.namespace(),r.routeId(),r.fromStopId(),
+                    r.toStopId(),r.fromOrder(),r.toOrder(),r.dow(),r.hourSlot(),r.sampleKind(),encode(r));
+            tuples.add("(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         }
-        db.batchUpdate("INSERT INTO bus_reference_row VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",args);
-        return Map.of("receivedRows",args.size(),"reused",false,"productionReady",false);
+        // 청크 전체를 한 bound multi-values INSERT로 보낸다. 드라이버 전역 옵션에 의존하지 않는다.
+        db.update("INSERT INTO bus_reference_row VALUES "+String.join(",",tuples),args.toArray());
+        return Map.of("receivedRows",request.rows().size(),"reused",false,"productionReady",false);
+    }
+    @Transactional(readOnly=true)
+    public Map<String,Object> status(String version) {
+        token(version,80);
+        Long chunks=db.queryForObject("SELECT count(*) FROM bus_reference_chunk WHERE data_version=?",Long.class,version);
+        Long rows=db.queryForObject("SELECT count(*) FROM bus_reference_row WHERE data_version=?",Long.class,version);
+        return Map.of("dataVersion",version,"totalRows",rows==null?0L:rows,"totalChunks",chunks==null?0L:chunks,
+                "productionReady",false,"realtimeApplied",false);
     }
     @Transactional(readOnly=true)
     public Map<String,Object> lookup(String version, Query q) {

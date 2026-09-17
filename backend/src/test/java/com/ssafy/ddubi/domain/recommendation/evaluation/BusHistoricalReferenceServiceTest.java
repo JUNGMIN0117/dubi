@@ -1,0 +1,89 @@
+package com.ssafy.ddubi.domain.recommendation.evaluation;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.ddubi.domain.pipeline.service.BusReferenceService;
+import com.ssafy.ddubi.domain.route.mapping.*;
+import com.ssafy.ddubi.domain.route.service.PublicBusReferenceService;
+import java.time.*;
+import java.util.*;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class BusHistoricalReferenceServiceTest {
+    final Instant now=Instant.parse("2026-09-17T00:00:00Z");
+    final BusReferenceService store=mock(BusReferenceService.class);
+    final PublicBusReferenceService publicReferences=mock(PublicBusReferenceService.class);
+    final MetropolitanBusMasterService masters=mock(MetropolitanBusMasterService.class);
+    final MetropolitanBusCatalog catalog=mock(MetropolitanBusCatalog.class);
+    final BusHistoricalReferenceService.Policy policy=new BusHistoricalReferenceService.Policy(true,"v1",1000,1,90,3,3,7,"HOURLY_SOURCE_MEAN");
+    BusHistoricalReferenceService service() {
+        when(store.status("v1")).thenReturn(Map.of("dataVersion","v1","totalRows",1000L,"totalChunks",1L));
+        when(masters.activeVersion()).thenReturn(Optional.of("master"));when(catalog.snapshot()).thenReturn(new MetropolitanBusCatalog.Snapshot("master",null));
+        return new BusHistoricalReferenceService(store,publicReferences,masters,catalog,policy);
+    }
+    List<MappedTransitSegment> edges(int count) {return MlRoutePreviewTest.route(0,"1",300,0,count).segments().get(0).mapping().segments();}
+    BusReferenceService.Row row(BusReferenceService.Query q,double mean,int dates,String kind,LocalDate end) {
+        return new BusReferenceService.Row(q.masterVersion(),q.namespace(),q.routeId(),q.fromStopId(),q.toStopId(),q.fromOrder(),q.toOrder(),q.dow(),q.hourSlot(),kind,mean,dates,dates,end.minusDays(14),end,"a".repeat(64));
+    }
+    void normal(double seconds) {
+        when(publicReferences.lookup(eq("v1"),any())).thenAnswer(call->Map.of("status","STAGED_REFERENCE_NOT_APPROVED","rows",List.of(row(call.getArgument(1),seconds,3,"HOURLY_SOURCE_MEAN",LocalDate.of(2026,8,27))),"truncated",false));
+    }
+    BusHistoricalReferenceService.Estimate estimate(BusHistoricalReferenceService s,Instant entered,int count,long uncertainty) {
+        return s.estimate(edges(count),"master",entered,uncertainty,now,new BusHistoricalReferenceService.Session(),System.nanoTime()+Duration.ofSeconds(20).toNanos());
+    }
+    @Test void completedDatasetGateIsLifetimeCachedAndExactMeanApplied() {
+        var s=service();s.warmGate();normal(45.1);assertEquals(92,estimate(s,now,2,0).seconds());assertEquals(46,estimate(s,now,1,0).seconds());verify(store,times(1)).status("v1");
+    }
+    @Test void incompleteGateAndDisabledPolicyCannotQueryRows() {
+        var s=service();when(store.status("v1")).thenReturn(Map.of("dataVersion","v1","totalRows",999L,"totalChunks",1L));
+        assertEquals("HISTORICAL_REFERENCE_DATASET_INCOMPLETE",estimate(s,now,1,0).reason());
+        estimate(s,now,1,0);verify(store,times(1)).status("v1");verifyNoInteractions(publicReferences);
+        var disabled=new BusHistoricalReferenceService(store,publicReferences,masters,catalog,new BusHistoricalReferenceService.Policy(false,"v1",1000,1,90,3,3,7,"HOURLY_SOURCE_MEAN"));
+        assertEquals("HISTORICAL_REFERENCE_DISABLED",estimate(disabled,now,1,0).reason());
+    }
+    @Test void staleSparseWrongKindAndFutureObservedRowsAreNotUsed() {
+        var s=service();
+        for(var rowCase:List.of("stale","sparse","kind","future")) {
+            when(publicReferences.lookup(eq("v1"),any())).thenAnswer(call->Map.of("status","STAGED_REFERENCE_NOT_APPROVED","rows",List.of(row(call.getArgument(1),60,rowCase.equals("sparse")?1:3,rowCase.equals("kind")?"ACTUAL_TRAVERSAL_MEAN":"HOURLY_SOURCE_MEAN",rowCase.equals("stale")?LocalDate.of(2026,5,1):rowCase.equals("future")?LocalDate.of(2026,9,18):LocalDate.of(2026,8,27)))));
+            assertEquals("HISTORICAL_REFERENCE_SAMPLES_OR_FRESHNESS_INSUFFICIENT",estimate(s,now,1,0).reason());
+        }
+    }
+    @Test void overlappingPeriodsAreNotAveragedAndAmbiguousLatestIsRejected() {
+        var s=service();when(publicReferences.lookup(eq("v1"),any())).thenAnswer(call->{var q=(BusReferenceService.Query)call.getArgument(1);return Map.of("status","STAGED_REFERENCE_NOT_APPROVED","rows",List.of(row(q,30,3,"HOURLY_SOURCE_MEAN",LocalDate.of(2026,8,27)),row(q,60,3,"HOURLY_SOURCE_MEAN",LocalDate.of(2026,8,27))));});
+        assertEquals("HISTORICAL_REFERENCE_AMBIGUOUS_PERIOD",estimate(s,now,1,0).reason());
+    }
+    @Test void kstHourAdvancesAndUncertainHourOrForecastRangeFallback() {
+        var s=service();normal(45);
+        Instant start=Instant.parse("2026-09-17T00:59:30Z");assertEquals(90,estimate(s,start,2,0).seconds());
+        var capture=org.mockito.ArgumentCaptor.forClass(BusReferenceService.Query.class);verify(publicReferences,times(2)).lookup(eq("v1"),capture.capture());
+        assertEquals(List.of(9,10),capture.getAllValues().stream().map(BusReferenceService.Query::hourSlot).toList());
+        assertEquals("HISTORICAL_REFERENCE_ENTRY_HOUR_UNCERTAIN",estimate(s,start,1,60).reason());
+        assertEquals("HISTORICAL_REFERENCE_FORECAST_DATE_UNSUPPORTED",estimate(s,now.plus(Duration.ofDays(8)),1,0).reason());
+    }
+    @Test void changedMasterRejectsWithoutReferenceLookup() {
+        var s=service();when(masters.activeVersion()).thenReturn(Optional.of("other"));
+        assertEquals("HISTORICAL_REFERENCE_MASTER_VERSION_MISMATCH",estimate(s,now,1,0).reason());verifyNoInteractions(publicReferences);
+    }
+    @Test void actualJourneyReplacesWholeApiRideWithoutMixingMlAndPreservesResidual() {
+        var history=service();normal(45);var ml=mock(BusPreviewClient.class);
+        when(ml.predict(any())).thenReturn(BusPreviewClient.Estimate.unavailable("ML_NOT_CONFIGURED"));
+        var evaluator=new JourneyEvaluationService(ml,new RouteEvidenceAssembler(mock(StringRedisTemplate.class),new ObjectMapper()),new RouteTimelineEvaluator(),mock(SubwayTimingService.class),new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false),history);
+        var route=MlRoutePreviewTest.route(0,"1",300,10,2);
+        var result=evaluator.compare(List.of(route),new RouteEvidenceAssembler.Snapshot(Map.of(),List.of()),now,now,now.plusSeconds(1000));
+        assertEquals(now.plusSeconds(100),result.fastest().estimatedArrivalAt());
+        assertEquals("MIXED_HISTORICAL_REFERENCE",result.candidates().get(0).quality());assertEquals(0,result.candidates().get(0).mlSteps());
+        assertEquals("BUS_HISTORICAL_REFERENCE",result.fastest().steps().get(0).source());assertFalse(result.productionReady());
+        assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_MIN_SAMPLE_COUNT:3"));
+        assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_OLDEST_OBSERVATION_END:2026-08-27"));
+        assertTrue(result.predictions().stream().noneMatch(MlRoutePreview.Prediction::applied));
+    }
+    @Test void partialReferenceFailureRestoresEntireApiRide() {
+        var history=service();normal(45);when(publicReferences.lookup(eq("v1"),argThat(q->q.fromOrder()==2))).thenReturn(Map.of("status","REFERENCE_MISSING","rows",List.of()));
+        var ml=mock(BusPreviewClient.class);when(ml.predict(any())).thenReturn(BusPreviewClient.Estimate.unavailable("ML_NOT_CONFIGURED"));
+        var evaluator=new JourneyEvaluationService(ml,new RouteEvidenceAssembler(mock(StringRedisTemplate.class),new ObjectMapper()),new RouteTimelineEvaluator(),mock(SubwayTimingService.class),new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false),history);
+        var result=evaluator.compare(List.of(MlRoutePreviewTest.route(0,"1",300,0,2)),new RouteEvidenceAssembler.Snapshot(Map.of(),List.of()),now,now,now.plusSeconds(1000));
+        assertEquals(now.plusSeconds(300),result.fastest().estimatedArrivalAt());assertEquals("API_ONLY",result.candidates().get(0).quality());
+    }
+}

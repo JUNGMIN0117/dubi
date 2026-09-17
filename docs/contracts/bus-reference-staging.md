@@ -1,10 +1,15 @@
 # 날씨 독립 버스 참고자료 저장·조회
 
+## 후속 연결
+전체 내보내기와 공개 참고조회가 구현되었다. 명시적 설정·전체 적재 검증을 거친 과거 평균 계산 fallback은
+`bus-historical-fallback.md`, 서버 실행 절차는 `../transit-stage3-deployment.md`를 따른다.
+아래 저장 API의 productionReady=false는 실시간/ML 승인 없음이라는 계약이며 과거 평균 사용 여부와 별개다.
+
 ## 운영 기준선과 분리
 평균을 p50/p80/p95로 복제하지 않는다. 날씨가 없는 자료는 DRY가 아니다.
 V11은 `bus_reference_chunk`, `bus_reference_row`만 추가하며 기존 V1~V10 및
 `baseline_serving`/활성 버전은 변경하지 않는다. 현재는 내부 검토 조회 경로만 제공하며
-추천 소요시간·출발시각·실시간 적용 여부를 자동 변경하지 않는다.
+적재 자체로 추천 소요시간·출발시각·실시간 적용 여부를 자동 변경하지 않는다.
 
 ## API
 기존 X-DDUBI-API-KEY 및 /internal/ 접근 정책을 그대로 적용한다.

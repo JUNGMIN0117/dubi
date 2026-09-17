@@ -324,6 +324,9 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
   @override
   Widget build(BuildContext context) {
     final usable = evaluation.canRecommendAt(DateTime.now());
+    final historicalEstimate = evaluation.canShowHistoricalEstimateAt(
+      DateTime.now(),
+    );
     final stale =
         evaluation.state == EvaluationState.stale ||
         evaluation.isExpiredAt(DateTime.now());
@@ -337,6 +340,8 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
             if (evaluation.quality.preview) const Chip(label: Text('검증용')),
             if (stale) const Chip(label: Text('갱신 필요')),
             if (evaluation.isLegacy) const Chip(label: Text('구버전 응답')),
+            if (evaluation.hasHistoricalReference)
+              const Chip(label: Text('과거 평균 기반 추정')),
           ],
         ),
         Text(
@@ -367,6 +372,11 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         if (usable && evaluation.proposedDepartAt != null)
           _timeRow('제안 출발', evaluation.proposedDepartAt),
         if (usable) _timeRow('예상 도착', evaluation.estimatedArrivalAt),
+        if (!usable && historicalEstimate) ...[
+          _timeRow('과거 평균 기반 참고 출발', evaluation.proposedDepartAt),
+          _timeRow('과거 평균 기반 참고 도착', evaluation.estimatedArrivalAt),
+          const Text('과거 자료로 계산한 참고 추정입니다. 현재 운행상황이나 정시 도착을 보장하지 않습니다.'),
+        ],
         if (evaluation.computedAt != null)
           _timeRow('마지막 확인', evaluation.computedAt),
         if (!widget.compact && evaluation.validUntil != null)
@@ -375,6 +385,8 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           _timeRow('다음 확인', evaluation.nextEvaluationAt),
         const SizedBox(height: 8),
         Text(_qualityMessage(evaluation.quality)),
+        if (evaluation.hasHistoricalReference)
+          const Text('버스 일부 구간에 과거 평균 소요시간을 사용했습니다. 실시간 정보나 ML 예측값이 아닙니다.'),
         if (evaluation.quality.costCoverage != 'COMPLETE')
           const Text('전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'),
         if (evaluation.quality.missingInputs.isNotEmpty)
@@ -503,12 +515,24 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         .join(', ');
   }
 
-  static String _fallbackLabel(String value) => switch (value) {
-    'EGRESS_ENDPOINT_UNVERIFIED' ||
-    'EGRESS_WALK_FALLBACK' => '이탈 도보는 기존 경로 정보 사용',
-    'MODEL_VALIDATION_ONLY' || 'VALIDATION_ONLY' => '검증 중인 모델 결과',
-    _ => '일부 구간은 기본 경로 정보 사용',
-  };
+  static String _fallbackLabel(String value) =>
+      historicalReferenceReasonLabel(value) ??
+      switch (value) {
+        _ when value.contains('HISTORICAL_REFERENCE_APPLIED') =>
+          '버스 과거 평균 소요시간 적용',
+        _ when value.contains('HISTORICAL_REFERENCE_WEATHER_UNKNOWN') =>
+          '과거 평균에 현재 날씨 미반영',
+        _
+            when value.contains('HISTORICAL_REFERENCE_DATA_VERSION') ||
+                value.contains('HISTORICAL_REFERENCE_SAMPLE_KIND') =>
+          '사용한 과거 자료의 출처 기록',
+        _ when value.contains('HISTORICAL_REFERENCE_') =>
+          '과거 자료 적용 조건이 맞지 않아 기본 경로시간 유지',
+        'EGRESS_ENDPOINT_UNVERIFIED' ||
+        'EGRESS_WALK_FALLBACK' => '이탈 도보는 기존 경로 정보 사용',
+        'MODEL_VALIDATION_ONLY' || 'VALIDATION_ONLY' => '검증 중인 모델 결과',
+        _ => '일부 구간은 기본 경로 정보 사용',
+      };
 
   static String _legLabel(EvaluationRouteLeg leg) {
     final role = switch (leg.role) {
@@ -526,6 +550,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
       DurationSource.realtimeArrival => '실시간 도착예측',
       DurationSource.timetable => '시간표 기준',
       DurationSource.mlPreview => '검증용 모델',
+      DurationSource.busHistoricalReference => '과거 버스 평균 기준 · 실시간 아님',
       DurationSource.unknown => '출처 확인 중',
     };
     final endpoints = [

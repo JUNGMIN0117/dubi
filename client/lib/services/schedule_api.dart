@@ -4,11 +4,21 @@ import '../core/constants/api_paths.dart';
 import '../core/network/api_error_response.dart';
 import '../domain/models.dart';
 import '../domain/schedule_evaluation.dart';
+import '../domain/transit_reference.dart';
+import 'transit_reference_api.dart';
 
 class ScheduleApi {
   const ScheduleApi(this._dio);
 
   final Dio _dio;
+
+  Future<TransitReferenceStatus> transitReferenceStatus() =>
+      TransitReferenceApi(_dio).fetchStatus();
+
+  Future<TransitReferenceDetail> transitReferenceDetail(
+    String kind,
+    String referenceId,
+  ) => TransitReferenceApi(_dio).fetchDetail(kind, referenceId);
 
   /// 인증 Dio로 현재 평가 상태를 읽는다. 실패 응답을 빈 정상 결과로 바꾸지 않는다.
   Future<ScheduleEvaluationV2> latestEvaluation(String id) async {

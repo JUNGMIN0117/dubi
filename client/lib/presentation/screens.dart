@@ -30,6 +30,8 @@ import 'more_page_widgets.dart';
 import 'widgets.dart';
 import 'schedule_evaluation_card.dart';
 import '../domain/schedule_evaluation.dart';
+import '../domain/transit_reference.dart';
+import 'transit_reference_panel.dart';
 
 export 'notification_center.dart';
 
@@ -67,7 +69,11 @@ RouteOption? _routeFromEvaluation(
     kind: evaluation.quality.preview || !evaluation.quality.productionEligible
         ? RouteKind.candidate
         : RouteKind.recommended,
-    label: evaluation.quality.preview ? '최신 평가 · 검증용' : '최신 평가',
+    label: evaluation.hasHistoricalReference
+        ? '과거 평균 기반 참고 추정'
+        : evaluation.quality.preview
+        ? '최신 평가 · 검증용'
+        : '최신 평가',
     transport: '${schedule.departurePlace} → ${schedule.place}',
     departure: clock(departure),
     arrival: clock(arrival),
@@ -3814,6 +3820,11 @@ class ScheduleDetailScreen extends StatelessWidget {
             )
           else
             const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
+          TransitReferencePanel(
+            repository: repository is TransitReferenceRepository
+                ? repository as TransitReferenceRepository
+                : null,
+          ),
           const SizedBox(height: 14),
           OutlinedButton.icon(
             key: const Key('editScheduleButton'),
@@ -4168,10 +4179,27 @@ class _RecommendationEvidenceCard extends StatelessWidget {
     'ML_PREVIEW' => '버스 구간 예측을 포함해 계산했어요.',
     'SUBWAY_PREVIEW' => '지하철 시간표를 포함해 계산했어요.',
     'MIXED_PREVIEW' => '경로 API와 교통 예측 정보를 함께 사용했어요.',
+    'HISTORICAL_REFERENCE' || 'MIXED_HISTORICAL_REFERENCE' =>
+      '일부 버스 구간에 과거 평균 소요시간을 사용한 참고 추정이에요. 실시간 또는 ML 예측값이 아니에요.',
     _ => '계산에 사용된 정보가 확인되지 않았어요. 최신 평가의 제한 사항을 확인해 주세요.',
   };
 
   static String _reasonDescription(String code) {
+    final historical = historicalReferenceReasonLabel(code);
+    if (historical != null) return historical;
+    if (code.contains('HISTORICAL_REFERENCE_APPLIED')) {
+      return '버스 구간에 과거 평균 소요시간을 적용했어요.';
+    }
+    if (code.contains('HISTORICAL_REFERENCE_WEATHER_UNKNOWN')) {
+      return '과거 평균에는 현재 날씨가 반영되지 않았어요.';
+    }
+    if (code.contains('HISTORICAL_REFERENCE_DATA_VERSION') ||
+        code.contains('HISTORICAL_REFERENCE_SAMPLE_KIND')) {
+      return '사용한 과거 자료의 출처가 기록돼 있어요.';
+    }
+    if (code.contains('HISTORICAL_REFERENCE_')) {
+      return '과거 자료 적용 조건이 맞지 않아 기본 경로시간을 유지했어요.';
+    }
     if (code == 'VALIDATION_ONLY') return '검증 단계의 결과예요.';
     if (code.contains('ML_NOT_CONFIGURED')) return '일부 구간은 경로 API 시간을 사용했어요.';
     if (code.contains('BUS_WAIT_MISSING')) return '버스 대기시간 정보가 부족해요.';

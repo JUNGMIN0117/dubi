@@ -30,10 +30,17 @@ class RecommendationOverview {
   final List<String> reasonCodes;
 
   bool get hasEstimate => departureAt != null && eta != null;
+  bool get historical =>
+      source == 'HISTORICAL_REFERENCE' ||
+      source == 'MIXED_HISTORICAL_REFERENCE';
 
   RouteOption toRouteOption(Schedule schedule) => RouteOption(
-    kind: RouteKind.recommended,
-    label: preview ? '최신 추천 · 검증용' : '최신 추천',
+    kind: historical ? RouteKind.candidate : RouteKind.recommended,
+    label: historical
+        ? '과거 평균 기반 참고 추정'
+        : preview
+        ? '최신 추천 · 검증용'
+        : '최신 추천',
     transport: '${schedule.departurePlace} → ${schedule.place}',
     departure: _clock(departureAt),
     arrival: _clock(eta),
@@ -52,6 +59,8 @@ class RecommendationOverview {
     'ML_PREVIEW' => '버스 예측 포함',
     'SUBWAY_PREVIEW' => '지하철 시간표 포함',
     'MIXED_PREVIEW' => '복합 교통 데이터 기준',
+    'HISTORICAL_REFERENCE' ||
+    'MIXED_HISTORICAL_REFERENCE' => '과거 버스 평균 포함 · 실시간 아님',
     _ => '최신 평가 결과',
   };
 }
@@ -472,7 +481,13 @@ class RecommendationApi {
         durationMin: durationMin,
         confidence: persistence['confidence']?.toString(),
         preview: persistence['preview'] == true,
-        source: persistence['source']?.toString(),
+        source:
+            const {
+              'HISTORICAL_REFERENCE',
+              'MIXED_HISTORICAL_REFERENCE',
+            }.contains(selected['quality'])
+            ? selected['quality'] as String
+            : persistence['source']?.toString(),
         fallbackUsed: persistence['fallbackUsed'] == true,
         reasonCodes: _strings(persistence['reasons']),
       );

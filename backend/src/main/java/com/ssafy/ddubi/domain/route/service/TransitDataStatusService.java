@@ -20,13 +20,17 @@ public class TransitDataStatusService {
     private final boolean mlConfigured;
     private final boolean subwayDecompositionVerified;
     private final boolean busDecompositionVerified;
+    private final PublicBusReferenceService busReferences;
+    private final TransitReferencePackageService referencePackages;
     public TransitDataStatusService(MetropolitanBusCatalog bus, SeoulTransitMasterDataProvider subway,
             SubwayTimetable timetable,
             @Value("${ddubi.recommendation.ml-preview-base-url:}") String mlUrl,
             @Value("${ddubi.subway-timing.decomposition-verified:false}") boolean subwayVerified,
-            @Value("${ddubi.bus-waiting.decomposition-verified:false}") boolean busVerified) {
+            @Value("${ddubi.bus-waiting.decomposition-verified:false}") boolean busVerified,
+            PublicBusReferenceService busReferences,TransitReferencePackageService referencePackages) {
         this.bus=bus;this.subway=subway;this.timetable=timetable;this.mlConfigured=mlUrl!=null&&!mlUrl.isBlank();
         this.subwayDecompositionVerified=subwayVerified;this.busDecompositionVerified=busVerified;
+        this.busReferences=busReferences;this.referencePackages=referencePackages;
     }
     /** 각 준비 단계와 지원 범위를 독립 반환한다. ML 주소 설정을 서버 연결 성공/운영 승인으로 표시하지 않는다. */
     public Map<String,Object> status(Instant now) {
@@ -62,6 +66,9 @@ public class TransitDataStatusService {
         }
         result.put("busMl",Map.of("status",mlConfigured?"CONFIGURED_NOT_PROBED":"ML_NOT_CONFIGURED",
                 "supportedNamespaces",List.of("SEOUL_BUS"),"productionReady",false,"waitingDecompositionVerified",busDecompositionVerified));
+        result.put("busReference",busReferences.status());
+        result.put("subwayReference",referencePackages.status("subway"));
+        result.put("roadReference",referencePackages.status("road"));
         return result;
     }
 }

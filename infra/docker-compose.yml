@@ -331,7 +331,9 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       ML_BUNDLE_DIR: /models/v12
       ML_MAX_WAITING_REQUESTS: ${ML_MAX_WAITING_REQUESTS:-4}
-      ML_QUEUE_WAIT_SECONDS: ${ML_QUEUE_WAIT_SECONDS:-5}
+      # 대기 상한 2초. 5초였을 때는 백엔드(호출 제한 5초)가 먼저 끊어 양쪽 모두 헛수고였다(2026-09-18).
+      # 밀린 요청은 빨리 MODEL_BUSY 로 돌려주고 호출자가 남은 예산을 과거 평균 계산에 쓰게 한다.
+      ML_QUEUE_WAIT_SECONDS: ${ML_QUEUE_WAIT_SECONDS:-2}
       ML_REFERENCE_CACHE_MIB: ${ML_REFERENCE_CACHE_MIB:-256}
     volumes:
       - ${ML_BUNDLE_DIR:-../artifacts/ml-serving/20260908-v12}:/models/v12:ro
@@ -424,6 +426,10 @@ services:
       DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE: ${DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE:-}
       DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-6999b0e67eb1af391de563291ce9cf4251b5ec271307e3f24de55d22d17318e2}   # metropolitan-bus-v6.json.manifest.json 의 sha256
       DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL: ${DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL:-http://ml-serving:8000}
+      # ML 호출 한 건의 제한. 실측 단독 응답이 약 4초라 5초는 여유가 없었다. 상한은 코드에서 10초로 막는다.
+      # 이 값은 한 번의 호출에만 적용되고, 평가 전체 예산(첫 계산 30초·수동 10초)을 넘기지 않도록
+      # 남은 시간이 부족하면 호출을 시작하지 않는다.
+      DDUBI_RECOMMENDATION_ML_PREVIEW_TIMEOUT_MS: ${DDUBI_RECOMMENDATION_ML_PREVIEW_TIMEOUT_MS:-7000}
       # 버스 ML 적용 모드. SHADOW=숫자만 기록(기본, 시간 계산에 쓰지 않음) / TEST_APPLY=테스트 환경에서만 시험 적용
       # / PRODUCTION=운영 계약(production_ready·training_ids_verified·feature_version·features_as_of·valid_until·input_digest)을
       # 모두 만족한 응답만 적용. 어느 모드도 productionReady 를 true 로 바꾸지 않는다. 되돌리기는 이 값만 SHADOW 로.

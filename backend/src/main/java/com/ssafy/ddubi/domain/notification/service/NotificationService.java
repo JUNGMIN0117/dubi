@@ -148,6 +148,11 @@ public class NotificationService {
         if(!notification.isOwnedBy(user.getId()) || !java.util.Objects.equals(notification.scheduleId(),command.scheduleId()))
             throw new BusinessException(ErrorCode.FORBIDDEN_RESOURCE);
         if(notification.getStatus()==NotificationStatus.SENT) return new Prepared(notification,command,List.of());
+        // 최신 outbox payload와 인앱 본문을 같은 트랜잭션에서 맞춘다. 실패 후 재시도해도
+        // 같은 notificationId를 쓰며, 위 SENT 분기는 과거 발송 이력의 덮어쓰기를 막는다.
+        requireText(command.title(), "title");
+        requireText(command.body(), "body");
+        notification.refreshPendingContent(command.type(),command.title(),command.body(),command.recommendationId());
         if(reason!=null) notification.markSuppressed(reason);
         notificationRepository.flush();
         return new Prepared(notification,command,reason==null?List.copyOf(devices):List.of());

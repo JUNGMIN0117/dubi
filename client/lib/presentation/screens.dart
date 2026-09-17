@@ -30,6 +30,7 @@ import 'more_page_widgets.dart';
 import 'widgets.dart';
 import 'schedule_evaluation_card.dart';
 import '../domain/schedule_evaluation.dart';
+import '../domain/saved_route_display.dart';
 import '../domain/transit_reference.dart';
 import 'transit_reference_panel.dart';
 import '../core/diagnostics/developer_diagnostics.dart';
@@ -3747,22 +3748,12 @@ class ScheduleDetailScreen extends StatelessWidget {
           ],
           const SizedBox(height: 16),
           _SavedRouteList(
-            routes: savedRoutes,
+            display: SavedRouteDisplay.from(savedRoutes),
             unavailable: routesUnavailable,
             onSelected: recommendationApi == null
                 ? null
-                : (savedRoute) => _open(
-                    c,
-                    RouteMapScreen(
-                      repository: routeRepository,
-                      api: recommendationApi,
-                      savedRoute: savedRoute,
-                      selectedRoute: savedRoute.toRouteOption(schedule),
-                      departureLabel:
-                          savedRoute.fromName ?? schedule.departurePlace,
-                      destinationLabel: savedRoute.toName ?? schedule.place,
-                    ),
-                  ),
+                : (savedRoute) =>
+                      _openSavedRoute(c, schedule, savedRoute, routeRepository),
           ),
           const SizedBox(height: 16),
           const Text(
@@ -3908,6 +3899,39 @@ class ScheduleDetailScreen extends StatelessWidget {
     }
   }
 
+  /// 저장된 추천 경로 상세를 연다.
+  ///
+  /// 화면 순번이나 걸러낸 배열의 위치가 아니라 서버가 준 경로 ID로 연다. 필수 ID가 없으면
+  /// 앱을 끄지 않고 안내만 한다. 이미 상세로 넘어가는 중이면 두 번 열지 않는다.
+  void _openSavedRoute(
+    BuildContext c,
+    Schedule schedule,
+    SavedRouteSummary savedRoute,
+    DdubiRepository routeRepository,
+  ) {
+    if (savedRoute.routeId.trim().isEmpty) {
+      ScaffoldMessenger.of(c).showSnackBar(
+        const SnackBar(
+          key: Key('savedRouteOpenError'),
+          content: Text('경로 상세를 불러올 수 없어요.'),
+        ),
+      );
+      return;
+    }
+    if (ModalRoute.of(c)?.isCurrent != true) return;
+    _open(
+      c,
+      RouteMapScreen(
+        repository: routeRepository,
+        api: recommendationApi,
+        savedRoute: savedRoute,
+        selectedRoute: savedRoute.toRouteOption(schedule),
+        departureLabel: savedRoute.fromName ?? schedule.departurePlace,
+        destinationLabel: savedRoute.toName ?? schedule.place,
+      ),
+    );
+  }
+
   /// 취소 실패를 원인별로 다른 문구로 안내한다. 남의 일정·없는 일정·완료된 일정·연결 문제를 한 문구로 합치지 않는다.
   @visibleForTesting
   static String cancelFailureMessage(ScheduleCommandFailure failure) =>
@@ -3973,43 +3997,61 @@ class _ScheduleRecommendationData {
 
 class _SavedRouteList extends StatelessWidget {
   const _SavedRouteList({
-    required this.routes,
+    required this.display,
     required this.unavailable,
     required this.onSelected,
   });
 
-  final List<SavedRouteSummary> routes;
+  final SavedRouteDisplay display;
   final bool unavailable;
   final ValueChanged<SavedRouteSummary>? onSelected;
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: const Key('savedRouteList'),
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text(
-        '저장된 추천 경로',
-        style: TextStyle(
-          fontSize: 19,
-          fontWeight: FontWeight.w900,
-          color: DdubiColors.navy,
+  Widget build(BuildContext context) {
+    final routes = display.visible;
+    return Column(
+      key: const Key('savedRouteList'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '저장된 추천 경로',
+          style: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w900,
+            color: DdubiColors.navy,
+          ),
         ),
-      ),
-      const SizedBox(height: 9),
-      if (unavailable)
-        const InfoCard(child: Text('저장된 경로를 불러오지 못했어요.'))
-      else if (routes.isEmpty)
-        const InfoCard(
-          key: Key('savedRouteEmptyState'),
-          child: Text('아직 평가된 추천 경로가 없어요.'),
-        )
-      else
-        for (final route in routes) ...[
-          _SavedRouteTile(route: route, onTap: onSelected),
-          if (route != routes.last) const SizedBox(height: 8),
+        const SizedBox(height: 9),
+        if (unavailable)
+          const InfoCard(child: Text('저장된 경로를 불러오지 못했어요.'))
+        else if (routes.isEmpty)
+          const InfoCard(
+            key: Key('savedRouteEmptyState'),
+            child: Text('아직 평가된 추천 경로가 없어요.'),
+          )
+        else ...[
+          for (final route in routes) ...[
+            _SavedRouteTile(route: route, onTap: onSelected),
+            if (route != routes.last) const SizedBox(height: 8),
+          ],
+          // 후보 수와 묶인 개수는 개발자 진단에서만 본다. 일반 사용자 화면에는 숫자를 내보내지 않는다.
+          ValueListenableBuilder<bool>(
+            valueListenable: DeveloperDiagnostics.enabled,
+            builder: (_, diagnostics, _) => diagnostics
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      display.diagnosticsLine,
+                      key: const Key('savedRouteDiagnostics'),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _SavedRouteTile extends StatelessWidget {

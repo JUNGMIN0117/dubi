@@ -9,7 +9,8 @@ Redis에 TTL과 함께 저장한다. Kafka 원문 보존은 Spark가 아니라 A
 | 잡 | 입력 토픽 | 처리 이벤트 | 출력 |
 |---|---|---|---|
 | `streaming/weather_latest.py` | `city.raw` | `weather.observation` | Redis `weather:latest:{nx}:{ny}` + HDFS `silver/weather` |
-| `streaming/realtime_latest.py` | `transport.raw,city.raw` | 버스·지하철·도로·도시·S-DoT 9종 | `docs/contracts/redis-keys.yaml`의 소스별 latest 키 |
+| `streaming/realtime_latest.py` | `transport.raw,city.raw` | 버스·지하철·도로·S-DoT | `docs/contracts/redis-keys.yaml`의 소스별 latest 키 |
+| `streaming/city_realtime_silver.py` | `city.raw` | `city.realtime` | Redis 도시 latest/forecast + 선택적 HDFS Parquet |
 | `streaming/topis_enriched.py` | `city.raw` | `topis.notice` | GMS/Kakao 정규화 → Redis JSON + 선택적 HDFS Parquet |
 | `streaming/traffic_incident_silver.py` | `city.raw` | `traffic.incident` | 링크·좌표 검증 → Redis JSON + 선택적 HDFS Parquet |
 
@@ -31,6 +32,7 @@ Spark 컨테이너의 `/opt/ddubi/sparkjobs`에서 다음처럼 제출한다.
 ```sh
 sh submit.sh streaming/weather_latest.py
 sh submit.sh streaming/realtime_latest.py
+sh submit.sh streaming/city_realtime_silver.py
 sh submit.sh streaming/topis_enriched.py
 ```
 
@@ -38,6 +40,8 @@ TOPIS AI 잡의 컬럼, 좌표·반경, 결측/오류 정책과 과거 아카이
 [TOPIS 공지 AI 전처리 계약](../docs/contracts/topis-notice-enrichment.md)을 따른다.
 교통 돌발의 LINK_ID 우선순위, EPSG:5181 변환, 위치 충돌과 마스터 승인 조건은
 [Traffic Incident Silver 계약](../docs/contracts/traffic-incident-silver.md)을 따른다.
+도시 인구·예측·도로 링크의 컬럼, WGS84 `XYLIST`, 결측 및 백필 정책은
+[City Realtime Silver 계약](../docs/contracts/city-realtime-silver.md)을 따른다.
 
 Compose의 TOPIS AI와 교통 돌발 잡은 각각 `topis-ai`, `road-silver` 프로필에서만 명시적으로 켠다.
 일반 비기상 잡의 배포 절차는

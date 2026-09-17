@@ -639,6 +639,44 @@ services:
       - spark-worker-1
       - spark-worker-2
 
+  # 서울 실시간 도시데이터의 인구·예측·도로 링크를 동일 규칙으로 정규화한다.
+  # Redis는 항상 실행하고, CITY_SILVER_OUTPUT_URI를 설정한 서버에서만 HDFS Parquet도 쓴다.
+  spark-streaming-city-realtime:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-city-realtime
+    profiles: ["spark"]
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command: ["sh", "submit.sh", "streaming/city_realtime_silver.py"]
+    ports:
+      - "${SPARK_CITY_DRIVER_UI_PORT:-4047}:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      SPARK_EXECUTOR_MEMORY: ${CITY_STREAMING_EXECUTOR_MEMORY:-768m}
+      SPARK_CORES_MAX: ${CITY_STREAMING_CORES_MAX:-1}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      CITY_SILVER_OUTPUT_URI: ${CITY_SILVER_OUTPUT_URI:-}
+      CITY_SILVER_FRESHNESS_SECONDS: ${CITY_SILVER_FRESHNESS_SECONDS:-900}
+    volumes:
+      - ./spark/conf:/opt/spark/conf:ro
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+    depends_on:
+      - spark-master
+      - spark-worker-1
+      - spark-worker-2
+
   # 검증된 실제 구간 통과 이벤트만 원문/offset과 함께 Parquet으로 보존한다.
   # 도착예정값이나 8시간 간격 위치값을 실측으로 변환하는 생산자는 아직 없으므로 별도 프로필로만 실행한다.
   spark-streaming-segment-observations:

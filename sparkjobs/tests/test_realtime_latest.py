@@ -84,21 +84,6 @@ def test_transform_extracts_typed_metrics_without_copying_raw(spark):
             "2026-09-04T12:00:00+09:00",
             {"providerLinkId": "L1", "raw": {"SPD": "22.5", "TRV_TIME": "91"}},
         ),
-        _event(
-            "city",
-            "city.realtime",
-            "2026-09-04T12:00:00+09:00",
-            {
-                "providerAreaId": "POI001",
-                "raw": {
-                    "LIVE_PPLTN_STTS": {
-                        "AREA_CONGEST_LVL": "붐빔",
-                        "AREA_PPLTN_MIN": "10000",
-                        "AREA_PPLTN_MAX": "12000",
-                    }
-                },
-            },
-        ),
     ]
 
     rows = {row.eventId: row for row in transform(_kafka_df(spark, events)).collect()}
@@ -108,9 +93,6 @@ def test_transform_extracts_typed_metrics_without_copying_raw(spark):
     assert rows["bus"].observation.arrivalTimeBasis == "SEOUL_EXPS_SECONDS_V1"
     assert rows["road"].observation.speedKph == 22.5
     assert rows["road"].observation.travelTimeSeconds == 91
-    assert rows["city"].observation.areaCongestionLevel == "붐빔"
-    assert rows["city"].observation.areaPopulationMax == 12000
-    assert "raw" not in rows["city"].observation.asDict()
 
 
 def test_subway_timing_preserves_source_time_and_train_type_without_filling_missing(spark):
@@ -206,8 +188,6 @@ def test_missing_provider_identity_is_countable_but_not_served(spark):
          "traffic:latest:flow:L1", 900),
         ("traffic.incident", {"providerIncidentId": "I1", "raw": {}},
          "traffic:latest:incident:I1", 2700),
-        ("city.realtime", {"providerAreaId": "POI001", "raw": {}},
-         "city:latest:area:POI001", 64800),
         ("sdot.population", {"providerSensorId": "D1", "raw": {}},
          "city:latest:sdot-population:D1", 1800),
         ("subway.alert", {"providerAlertId": "A1", "raw": {}},

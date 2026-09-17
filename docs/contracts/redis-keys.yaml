@@ -168,8 +168,25 @@ keys:
     ttlSeconds: 64800
     owner: spark
     description: >-
-      서울 주요 장소별 인구 혼잡도·인구 범위·평균 도로속도·기상 대표값.
+      서울 주요 장소별 인구 혼잡도·인구 범위·평균 도로속도 City Silver JSON.
       6시간 수집 주기의 세 배인 18시간 보관한다. validUntil 이후 기준선으로 fallback한다.
+
+  cityRoadLatest:
+    pattern: "city:latest:road:{linkNamespace}:{linkId}"
+    type: string
+    ttlSeconds: 64800
+    owner: spark
+    description: >-
+      서울 실시간 도시데이터의 도로 링크별 최신 속도·상태·WGS84 LineString JSON.
+      namespace 검증 전에는 다른 제공자의 숫자 LINK_ID와 조인하지 않는다.
+
+  cityPopulationForecast:
+    pattern: "city:forecast:population:{providerAreaId}:{forecastAt}"
+    type: string
+    ttlSeconds: 64800
+    owner: spark
+    description: >-
+      장소별 예측 생성시각에 발표된 예측시각별 인구 범위와 혼잡도 JSON.
 
   sdotPopulationLatest:
     pattern: "city:latest:sdot-population:{providerSensorId}"

@@ -239,6 +239,10 @@ void main() {
       ),
     );
     expect(find.byKey(const Key('evaluationDiagnosticsPanel')), findsOneWidget);
+    // 보조 시각은 기본으로 접혀 있다. 개발자 진단 값도 "자세히"를 펼쳐야 보인다.
+    expect(find.textContaining('유효 시각'), findsNothing);
+    await tester.tap(find.byKey(const Key('evaluationTimeDetailsToggle')));
+    await tester.pump();
     expect(find.textContaining('유효 시각'), findsOneWidget);
     expect(find.textContaining('step-1: ML 미적용 (ML_BUDGET_EXHAUSTED)'), findsOneWidget);
     expect(find.textContaining('과거 평균 미적용 (EXACT_KEY_UNAVAILABLE)'), findsOneWidget);

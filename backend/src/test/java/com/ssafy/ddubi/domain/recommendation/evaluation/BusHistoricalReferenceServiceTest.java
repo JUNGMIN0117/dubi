@@ -98,6 +98,43 @@ class BusHistoricalReferenceServiceTest {
         assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_OLDEST_OBSERVATION_END:2026-08-27"));
         assertTrue(result.predictions().stream().noneMatch(MlRoutePreview.Prediction::applied));
     }
+    @Test void mlBudgetShareLeavesTimeForHistoricalFallback() {
+        var history=service();normal(45);var ml=mock(BusPreviewClient.class);
+        when(ml.predict(any())).thenReturn(new BusPreviewClient.Estimate(50.0,null,"v12",now,0,10,false));
+        var evaluator=new JourneyEvaluationService(ml,new RouteEvidenceAssembler(mock(StringRedisTemplate.class),new ObjectMapper()),new RouteTimelineEvaluator(),mock(SubwayTimingService.class),new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false),history);
+        var route=MlRoutePreviewTest.route(0,"1",300,10,2);
+        // ML 예산만 소진되고 전체 예산이 남은 세션: ML은 새 호출 없이 ML_BUDGET_EXHAUSTED, 과거 평균은 실제 조회·적용된다.
+        long nowNanos=System.nanoTime();
+        var session=JourneyEvaluationService.Session.withDeadlines(nowNanos+Duration.ofSeconds(20).toNanos(),nowNanos-1);
+        var result=evaluator.compare(List.of(route),new RouteEvidenceAssembler.Snapshot(Map.of(),List.of()),now,now,now.plusSeconds(1000),session);
+        verify(ml,never()).predict(any());
+        assertEquals("BUS_HISTORICAL_REFERENCE",result.fastest().steps().get(0).source());
+        assertTrue(result.fastest().reasons().contains("step-1:ML_BUDGET_EXHAUSTED"));
+        assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_APPLIED"));
+        assertTrue(result.budgetExhausted());
+        // 기본 세션은 ML 마감이 전체 마감보다 앞선다. 전체 예산은 그대로다.
+        var normal=evaluator.newSession(5000);assertTrue(normal.mlDeadline<normal.deadline);
+        assertThrows(IllegalArgumentException.class,()->new JourneyEvaluationService(ml,new RouteEvidenceAssembler(mock(StringRedisTemplate.class),new ObjectMapper()),new RouteTimelineEvaluator(),mock(SubwayTimingService.class),new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false),history,1.5));
+    }
+    @Test void missingReferenceDataAndExhaustedBudgetAreDistinctDiagnostics() {
+        var history=service();var ml=mock(BusPreviewClient.class);
+        when(ml.predict(any())).thenReturn(BusPreviewClient.Estimate.unavailable("ML_NOT_CONFIGURED"));
+        var evaluator=new JourneyEvaluationService(ml,new RouteEvidenceAssembler(mock(StringRedisTemplate.class),new ObjectMapper()),new RouteTimelineEvaluator(),mock(SubwayTimingService.class),new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false),history);
+        var route=MlRoutePreviewTest.route(0,"1",300,10,1);var snapshot=new RouteEvidenceAssembler.Snapshot(Map.of(),List.of());
+        // 데이터 없음: 정확키 조회가 비어 있다(REFERENCE_MISSING). 예산 문제가 아니다.
+        when(publicReferences.lookup(eq("v1"),any())).thenReturn(Map.of("status","REFERENCE_MISSING","rows",List.of(),"truncated",false));
+        var missing=evaluator.compare(List.of(route),snapshot,now,now,now.plusSeconds(1000));
+        assertTrue(missing.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_NOT_APPLIED:EXACT_KEY_UNAVAILABLE"));
+        assertTrue(missing.fastest().reasons().contains("step-1:ML_NOT_APPLIED:ML_NOT_CONFIGURED"));
+        assertTrue(missing.fastest().reasons().contains("step-1:API_FALLBACK"));
+        assertFalse(missing.fastest().reasons().stream().anyMatch(r->r.contains("BUDGET_EXHAUSTED")));
+        // 예산 소진: 자료는 있지만 마감이 지났다. 데이터 없음으로 표시하지 않는다.
+        normal(45);long nowNanos=System.nanoTime();
+        var exhausted=evaluator.compare(List.of(route),snapshot,now,now,now.plusSeconds(1000),JourneyEvaluationService.Session.withDeadlines(nowNanos-1,nowNanos-1));
+        assertTrue(exhausted.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_NOT_APPLIED:BUDGET_EXHAUSTED"));
+        assertFalse(exhausted.fastest().reasons().stream().anyMatch(r->r.contains("EXACT_KEY_UNAVAILABLE")));
+        assertEquals("FALLBACK",exhausted.fastest().steps().get(0).source());
+    }
     @Test void partialReferenceFailureRestoresEntireApiRide() {
         var history=service();normal(45);when(publicReferences.lookup(eq("v1"),argThat(q->q.fromOrder()==2))).thenReturn(Map.of("status","REFERENCE_MISSING","rows",List.of()));
         var ml=mock(BusPreviewClient.class);when(ml.predict(any())).thenReturn(BusPreviewClient.Estimate.unavailable("ML_NOT_CONFIGURED"));

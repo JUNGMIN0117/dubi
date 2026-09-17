@@ -447,3 +447,49 @@ Git에는 모델과 참조 자료가 포함되지 않으므로 코드만 받아�
 기존 검증: pytest **16개 통과**, 실제 10개 표본의 서버 원본 대비 수치 차이 **0초**,
 실제 로컬 HTTP 호출 성공. 이번 문서의 정상·부분 실패·422 예시도 실행 구현에서 생성·검증했다.
 이 결과는 모델 이식과 HTTP 동작의 근거이며 전체 노선 커버리지나 예측 정확도 보장은 아니다.
+
+## 12. Backend 적용 모드·배치 호출·missing_features 처리·운영 계약 제안 (2026-09-18, 로컬 검증만 완료)
+
+이 절은 Backend 쪽 계약 해석을 고정한다. ml-serving 자체 변경(모델 재학습 포함)은 범위 밖이며, 12.4는 ml-serving 팀에 제안하는 항목이다.
+
+### 12.1 적용 모드 (`DDUBI_RECOMMENDATION_ML_APPLY_MODE`, 기본 `SHADOW`)
+
+| 모드 | 숫자를 시간 계산에 사용 | 응답 표시 | 허용 환경 | `productionReady` |
+|---|---|---|---|---|
+| `SHADOW` | 아니오. `predictions[]`에 기록만 한다 | `step-N:ML_SHADOW_RECORDED`, `step-N:ML_NOT_APPLIED:SHADOW_MODE`, `step-N:API_FALLBACK` | 운영 기본 | false |
+| `TEST_APPLY` | 예. 단 `history_sample_count>0`이고 `data_insufficient=false`인 `PREVIEW` 수치만 | `ML_TEST_APPLIED`, `ML_MODEL_VERSION:`, `ML_MIN_HISTORY_SAMPLES:`, `ML_MAX_MISSING_FEATURES:`, step source `ML_PREVIEW`. 표본 0건·부족이면 `ML_NOT_APPLIED:ML_HISTORY_INSUFFICIENT` 로 step 전체 fallback | 테스트 프로파일만(`application-test.yml` + `ml-test-apply-allowed=true`) | false |
+| `PRODUCTION` | 12.4 운영 계약을 모두 만족한 응답만 | `ML_APPLIED`, step source `ML_PRODUCTION`. 미충족 시 `ML_NOT_APPLIED:ML_PRODUCTION_CONTRACT_NOT_MET` | 승인 후 | false(승인 정책 전환은 별도 결정) |
+
+- 어느 모드도 `productionReady`를 true로 바꾸지 않는다. 되돌리기는 값을 `SHADOW`로 바꾸고 backend를 재기동하는 것으로 끝난다(코드 변경·DB 변경 없음).
+- step 단위 원자성: 한 step의 edge 중 하나라도 숫자가 없으면 그 step 전체를 경로 API 원본 값으로 되돌리고 `ML_NOT_APPLIED:<원인>`을 남긴다. 부분 적용은 하지 않는다.
+- 잘못된 모드 문자열은 기동 실패(fail fast)다.
+
+### 12.2 배치 호출 (`BusPreviewClient.predictBatch`)
+
+1. 평가 시작 시 모든 후보의 지원 BUS edge 입력을 모아 `(노선, 출발정류장, 도착정류장, 구간순번, 진입시각)` 기준으로 중복을 제거한다.
+2. `maxBatchSegments`(기본 200, 1~1000) 단위로 나눠 `/v1/bus/predictions:batch`를 부른다. `segment_key`는 요청 안 순번 `e0..eN`이다.
+3. 응답 검증: `results` 수가 요청 수와 같아야 하고, 각 `segment_key`가 요청 키 집합에 정확히 한 번씩 있어야 한다. 수·키 불일치나 중복 키는 그 청크 전체를 `ML_INVALID_RESPONSE`로 처리한다(순서는 키로 다시 맞추므로 응답 순서에 의존하지 않는다).
+4. 실패 구분: 전체 요청 timeout → 그 청크 모든 입력 `ML_TIMEOUT`. HTTP/형식 오류 → `ML_HTTP_ERROR`/`ML_INVALID_RESPONSE`. 개별 `status=UNAVAILABLE`은 그 결과의 `reason`을 그대로 전달한다(다른 결과는 정상 사용).
+5. 결과는 평가 세션 캐시에 넣어 뒤 후보도 같은 값을 쓴다(공정성). 캐시에 없는 edge만 개별 호출하며, 개별 호출은 세션당 `INDIVIDUAL_CALL_LIMIT=8`회·ML 마감시각까지만 허용한다. 넘으면 `ML_BUDGET_EXHAUSTED`(자료 없음과 다른 코드).
+6. 예산: 트리거별 세션 예산(첫 계산 30초 / 자동 갱신 15초 / 수동 다시 계산 10초)의 `ml-budget-share`(기본 0.6)만 ML에 쓴다. 나머지는 과거 평균·시간표 계산에 남긴다.
+
+### 12.3 `missing_features` 처리
+
+- 배열이 없으면 `null`(정보 없음), 빈 배열이면 빈 목록(결측 없음)으로 구분해 보존한다.
+- 원소는 문자열이어야 하고 이름은 `[A-Za-z0-9_.:-]{1,64}`만 허용한다. 배열이 아니거나 이름이 규칙을 벗어나면 그 결과를 `ML_INVALID_RESPONSE`로 본다.
+- 배열 길이는 `missing_feature_count`와 같아야 한다. 다르면 `ML_INVALID_RESPONSE`.
+- 최대 32개까지만 보존하고 넘치면 `missingFeaturesTruncated=true`를 남긴다.
+- 이름은 진단(`predictions[].estimate.missingFeatures`)에만 쓴다. 로그에는 원문 응답·URL·비밀값을 남기지 않는다.
+- 2026-09-18 08시 실측(노선 110000004, 121000096→122000184, 순번 69) 15개: `history_recent_seconds`, `history_median_4obs`, `history_mean_4obs`, `history_median_8obs`, `history_mean_8obs`, `history_std_8obs`, `history_trend_seconds`, `to_board_daily_hour_lag2month`, `to_alight_daily_hour_lag2month`, `passenger_recent`, `passenger_mean_4obs`, `passenger_std_4obs`, `passenger_trend`, `boarding_lag77d`, `bus_runs_lag77d`. 모두 온라인 이력·승객 특성이며 정적 특성은 결측이 아니었다.
+
+### 12.4 운영 계약(PRODUCTION) — Backend가 요구하는 응답 조건 (ml-serving 제안)
+
+Backend `PRODUCTION` 모드는 아래를 모두 만족한 결과만 적용한다. 현재 ml-serving v12 응답은 어느 것도 만족하지 않으므로 운영 모드로 켜도 적용은 0건이고 `ML_PRODUCTION_CONTRACT_NOT_MET`만 남는다.
+
+| 위치 | 조건 |
+|---|---|
+| 배치 공통 | `production_ready=true`, `feature_version` 문자열, `features_as_of` ≤ 각 결과 `computed_at`, `valid_until` > 현재 시각, `input_digest` = 요청 본문 전체의 SHA-256(hex) |
+| 개별 결과 | `status=PRODUCTION`, `prediction.training_ids_verified=true`, `data_insufficient=false`(부족하면 `ML_HISTORY_INSUFFICIENT`로 미적용), 수치 `predicted_seconds` 존재 |
+| 커버리지 | 한 step의 모든 edge가 위 조건을 만족해야 그 step에 적용 |
+
+PREVIEW 계약(현행)은 `production_ready=false`, `status=PREVIEW`, `reason=MODEL_NOT_PRODUCTION_READY`, `training_ids_verified=false`를 그대로 요구하며, 두 계약은 `BusPreviewClient.Contract`로 분리돼 있어 조건을 지우거나 boolean을 강제로 바꾸는 방식으로는 운영 적용이 되지 않는다. 검증: `BusPreviewClientTest`(8) · `MlApplyModeTest`(6) 합성 응답으로 통과.

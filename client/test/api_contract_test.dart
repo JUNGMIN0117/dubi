@@ -568,9 +568,23 @@ void main() {
                   {
                     'id': 7,
                     'scheduleId': 12,
+                    'evaluationId': 'eval-7',
+                    'decision': 'ADVANCE_DEPARTURE',
                     'type': 'ROUTE_CHANGE',
                     'title': '더 빠른 경로가 있어요',
                     'body': '경로를 확인해주세요.',
+                    'status': 'SENT',
+                    'createdAt': '2026-09-15T08:00:00',
+                    'readAt': null,
+                  },
+                  {
+                    'id': 7,
+                    'scheduleId': 12,
+                    'evaluationId': 'eval-7',
+                    'decision': 'ADVANCE_DEPARTURE',
+                    'type': 'ROUTE_CHANGE',
+                    'title': '중복 수신',
+                    'body': '같은 알림입니다.',
                     'status': 'SENT',
                     'createdAt': '2026-09-15T08:00:00',
                     'readAt': null,
@@ -612,6 +626,8 @@ void main() {
 
     expect(home.dataState, 'NORMAL');
     expect(inbox.items.single.scheduleId, '12');
+    expect(inbox.items.single.evaluationId, 'eval-7');
+    expect(inbox.items.single.decision, 'ADVANCE_DEPARTURE');
     expect(requests.map((request) => request.path), [
       '/home',
       '/notifications',

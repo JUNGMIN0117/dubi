@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../core/constants/api_paths.dart';
 import '../domain/models.dart';
+import '../domain/schedule_evaluation.dart';
 
 class RecommendationOverview {
   const RecommendationOverview({
@@ -115,20 +116,16 @@ class SavedRouteSummary {
       );
 
   RouteOption toRouteOption(Schedule schedule) {
-    final arrival = schedule.arriveBy;
-    final departure = arrival.subtract(Duration(minutes: baseDurationMin));
     return RouteOption(
-      kind: selected
-          ? RouteKind.recommended
-          : rankNo == 2
-          ? RouteKind.fastest
-          : RouteKind.safest,
-      label: selected ? '선택된 추천 경로' : '${rankNo == 0 ? '-' : rankNo}순위 경로',
+      kind: selected ? RouteKind.recommended : RouteKind.candidate,
+      label: selected ? '선택된 경로' : '경로 ${rankNo == 0 ? '-' : rankNo}',
       transport: modes.isEmpty
           ? '이동수단 정보 없음'
           : modes.map(_transportLabel).join(' · '),
-      departure: RecommendationApi._time(departure),
-      arrival: RecommendationApi._time(arrival),
+      departure: schedule.plannedDepartAt == null
+          ? '확인 필요'
+          : RecommendationApi._time(schedule.plannedDepartAt!),
+      arrival: '평가 필요',
       margin: '$segmentCount개 이동 구간',
       detail: '약 $baseDurationMin분',
       fare: '요금 정보 없음',
@@ -231,6 +228,24 @@ class RouteMapBounds {
   );
 }
 
+class RouteEvaluationResult {
+  const RouteEvaluationResult._({
+    this.evaluation,
+    this.candidates = const [],
+    this.searchFallback = false,
+  });
+
+  const RouteEvaluationResult.evaluated(ScheduleEvaluationV2 value)
+    : this._(evaluation: value);
+
+  const RouteEvaluationResult.candidates(List<RouteOption> values)
+    : this._(candidates: values, searchFallback: true);
+
+  final ScheduleEvaluationV2? evaluation;
+  final List<RouteOption> candidates;
+  final bool searchFallback;
+}
+
 class RouteMapSegment {
   const RouteMapSegment({
     required this.seq,
@@ -297,6 +312,42 @@ class RecommendationApi {
 
   final Dio _dio;
 
+  Future<RouteEvaluationResult> evaluateOrSearch(
+    RouteSearchCondition condition,
+  ) async {
+    try {
+      return RouteEvaluationResult.evaluated(await evaluateRoute(condition));
+    } on DioException catch (error) {
+      if (!const {404, 405, 501}.contains(error.response?.statusCode)) rethrow;
+      return RouteEvaluationResult.candidates(await searchRoutes(condition));
+    }
+  }
+
+  Future<ScheduleEvaluationV2> evaluateRoute(
+    RouteSearchCondition condition,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      ApiPaths.routeEvaluate,
+      data: {
+        'origin': {
+          'longitude': condition.origin.lng,
+          'latitude': condition.origin.lat,
+        },
+        'destination': {
+          'longitude': condition.destination.lng,
+          'latitude': condition.destination.lat,
+        },
+        'plannedDepartAt': _isoWithOffset(condition.plannedDepartAt),
+        'arriveBy': _isoWithOffset(condition.desiredArrivalAt),
+      },
+    );
+    final data = response.data?['data'];
+    if (response.data?['success'] != true || data is! Map) {
+      throw const FormatException('경로 평가 응답 형식을 확인할 수 없습니다.');
+    }
+    return ScheduleEvaluationV2.fromJson(_stringKeyed(data));
+  }
+
   Future<List<RouteOption>> searchRoutes(RouteSearchCondition condition) async {
     final response = await _dio.post<Map<String, dynamic>>(
       ApiPaths.routeSearch,
@@ -322,26 +373,19 @@ class RecommendationApi {
           final item = raw.map((key, value) => MapEntry(key.toString(), value));
           final durationMinutes =
               ((item['totalDurationSeconds'] as num).toDouble() / 60).ceil();
-          final departureAt = condition.desiredArrivalAt.subtract(
-            Duration(minutes: durationMinutes),
-          );
           final fare = item['fare'] is Map ? item['fare'] as Map : const {};
           final minimumFare = (fare['minimumWon'] as num?)?.toInt();
           final maximumFare = (fare['maximumWon'] as num?)?.toInt();
           return RouteOption(
-            kind: index == 0
-                ? RouteKind.recommended
-                : index == 1
-                ? RouteKind.fastest
-                : RouteKind.safest,
-            label: index == 0 ? '추천 경로' : '경로 ${index + 1}',
+            kind: RouteKind.candidate,
+            label: '경로 ${index + 1} · 단순 후보',
             transport: switch (item['type']) {
               'BUS' => '버스',
               'SUBWAY' => '지하철',
               _ => '버스 + 지하철',
             },
-            departure: _time(departureAt),
-            arrival: _time(condition.desiredArrivalAt),
+            departure: '평가 필요',
+            arrival: '평가 필요',
             margin: '환승 ${(item['transfers'] as num?)?.toInt() ?? 0}회',
             detail:
                 '약 $durationMinutes분 · ${(item['totalDistanceMeters'] as num).toInt()}m',
@@ -354,6 +398,16 @@ class RecommendationApi {
   static String _time(DateTime value) =>
       '${value.hour.toString().padLeft(2, '0')}:'
       '${value.minute.toString().padLeft(2, '0')}';
+
+  static String _isoWithOffset(DateTime value) {
+    if (value.isUtc) return value.toIso8601String();
+    final offset = value.timeZoneOffset;
+    final totalMinutes = offset.inMinutes.abs();
+    final sign = offset.isNegative ? '-' : '+';
+    final hours = (totalMinutes ~/ 60).toString().padLeft(2, '0');
+    final minutes = (totalMinutes % 60).toString().padLeft(2, '0');
+    return '${value.toIso8601String()}$sign$hours:$minutes';
+  }
 
   static String _fare(int? minimum, int? maximum) {
     if (minimum == null) return '요금 정보 없음';

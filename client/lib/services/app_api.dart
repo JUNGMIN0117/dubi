@@ -207,14 +207,19 @@ class NotificationApi {
       ),
     );
     final content = data['content'];
+    final parsed = content is List
+        ? content
+              .whereType<Map>()
+              .map((item) => AppNotification.fromJson(_stringKeyed(item)))
+              .toList(growable: false)
+        : const <AppNotification>[];
+    final unique = <String, AppNotification>{};
+    for (final item in parsed) {
+      unique.putIfAbsent(item.id, () => item);
+    }
     return NotificationInbox(
       unreadCount: (data['unreadCount'] as num?)?.toInt() ?? 0,
-      items: content is List
-          ? content
-                .whereType<Map>()
-                .map((item) => AppNotification.fromJson(_stringKeyed(item)))
-                .toList(growable: false)
-          : const [],
+      items: unique.values.toList(growable: false),
     );
   }
 

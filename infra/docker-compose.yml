@@ -245,15 +245,22 @@ services:
     image: mysql:${MYSQL_VERSION:-8.4}
     container_name: mysql
     profiles: ["data"]
-    mem_limit: 1g
+    # 2026-09-18 진단: 사용량 880MB/1GiB(86%)로 여유가 144MB뿐이라 2026-09-17 23:42 커널이
+    # mysqld 를 메모리 초과로 종료했다. 호스트 여유가 10.9GB 라 제한만 올린다.
+    mem_limit: 2g
     ports:
       - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
       - --default-time-zone=+09:00
+      # 버퍼 풀은 그대로 둔다. 16384쪽 중 15365쪽(94%)이 차 있어 줄이면 조회가 더 느려진다.
       - --innodb-buffer-pool-size=256M
-      - --max-connections=200
+      # 최대 연결은 실제 최대 사용 13(앱 연결 풀 10 + 관리·스케줄러)에 맞춘다.
+      # 최악의 경우 연결별 버퍼가 약 400MB에서 80MB 로 줄어든다.
+      - --max-connections=40
+      # 로그 버퍼 기본 64MiB 는 이 쓰기량에 과하다. 48MiB 를 고정 확보에서 되돌린다.
+      - --innodb-log-buffer-size=16M
       - --slow-query-log=ON
       - --long-query-time=1
     environment:

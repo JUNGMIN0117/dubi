@@ -56,8 +56,53 @@ python infra/scripts/road-mapping-candidates.py `
 - report SHA256: `c5997639972e2b10513e09ae962dc21cf0495f124c78c14eb09444e15a88db5b`.
 - 테스트 7개 통과: 거리·방향, multipart 틈, 평행도로 모호성, 장거리 샘플링, 방향별 연결, GTFS 오류 거부, 합성 SHP 전체 처리·검토용 출력·체크섬 재사용·손상 거부.
 
+## 후속: 원본 설명자료와 정류장 occurrence 검증
+
+### 실제 원문 근거
+
+같은 ZIP 내부 `★2024년기준_GIS DB 설명자료.hwp`를 로컬에서 직접 읽었다. 문서 SHA256은 `9673f6dc0342470fd2f7d8dfc81c0ca7d0383cbe8d43e995c16f0ed070c3a8df`다. `road-source-manual.py --roads <ZIP>`으로 필요한 문단만 재현 가능하게 추출한다. 아래 index는 HWP BodyText 문단 추출 순서이며 페이지 번호가 아니다.
+
+- LINK 테이블(index 484~491): `UP_ITS_ID / TRAF_ID_P`는 국가표준링크 ID(정방향), `DOWN_ITS_ID / TRAF_ID_N`은 국가표준링크 ID(역방향).
+- ② 노드 방향(index 507~509): 링크 그래픽 시작→종료가 UP이고 반대가 DOWN. 실제 도로의 명칭상 상행/하행과 다르다. 일방통행은 주행방향을 UP에 기록하고 DOWN을 입력하지 않는다.
+- ⑧ ONEWAY(index 678~680): 1=일방, 0=양방. 물리적으로 분리된 고속도로·터널·교량의 양선 링크도 각각 일방으로 본다.
+- ㉒ TRAF_ID_P/N(index 777~779): 국토교통부 국가교통정보센터 국가표준노드링크와 일치하는 링크에 방향별 ID를 입력한 필드다.
+
+따라서 **원본 필드의 방향 의미는 확인했다.** 이는 원본의 현행 유효성이나 SEOUL_ACCINFO_LINK 동일성을 증명하지 않는다. 첫 실행 report의 `ROAD_DIRECTION_CODES_UNVERIFIED`는 당시 상태이며 산출물을 덮어쓰지 않았다.
+
+### 기존 공식 BIS 경로 재사용 조사
+
+`backend/tools/road-impact/audit.py`와 `docs/contracts/road-impact.md`에는 공식 BIS 노드→구간→도로→TOPIS 방향 연결 구현이 이미 있다. 동일 버스 occurrence를 처리하므로 원본이 있으면 이 경로가 GTFS 기하 후보보다 우선이다.
+
+이번 노트북의 Downloads, 제품 저장소와 작업 worktree, 별도 작업벤치에서 `tdata-62-10255.csv`, `tdata-58-10251.csv`, `tdata-63-10256.csv`, `tdata-7-10200.csv` 및 구간링크/경유노드/표준링크 이름을 검색했으나 찾지 못했다. 기존 감사 JSON과 sources manifest만 확인했다. **기존 24,052/17,465 후보 수는 과거 문서 결과이며 이번 현행 재실행 결과가 아니다.** 신규 다운로드나 외부 요청은 하지 않았다.
+
+### 현재 보유 자료로 만든 occurrence 검토 도구
+
+```powershell
+python infra/scripts/road-occurrence-review.py `
+  --candidates "<첫 실행 디렉터리>\candidates.jsonl" `
+  --gtfs "C:\Users\SSAFY\Downloads\source-gtfs-seoul-bus" `
+  --bus-crosswalk backend/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz `
+  --bus-namespace SEOUL_BUS --gtfs-id-prefix SB_ `
+  --output "<새 occurrence 검토 디렉터리>"
+```
+
+- 첫 단계 candidate/report 체크섬 및 동일 shapes 원본 SHA를 확인한다.
+- GTFS prefix와 provider namespace를 명시적으로 받고, 노선·양끝 정류장·양끝 순번이 crosswalk의 정확히 한 edge와 일치해야 한다. 노선명 추정/다른 namespace 대체/순환노선 순번 생략은 없다.
+- 정류장의 `shape_dist_traveled`가 유일한 shape vertex와 일치하고 그 vertex와 정류장 좌표가 30m 이내여야 한다. 임계값은 검토용 연결 조건이며 운영 정확성 인증이 아니다.
+- shape 거리의 단조 증가, 중복 순번, 좌표 오류를 거부한다.
+- ONEWAY 역주행 후보를 제외하고 원본 UP/DOWN 노드와 해당 방향 국가표준링크 ID를 기록한다. 0은 유효 국가표준링크 ID로 만들지 않는다.
+- 기존 top-3 후보만 필터하므로 밖의 허용 방향 후보가 존재할 수 있다. 2단계 전체 처리 전 후보 생성 단계에 방향 조건을 넣고 다시 탐색해야 한다. 현재 결과로 전체 경로 승인을 하지 않는다.
+
+실제 결과: `data_staging/recommendation-20260917/road-mapping/occurrence-review-v2` (작업벤치 아래).
+
+- 동일 형상 3개, crosswalk `CSV-V5-34dc30aa763b-KAKAO-REVIEW-V6`.
+- 방향 허용 후보 표본 2,829건, 일방통행 역주행 후보 표본 267건 제외. 서로 다른 도로 수가 아니라 **샘플별 후보 수**다.
+- 정확한 정류장 occurrence 검토 연결 113개, 동일 서비스 패턴 중복 182개 통합.
+- 운영 승인 0개. 국가표준링크 후보를 runtime AccInfo ID로 복사하지 않는다.
+- 추가 6개 포함 도로 테스트 총 13개 통과.
+
 ## 남은 작업과 다음 행동
 
-남은 항목: 원본 도로 필드 사전의 방향/링크 체계 확인, GTFS 형상과 canonical 정류장 occurrence 연결, 전체 구간 연속 경로와 고가·지하/일방통행 검증, provider namespace 연결 근거, 유효기간 검증. 검증되지 않은 상태는 통제 미확인으로 유지한다.
+남은 항목: 방향 필터를 후보 생성 단계에 반영, 전체 구간 연속 경로와 고가·지하 검증, provider namespace 연결 근거, 원본 유효기간 검증. 검증되지 않은 상태는 통제 미확인으로 유지한다.
 
-다음 행동은 **보유 ZIP 내부 GIS DB 설명자료에서 TRAF_ID_P/N 및 방향 코드 의미를 확인해 후보의 링크 namespace·방향 검증을 진행하는 것**이다. 원본 추가 요청이나 운영 적용은 선행하지 않는다.
+다음 행동은 **2단계 전체 가공 전에 후보 생성에서 일방통행·노드 방향을 적용하고 occurrence별 연속 경로 검증을 추가하는 것**이다. 원본 추가 요청이나 운영 적용은 선행하지 않는다.

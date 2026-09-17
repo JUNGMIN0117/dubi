@@ -47,13 +47,14 @@ public class SubwayTimingService {
      * waitSeconds는 승강장 도착부터 탑승 기준시각, rideSeconds는 그 시각부터 하차까지다.
      * 실시간 탑승은 예측 도착을 사용하고 정차시간은 시간표 ride에 포함한다. 모든 값은 잠정 추정이다.
      * 원본 payload 없이 eventId/발생시각/시간표 버전으로 적용 근거와 fallback을 추적한다.
+     * validUntil은 적용한 시간표·도착·위치 증거 중 가장 이른 만료다. 최종 결과 캐시도 이 시각을 넘기지 않는다.
      */
     public record Estimate(Long waitSeconds, Long rideSeconds, Instant boardingAt, Instant arrivalAt,
                            String tripKey, String source, String timetableVersion, String arrivalEventId,
-                           Instant observedAt, String positionEventId, List<String> reasons) {
+                           Instant observedAt, String positionEventId, Instant validUntil, List<String> reasons) {
         public Estimate { reasons = List.copyOf(reasons); }
         static Estimate missing(String reason) {
-            return new Estimate(null, null, null, null, null, "UNAVAILABLE", null, null, null, null, List.of(reason));
+            return new Estimate(null, null, null, null, null, "UNAVAILABLE", null, null, null, null, null, List.of(reason));
         }
     }
     private record Match(SubwayTimetable.Trip trip, int from, int to) { }
@@ -156,12 +157,16 @@ public class SubwayTimingService {
             if (boarding.isBefore(platformAt)) { rejected.add("SUBWAY_TRAIN_NOT_BOARDABLE"); continue; }
             Instant destination = boarding.plusSeconds(ride);
             if (!destination.isBefore(data.validUntil())) { rejected.add("SUBWAY_TIMETABLE_OUTSIDE_VALIDITY"); continue; }
+            // 단순 조회한 stale/fallback 관측은 제외하고, 실제 탑승/위치 판단에 사용한 증거만 제한한다.
+            Instant validUntil = data.validUntil();
+            if (arrivalEvent != null && arrival.until().isBefore(validUntil)) validUntil = arrival.until();
+            if (positionEvent != null && position.until().isBefore(validUntil)) validUntil = position.until();
             estimates.add(new Estimate(Duration.between(platformAt, boarding).getSeconds(), ride, boarding, destination,
-                    trip.key(), source, data.version(), arrivalEvent, observedAt, positionEvent, reasons));
+                    trip.key(), source, data.version(), arrivalEvent, observedAt, positionEvent, validUntil, reasons));
         }
         if (estimates.isEmpty()) {
             rejected.add("SUBWAY_NO_BOARDABLE_TRAIN");
-            return new Estimate(null, null, null, null, null, "UNAVAILABLE", data.version(), null, null, null, new ArrayList<>(rejected));
+            return new Estimate(null, null, null, null, null, "UNAVAILABLE", data.version(), null, null, null, null, new ArrayList<>(rejected));
         }
         return estimates.stream().min(Comparator.comparing(Estimate::arrivalAt).thenComparing(Estimate::tripKey)).orElseThrow();
     }

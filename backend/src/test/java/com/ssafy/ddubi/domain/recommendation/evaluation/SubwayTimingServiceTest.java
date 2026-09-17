@@ -271,4 +271,30 @@ class SubwayTimingServiceTest {
         assertThat(result.waitPredictions().get(0).seconds()).isNull();
         assertThat(result.candidates().get(0).result().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.INSUFFICIENT_DATA);
     }
+    /** Redis 도착·위치 증거의 더 짧은 TTL을 최종 평가까지 전달한다. 시간표 fallback에는 도착 TTL을 쓰지 않는다. */
+    @Test void appliedSubwayEvidenceCapsFinalValidityAtEarliestSourceExpiry() throws Exception {
+        arrival("T1",now,10,"내선");
+        var key="transit:latest:subway-arrival:1002:PA:T1";
+        var row=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree(rows.get(key));
+        row.put("validUntil",now.plusSeconds(20).toString()); rows.put(key,json.writeValueAsString(row));
+        rows.put("transit:latest:subway-position:1002:T1",json.writeValueAsString(Map.of(
+                "eventType","subway.position","providerIds",Map.of("lineId","1002","trainId","T1","stationId","PA"),
+                "eventId","position-T1","occurredAt",now.toString(),"collectedAt",now.toString(),"validUntil",now.plusSeconds(15).toString(),
+                "observation",Map.of("direction","0","destinationStation","종점","sourceGeneratedAt",now.toString()))));
+        var route=new RouteCandidate(0,RouteType.SUBWAY,100,999,0,new FareRange(0,0),0,0,List.of(segment(1,"A","B")));
+        var preview=new MlRoutePreview(mock(BusPreviewClient.class),new RouteEvidenceAssembler(redis,json),new RouteTimelineEvaluator(),
+                service(true,trip("T1",call("A",60,true),call("B",300,true))),new BusWaitingService(redis,json,false));
+        var snapshot=new RouteEvidenceAssembler.Snapshot(Map.of(),List.of());
+        var evaluation=new ConditionalDepartureEvaluator(null,null,256,60,5000).evaluate(1,now,now,now.plusSeconds(2000),List.of(),
+                at->preview.compare(List.of(route),snapshot,now,at,now.plusSeconds(2000)));
+        var stored=json.readValue(json.writeValueAsString(evaluation),ConditionalDepartureEvaluator.Evaluation.class);
+        assertThat(stored.proposedComparison().subwayPredictions().get(0).estimate().arrivalEventId()).isEqualTo("arrival-T1");
+        assertThat(ScheduleEvaluationV2.validity(stored,snapshot,now,null)).isEqualTo(now.plusSeconds(15));
+        rows.remove("transit:latest:subway-position:1002:T1");
+        assertThat(estimate(service(true,trip("T1",call("A",60,true),call("B",300,true))),now).validUntil())
+                .isEqualTo(now.plusSeconds(20));
+        rows.clear();
+        assertThat(estimate(service(true,trip("T1",call("A",60,true),call("B",300,true))),now).validUntil())
+                .isEqualTo(now.plusSeconds(86400));
+    }
 }

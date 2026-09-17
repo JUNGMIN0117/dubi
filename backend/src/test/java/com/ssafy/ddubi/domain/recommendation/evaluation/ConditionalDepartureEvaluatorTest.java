@@ -63,5 +63,33 @@ class ConditionalDepartureEvaluatorTest {
         var result=engine(4).evaluate(1,now,p,d,boundaries,at->{seen.add(at);return comparison(at,at.equals(p.minusSeconds(60))?d.minusSeconds(600):d);});
         assertThat(seen).containsExactly(p,p.minusSeconds(60));
         assertThat(result.proposed().departureAt()).isEqualTo(p.minusSeconds(60));
+        assertThat(result.decision()).isEqualTo(ADVANCE_DEPARTURE);
+        assertThat(result.search().complete()).isTrue();
+    }
+    /** 수시간 뒤 일정도 최신 해까지 모두 검사했다면 버린 과거 후보 때문에 미완료로 바꾸지 않는다. */
+    @Test void distantScheduleCompletesWhenLatestFeasibleDepartureIsFoundWithinBudget() {
+        Instant planned=now.plusSeconds(21600),deadline=planned.plusSeconds(3600);
+        var result=engine(256).evaluate(1,now,planned,deadline,List.of(),at->comparison(at,at.plusSeconds(3600)));
+        assertThat(result.decision()).isEqualTo(ADVANCE_DEPARTURE);
+        assertThat(result.proposed().departureAt()).isEqualTo(planned.minusSeconds(600));
+        assertThat(result.search().complete()).isTrue();
+        assertThat(result.search().evaluatedCount()).isEqualTo(11);
+        assertThat(result.bestKnownDecision()).isNull();
+    }
+
+    @Test void truncatedDomainWithoutFeasibleDepartureStillRemainsIncomplete() {
+        var result=engine(4).evaluate(1,now,now.plusSeconds(21600),now.plusSeconds(25200),List.of(),
+                at->comparison(at,now.plusSeconds(30000)));
+        assertThat(result.decision()).isEqualTo(SEARCH_INCOMPLETE);
+        assertThat(result.search().complete()).isFalse();
+    }
+    @Test void feasibleResultFromExhaustedBatchDoesNotClaimCompletedSearch() {
+        var result=engine(256).evaluate(1,now,p,d,List.of(),at->{
+            var base=comparison(at,at.equals(p)?d:d.minusSeconds(600));
+            return new MlRoutePreview.Comparison(base.status(),false,base.fastest(),base.candidates(),base.predictions(),
+                    !at.equals(p),base.subwayPredictions(),base.waitPredictions());
+        });
+        assertThat(result.decision()).isEqualTo(SEARCH_INCOMPLETE);
+        assertThat(result.bestKnownDecision()).isEqualTo(ADVANCE_DEPARTURE);
     }
 }

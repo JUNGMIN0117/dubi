@@ -397,6 +397,10 @@ services:
       DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE: ${DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE:-}
       DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64}   # metropolitan-bus-v6.json.manifest.json 의 sha256
       DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL: ${DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL:-http://ml-serving:8000}
+      # 공식 시간표 artifact가 준비되기 전에는 경로를 비운다. Backend는 이 경우 근거 없는 시간표 보정을 적용하지 않는다.
+      DDUBI_SUBWAY_TIMING_TIMETABLE_PATH: ${DDUBI_SUBWAY_TIMING_TIMETABLE_PATH:-}
+      DDUBI_SUBWAY_TIMING_DECOMPOSITION_VERIFIED: ${DDUBI_SUBWAY_TIMING_DECOMPOSITION_VERIFIED:-false}
+      DDUBI_BUS_WAITING_DECOMPOSITION_VERIFIED: ${DDUBI_BUS_WAITING_DECOMPOSITION_VERIFIED:-false}
       JAVA_OPTS: -Xms256m -Xmx512m
     volumes:
       # 기본값을 저장소의 backend/transit-master 로(9/11). 이전 기본값 ./transit-master 는 서버에 빈 폴더였다.
@@ -620,15 +624,109 @@ services:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      # Spark 쪽 버스 대응표는 9/11 임시 OFF (기본값 빈 문자열 → 코드가 대응표 없이 동작).
-      # 이유: load_crosswalk 가 21만 행을 F.lit 리터럴로 계획에 넣고 캐시하지 않아 배치마다 재파싱 → 배치 40초, 드라이버 힙 소진, 컨테이너 OOM 재시작.
-      # dt 가 index 를 cache/broadcast 로 고정하면 .env 에 SPARK_BUS_CROSSWALK_PATH·SHA256 을 채워 켠다(수집기와 같은 파일·지문).
-      # 수집기 쪽 대응표(x-collector-env)는 켜져 있어 Kafka 이벤트의 segmentIds 는 계속 채워진다.
-      BUS_CROSSWALK_PATH: ${SPARK_BUS_CROSSWALK_PATH:-}
-      BUS_CROSSWALK_SHA256: ${SPARK_BUS_CROSSWALK_SHA256:-}
+      # Collector와 Spark가 검증된 동일 artifact/지문을 사용한다. load_crosswalk는 기동 시 cache/count로 한 번 물질화한다.
+      BUS_CROSSWALK_PATH: ${SPARK_BUS_CROSSWALK_PATH:-/opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz}
+      BUS_CROSSWALK_SHA256: ${SPARK_BUS_CROSSWALK_SHA256:-e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd}
     volumes:
       - ./spark/conf:/opt/spark/conf:ro
       - ../backend/transit-master:/opt/ddubi/transit-master:ro   # 버스 대응표 (driver 가 기동 시 한 번 읽음)
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+    depends_on:
+      - spark-master
+      - spark-worker-1
+      - spark-worker-2
+
+  # 검증된 실제 구간 통과 이벤트만 원문/offset과 함께 Parquet으로 보존한다.
+  # 도착예정값이나 8시간 간격 위치값을 실측으로 변환하는 생산자는 아직 없으므로 별도 프로필로만 실행한다.
+  spark-streaming-segment-observations:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-segment-observations
+    profiles: ["recommendation-data"]
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command: ["sh", "submit.sh", "streaming/segment_observations.py"]
+    ports:
+      - "${SPARK_SEGMENT_OBSERVATIONS_DRIVER_UI_PORT:-4045}:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      SPARK_EXECUTOR_MEMORY: ${SEGMENT_OBSERVATIONS_EXECUTOR_MEMORY:-768m}
+      SPARK_CORES_MAX: ${SEGMENT_OBSERVATIONS_CORES_MAX:-1}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SEGMENT_FACTS_PATH: ${SEGMENT_FACTS_PATH:-hdfs://hdfs-namenode:9000/ddubi/silver/segment-observation/v1}
+    volumes:
+      - ./spark/conf:/opt/spark/conf:ro
+      - ../sparkjobs:/opt/ddubi/sparkjobs
+      - spark-checkpoints:/opt/ddubi/checkpoints
+      - spark-events:/opt/ddubi/spark-events
+      - spark-ivy:/opt/ddubi/ivy
+    depends_on:
+      - spark-master
+      - spark-worker-1
+      - spark-worker-2
+
+  # 위 실측과 검증된 registry/baseline을 매분 평가해 Redis 최신값과 Kafka 판정 이력을 함께 발행한다.
+  # registry/baseline 경로가 비어 있으면 기동을 거부해 미검증 매핑이나 기준선을 사용하지 않는다.
+  spark-streaming-segment-status:
+    <<: *common
+    image: ddubi/spark:${APP_VERSION:-0.1.0}
+    container_name: spark-streaming-segment-status
+    profiles: ["recommendation-data"]
+    mem_limit: 1g
+    working_dir: /opt/ddubi/sparkjobs
+    command:
+      - sh
+      - -c
+      - >-
+        : "$${SEGMENT_REGISTRY_PATH:?SEGMENT_REGISTRY_PATH가 필요합니다}";
+        : "$${SEGMENT_BASELINE_PATH:?SEGMENT_BASELINE_PATH가 필요합니다}";
+        exec sh submit.sh streaming/segment_status_live.py
+        --input "$${SEGMENT_FACTS_PATH}"
+        --registry "$${SEGMENT_REGISTRY_PATH}"
+        --baseline "$${SEGMENT_BASELINE_PATH}"
+        --output "$${SEGMENT_STATUS_OUTPUT_PATH}"
+        --policy-version "$${SEGMENT_STATUS_POLICY_VERSION}"
+        --slow-seconds "$${SEGMENT_STATUS_SLOW_SECONDS}"
+        --delayed-seconds "$${SEGMENT_STATUS_DELAYED_SECONDS}"
+        --min-samples "$${SEGMENT_STATUS_MIN_SAMPLES}"
+        --max-age-seconds "$${SEGMENT_STATUS_MAX_AGE_SECONDS}"
+        --publish
+    ports:
+      - "${SPARK_SEGMENT_STATUS_DRIVER_UI_PORT:-4046}:4040"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      SPARK_VERSION: ${SPARK_VERSION:-3.5.3-python3}
+      SPARK_CHECKPOINT_DIR: ${SPARK_CHECKPOINT_DIR}
+      SPARK_EVENTLOG_DIR: ${SPARK_EVENTLOG_DIR}
+      SPARK_EVENTLOG_ENABLED: ${SPARK_EVENTLOG_ENABLED:-false}
+      SPARK_EXECUTOR_MEMORY: ${SEGMENT_STATUS_EXECUTOR_MEMORY:-768m}
+      SPARK_CORES_MAX: ${SEGMENT_STATUS_CORES_MAX:-1}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SEGMENT_FACTS_PATH: ${SEGMENT_FACTS_PATH:-hdfs://hdfs-namenode:9000/ddubi/silver/segment-observation/v1}
+      SEGMENT_REGISTRY_PATH: ${SEGMENT_REGISTRY_PATH:-}
+      SEGMENT_BASELINE_PATH: ${SEGMENT_BASELINE_PATH:-}
+      SEGMENT_STATUS_OUTPUT_PATH: ${SEGMENT_STATUS_OUTPUT_PATH:-hdfs://hdfs-namenode:9000/ddubi/derived/segment-status/v1}
+      SEGMENT_STATUS_POLICY_VERSION: ${SEGMENT_STATUS_POLICY_VERSION:-segment-status-v1}
+      SEGMENT_STATUS_SLOW_SECONDS: ${SEGMENT_STATUS_SLOW_SECONDS:-30}
+      SEGMENT_STATUS_DELAYED_SECONDS: ${SEGMENT_STATUS_DELAYED_SECONDS:-60}
+      SEGMENT_STATUS_MIN_SAMPLES: ${SEGMENT_STATUS_MIN_SAMPLES:-3}
+      SEGMENT_STATUS_MAX_AGE_SECONDS: ${SEGMENT_STATUS_MAX_AGE_SECONDS:-300}
+    volumes:
+      - ./spark/conf:/opt/spark/conf:ro
       - ../sparkjobs:/opt/ddubi/sparkjobs
       - spark-checkpoints:/opt/ddubi/checkpoints
       - spark-events:/opt/ddubi/spark-events
@@ -826,7 +924,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       APP_ENV: ${APP_ENV:-local}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-      ARCHIVE_TOPICS: ${ARCHIVE_TOPICS:-transport.raw,city.raw,source.poll-status}   # topics.yaml 의 archive: true 토픽
+      ARCHIVE_TOPICS: ${ARCHIVE_TOPICS:-transport.raw,city.raw,source.poll-status,segment.status}   # topics.yaml 의 archive: true 토픽
       ARCHIVE_LOCAL_DIR: ${ARCHIVE_LOCAL_DIR}
       ARCHIVE_URI: ${ARCHIVE_URI}
       ARCHIVE_HDFS_USER: ${ARCHIVE_HDFS_USER:-hadoop}

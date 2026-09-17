@@ -151,6 +151,8 @@ echo "@@errors"; printf "backend %s
 " "$(docker logs backend --since %(h)dh 2>&1 | grep -cE ' ERROR ')"
 echo "@@deploy"; cd ~/S15P21E202 && git log -1 --format='%h %cd' --date=format:'%m-%d %H:%M' && stat -c %y .git/FETCH_HEAD 2>/dev/null | cut -c1-16
 echo "@@redis_nottl"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | awk "{print \"TTL \" \$0}" | redis-cli -a "$REDIS_PASSWORD" --no-auth-warning | grep -c "^-1$"'
+echo "@@segment_status_keys"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "segment:status:*" | wc -l'
+echo "@@segment_status_bad_ttl"; docker exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "segment:status:*" | awk "{print \"TTL \" \$0}" | redis-cli -a "$REDIS_PASSWORD" --no-auth-warning | grep -cE "^(-1|-2)$"'
 echo "@@cert"; echo | openssl s_client -connect localhost:443 -servername j15e202.p.ssafy.io 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2
 """.replace("%(h)d", str(WINDOW_H))], timeout=60)
     return _split_sections(out or "")
@@ -303,7 +305,7 @@ def build(env):
         w("서비스", f"5xx {int(http_5xx)}건")
 
     # --- 데이터 ---
-    intake = by_label(f'sum by (topic) (increase(kafka_topic_partition_current_offset{{topic=~"city.raw|transport.raw|segment.status"}}[{WINDOW_H}h]))', "topic")
+    intake = by_label(f'sum by (topic) (increase(kafka_topic_partition_current_offset{{topic=~"city.raw|transport.raw|segment.observation|segment.status"}}[{WINDOW_H}h]))', "topic")
     lag = scalar("sum(kafka_consumergroup_lag)")
     spark_apps = scalar('metrics_master_apps_Value{type="gauges"}')
     spark_workers = scalar('metrics_master_aliveWorkers_Value{type="gauges"}')
@@ -315,6 +317,8 @@ def build(env):
     hdfs_total = scalar("hdfs_namenode_capacity_total_bytes")
     if up_total is not None and (intake.get("city.raw") or 0) == 0:  # Prometheus 자체가 죽었을 땐 "조회 실패" 로만 경고한다
         w("데이터", "city.raw 유입 0")
+    if (intake.get("segment.observation") or 0) > 0 and (intake.get("segment.status") or 0) == 0:
+        w("데이터", "구간 실측은 들어오지만 segment.status 생성 0")
     if spark_apps is not None and spark_apps < 2:
         w("데이터", "Spark 잡 부족")
     if hdfs_live is not None and hdfs_live < 2:
@@ -383,6 +387,17 @@ def build(env):
             pass
     if redis_nottl:
         w("서비스", f"Redis TTL 없는 키 {redis_nottl}")
+    segment_status_keys = None
+    segment_status_bad_ttl = None
+    try:
+        if loc.get("segment_status_keys"):
+            segment_status_keys = int(loc["segment_status_keys"][0])
+        if loc.get("segment_status_bad_ttl"):
+            segment_status_bad_ttl = int(loc["segment_status_bad_ttl"][0])
+    except ValueError:
+        pass
+    if segment_status_keys and segment_status_bad_ttl:
+        w("데이터", f"segment status TTL 오류 {segment_status_bad_ttl}건")
     cert_days = cert_days_left(loc["cert"][0]) if loc.get("cert") else None
     if cert_days is not None and cert_days < 30:
         w("운영", f"인증서 {cert_days}일 남음")
@@ -458,7 +473,7 @@ def build(env):
 
     rows = [
         ("서비스", f"backend {'✓' if backend_up == 1 else '✗'} · ML {'✓' if ml_up == 1 else ('✗' if ml_up is not None else '?')} · MySQL 연결 {fmt(mysql_conn)}/{fmt(mysql_max)} · Redis {fmt(redis_pct, 1, '%')} (키 {fmt(redis_keys)}, TTL 없는 키 {fmt(redis_nottl)}) · 요청 {fmt(http_all)} / 5xx {fmt(http_5xx)}"),
-        ("데이터", f"유입 {intake_txt} · 아카이버 랙 {fmt(lag)} · Spark 잡 {fmt(spark_apps)}/2 worker {fmt(spark_workers)}/2 · 배치 지연 {latency_txt}"),
+        ("데이터", f"유입 {intake_txt} · segment Redis 키 {fmt(segment_status_keys)} (TTL 오류 {fmt(segment_status_bad_ttl)}) · 아카이버 랙 {fmt(lag)} · Spark 잡 {fmt(spark_apps)}/2 worker {fmt(spark_workers)}/2 · 배치 지연 {latency_txt}"),
         ("저장", f"HDFS Live {fmt(hdfs_live)} · Under-rep {fmt(hdfs_under)} · Missing {fmt(hdfs_missing)} · 사용 {human(hdfs_used)} · 아카이브 새 파일 {fmt(new_files)} · Kafka {human(kafka_bytes)}"),
         ("자원", f"디스크 서버1/2 {disk_txt} · 메모리 서버1/2 {mem_txt}"),
         ("안정성", f"수집 대상 {fmt(up_ok)}/{fmt(up_total)} · 알림 발동 {fmt(firing_n) if firing_n is not None else '?'}{(' (' + ', '.join(firing) + ')') if firing else ''} · 재시작 {restarts_txt} · 오류 로그 {errors_txt}"),

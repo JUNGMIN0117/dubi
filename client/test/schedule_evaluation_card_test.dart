@@ -137,9 +137,9 @@ void main() {
       'keep': '현재 출발 계획을 유지해도 일정 전에 도착할 것으로 예상됩니다.',
       'advance': '제안 시각에 출발하면 일정 10분 전 도착이 예상됩니다.',
       'margin': '10분 여유 확보는 어렵지만 일정 전 도착 가능한 경로입니다.',
-      'late': '현재 확인 가능한 경로로는 일정 시작 이후 도착이 예상됩니다.',
-      'data': '최신 도착 예측에 필요한 정보가 부족합니다.',
-      'search': '제한 시간 안에 탐색을 완료하지 못했습니다. 확인된 대안만 표시합니다.',
+      'late': '정확한 출발 추천을 아직 확정하지 못했어요.',
+      'data': '정확한 출발 추천을 아직 확정하지 못했어요.',
+      'search': '아직 최신 출발시각을 확정하지 못했어요. 확인된 후보는 참고용입니다.',
     };
 
     for (final entry in cases.entries) {
@@ -199,7 +199,8 @@ void main() {
   testWidgets('null ETA와 경로가 없어도 사고 원인을 추측하지 않는다', (tester) async {
     await tester.pumpWidget(_summary(fixtures['data']!));
 
-    expect(find.text('예상 도착: 확인 불가'), findsOneWidget);
+    expect(find.textContaining('예상 도착:'), findsNothing);
+    expect(find.text('정확한 출발 추천을 아직 확정하지 못했어요.'), findsOneWidget);
     expect(find.text('경로 구간'), findsNothing);
     expect(find.textContaining('사고'), findsNothing);
   });
@@ -320,6 +321,17 @@ void main() {
           'state': 'READY',
           'decision': 'DEPART_NOW',
           'departureMissed': departureMissed,
+          'estimatedArrivalAt': DateTime.now()
+              .add(const Duration(hours: 1))
+              .toIso8601String(),
+          'validUntil': DateTime.now()
+              .add(const Duration(minutes: 1))
+              .toIso8601String(),
+          'quality': {
+            'preview': false,
+            'productionEligible': true,
+            'costCoverage': 'COMPLETE',
+          },
         });
 
     await tester.pumpWidget(_summary(evaluation(false)));

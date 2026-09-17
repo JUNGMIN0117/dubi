@@ -800,12 +800,14 @@ class LoginScreen extends StatefulWidget {
     required this.googleLoginService,
     required this.naverLoginService,
     this.onAuthenticated,
+    this.onKeepSignedInChanged,
   });
   final AuthRepository authRepository;
   final KakaoLoginService kakaoLoginService;
   final GoogleLoginService googleLoginService;
   final NaverLoginService naverLoginService;
   final VoidCallback? onAuthenticated;
+  final ValueChanged<bool>? onKeepSignedInChanged;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -951,8 +953,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           dense: true,
                           controlAffinity: ListTileControlAffinity.leading,
                           value: keepSignedIn,
-                          onChanged: (value) =>
-                              setState(() => keepSignedIn = value ?? true),
+                          onChanged: loading
+                              ? null
+                              : (value) {
+                                  setState(() => keepSignedIn = value ?? true);
+                                  widget.onKeepSignedInChanged?.call(
+                                    keepSignedIn,
+                                  );
+                                },
                           title: const Text(
                             '로그인 상태 유지',
                             style: TextStyle(
@@ -1123,6 +1131,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     if (!(formKey.currentState?.validate() ?? false)) return;
+    widget.onKeepSignedInChanged?.call(keepSignedIn);
     setState(() => loading = true);
     try {
       await widget.authRepository.login(
@@ -1187,19 +1196,22 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     ),
   );
-  void _social(BuildContext c, String provider) => _open(
-    c,
-    SocialAuthScreen(
-      provider: provider,
-      repository: widget.authRepository,
-      kakaoLoginService: provider == '카카오' ? widget.kakaoLoginService : null,
-      googleLoginService: provider == 'Google'
-          ? widget.googleLoginService
-          : null,
-      naverLoginService: provider == '네이버' ? widget.naverLoginService : null,
-      onAuthenticated: () => _completeLogin(c),
-    ),
-  );
+  void _social(BuildContext c, String provider) {
+    widget.onKeepSignedInChanged?.call(keepSignedIn);
+    _open(
+      c,
+      SocialAuthScreen(
+        provider: provider,
+        repository: widget.authRepository,
+        kakaoLoginService: provider == '카카오' ? widget.kakaoLoginService : null,
+        googleLoginService: provider == 'Google'
+            ? widget.googleLoginService
+            : null,
+        naverLoginService: provider == '네이버' ? widget.naverLoginService : null,
+        onAuthenticated: () => _completeLogin(c),
+      ),
+    );
+  }
 }
 
 class _GoogleMark extends StatelessWidget {
@@ -1392,7 +1404,12 @@ class _MobileHomeContent extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           if (evaluation != null) ...[
-            InfoCard(child: ScheduleEvaluationSummary(evaluation: evaluation!)),
+            InfoCard(
+              child: ScheduleEvaluationSummary(
+                evaluation: evaluation!,
+                compact: true,
+              ),
+            ),
             const SizedBox(height: 16),
           ],
           Row(
@@ -1912,7 +1929,12 @@ class _WebHomeContent extends StatelessWidget {
       ),
       const SizedBox(height: 20),
       if (evaluation != null) ...[
-        InfoCard(child: ScheduleEvaluationSummary(evaluation: evaluation!)),
+        InfoCard(
+          child: ScheduleEvaluationSummary(
+            evaluation: evaluation!,
+            compact: true,
+          ),
+        ),
         const SizedBox(height: 20),
       ],
       Row(
@@ -2849,7 +2871,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     final departAt =
         schedule?.plannedDepartAt ??
         DateTime.now().add(const Duration(minutes: 30));
-    departureConfirmed = schedule == null || schedule.plannedDepartAt != null;
+    departureConfirmed = schedule?.plannedDepartAt != null;
     arrivalDate = arriveBy;
     arrivalTime = TimeOfDay.fromDateTime(arriveBy);
     departureDate = departAt;
@@ -2935,7 +2957,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
                     const Padding(
                       padding: EdgeInsets.only(top: 8),
                       child: Text(
-                        '기존 일정에 출발 예정시각이 없습니다. 날짜 또는 시간을 확인해 주세요.',
+                        '자동으로 표시된 시각입니다. 출발할 날짜와 시간을 직접 확인해 주세요.',
                         style: TextStyle(color: DdubiColors.red, fontSize: 12),
                       ),
                     ),
@@ -3658,7 +3680,7 @@ class ScheduleDetailScreen extends StatelessWidget {
                       Text(
                         route == null
                             ? '추천 출발 시간을 확인 중이에요.'
-                            : '${route.departure}에 출발하는 것을\n추천해요!',
+                            : '선택한 경로의 기본 정보를\n확인해 주세요.',
                         style: const TextStyle(
                           fontSize: 19,
                           height: 1.28,
@@ -3668,7 +3690,7 @@ class ScheduleDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        '실시간 이동 상황을 반영했어요.',
+                        '출발 판단과 실시간 반영 여부는 최신 평가에서 확인해 주세요.',
                         style: TextStyle(
                           fontSize: 11,
                           color: Color(0xFF68808B),
@@ -3685,7 +3707,7 @@ class ScheduleDetailScreen extends StatelessWidget {
             children: [
               const Expanded(
                 child: Text(
-                  '뚜비 최종 추천 경로',
+                  '현재 선택 경로',
                   style: TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w900,
@@ -4146,7 +4168,7 @@ class _RecommendationEvidenceCard extends StatelessWidget {
     'ML_PREVIEW' => '버스 구간 예측을 포함해 계산했어요.',
     'SUBWAY_PREVIEW' => '지하철 시간표를 포함해 계산했어요.',
     'MIXED_PREVIEW' => '경로 API와 교통 예측 정보를 함께 사용했어요.',
-    _ => '서버에서 저장한 최신 평가 결과를 표시하고 있어요.',
+    _ => '계산에 사용된 정보가 확인되지 않았어요. 최신 평가의 제한 사항을 확인해 주세요.',
   };
 
   static String _reasonDescription(String code) {
@@ -4159,7 +4181,7 @@ class _RecommendationEvidenceCard extends StatelessWidget {
     if (code.startsWith('ROAD_POTENTIAL_IMPACT:')) {
       return '예상 이동 구간에 도로 영향 가능성이 있어요.';
     }
-    return code;
+    return '일부 교통정보를 확인하지 못했어요.';
   }
 }
 
@@ -4486,6 +4508,7 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
   PlaceLocation? _origin;
   PlaceLocation? _destination;
   late DateTime _plannedDepartAt;
+  bool _departureConfirmed = false;
   late DateTime _desiredArrivalAt;
   late final TextEditingController _departure;
   late final TextEditingController _arrival;
@@ -4578,6 +4601,7 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
         TextFormField(
           key: const Key('routeDepartureTimeField'),
           controller: _departure,
+          validator: (_) => _departureConfirmed ? null : '출발 예정시간을 직접 선택해 주세요.',
           readOnly: true,
           onTap: _pickDeparture,
           decoration: const InputDecoration(
@@ -4621,6 +4645,7 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
               _origin = item.origin;
               _destination = item.destination;
               _plannedDepartAt = item.plannedDepartAt;
+              _departureConfirmed = false;
               _desiredArrivalAt = item.desiredArrivalAt;
               _departure.text = _formatArrival(_plannedDepartAt);
               _arrival.text = _formatArrival(_desiredArrivalAt);
@@ -4693,6 +4718,7 @@ class _RouteSearchScreenState extends State<RouteSearchScreen> {
         time.minute,
       );
       _departure.text = _formatArrival(_plannedDepartAt);
+      _departureConfirmed = true;
     });
   }
 
@@ -6914,13 +6940,21 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
         final data = snapshot.data!;
         final item = data.item;
         final latest = data.latest;
-        final expired =
+        final latestExpired =
             latest != null &&
             (latest.state == EvaluationState.stale ||
                 latest.isExpiredAt(DateTime.now()));
+        final expired = item.validUntil != null
+            ? !item.validUntil!.isAfter(DateTime.now())
+            : item.evaluationId != null &&
+                  item.evaluationId == latest?.evaluationId &&
+                  latestExpired;
         final isCurrent =
             item.evaluationId != null &&
             latest?.evaluationId == item.evaluationId &&
+            latest?.state == EvaluationState.ready &&
+            latest?.validUntil != null &&
+            !latestExpired &&
             !expired;
         return ListView(
           padding: _pad,
@@ -6928,10 +6962,8 @@ class _NotificationDetailScreenState extends State<NotificationDetailScreen> {
             Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             Text(item.body),
-            if (item.decision != null) ...[
-              const SizedBox(height: 12),
-              Text('알림 판단: ${item.decision}'),
-            ],
+            if (item.evaluationId == null)
+              const Text('알림의 평가 연결 정보를 확인할 수 없습니다. 연결된 일정에서 최신 결과를 확인해 주세요.'),
             if (item.evaluationId != null) ...[
               const SizedBox(height: 12),
               Text(

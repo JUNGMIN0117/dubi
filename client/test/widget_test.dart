@@ -381,6 +381,10 @@ void main() {
     );
     expect(find.byKey(const Key('scheduleDateButton')), findsOneWidget);
     expect(find.byKey(const Key('scheduleArrivalTimeButton')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('scheduleDepartureTimeButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
     expect(find.text('중요도'), findsNothing);
     expect(find.text('교통수단 선호'), findsNothing);
     await tester.ensureVisible(find.byKey(const Key('destinationPlaceField')));
@@ -702,6 +706,15 @@ void main() {
     await tester.tap(find.byKey(const Key('placeSearchButton')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('placeSearchResult0')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('routeDepartureTimeField')),
+    );
+    await tester.tap(find.byKey(const Key('routeDepartureTimeField')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('경로 평가하기'));
     await tester.pumpAndSettle();

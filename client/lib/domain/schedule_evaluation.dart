@@ -373,16 +373,36 @@ class ScheduleEvaluationV2 {
   final EvaluationVersions? versions;
 
   bool isExpiredAt(DateTime now) =>
-      validUntil != null && validUntil!.isBefore(now);
+      validUntil != null && !validUntil!.isAfter(now);
 
   bool get isLegacy => schemaVersion != 'schedule-evaluation-v2';
 
-  bool canAcceptAt(DateTime now) =>
+  bool canRecommendAt(DateTime now) =>
+      !isLegacy &&
       state == EvaluationState.ready &&
-      decision != DepartureDecision.unknown &&
+      const {
+        DepartureDecision.keepDeparture,
+        DepartureDecision.advanceDeparture,
+        DepartureDecision.departNow,
+        DepartureDecision.marginUnavailable,
+        DepartureDecision.lateExpected,
+      }.contains(decision) &&
       !quality.preview &&
       quality.productionEligible &&
+      quality.costCoverage == 'COMPLETE' &&
+      search?.complete != false &&
+      estimatedArrivalAt != null &&
+      validUntil != null &&
       !isExpiredAt(now) &&
+      !legs.any(
+        (leg) =>
+            (leg.role == RouteLegRole.ride || leg.role == RouteLegRole.wait) &&
+            (leg.durationSource == DurationSource.providerTotalFallback ||
+                leg.durationSource == DurationSource.unknown),
+      );
+
+  bool canAcceptAt(DateTime now) =>
+      canRecommendAt(now) &&
       actualDepartAt == null &&
       !departureMissed &&
       proposedDepartAt != null;

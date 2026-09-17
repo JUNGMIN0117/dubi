@@ -4,9 +4,11 @@
 422, 모델이 준비되지 않으면 503을 반환한다. 모든 모델 결과는 PREVIEW이며 기존
 Spring 추천 결과를 자동 변경하지 않는다. 로컬은 127.0.0.1:8000으로 실행한다.
 """
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
+import time
 from pathlib import Path
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -25,6 +27,22 @@ from serving_runtime import InferenceQueue, QueueBusy, RuntimeSettings
 LOGGER = logging.getLogger(__name__)
 DEFAULT_BUNDLE = Path(__file__).resolve().parent.parent / 'artifacts/ml-serving/20260908-v12'
 
+
+
+def _log_end(request_id, segments, timings, start, outcome):
+    """요청 한 건의 단계별 시간을 한 줄로 남긴다. 값이 없으면 -1 로 두어 측정 못한 구간을 구분한다.
+
+    queue_ms 는 입장까지 기다린 시간, feature_ms 는 참조자료 조회·특성 생성, inference_ms 는 모델 계산이다.
+    단일 구간과 9개 구간이 모두 비슷한 시간이면 고정 비용이 어디에 있는지 이 세 값으로 갈린다.
+    """
+    def ms(value):
+        return -1 if value is None else round(value * 1000)
+    started = timings.get('started_at')
+    LOGGER.info('ML_REQUEST_END request_id=%s segments=%d queue_ms=%s feature_ms=%s inference_ms=%s total_ms=%s outcome=%s',
+                request_id, segments,
+                ms(None if started is None else started - start),
+                ms(timings.get('feature_seconds')), ms(timings.get('inference_seconds')),
+                ms(time.perf_counter() - start), outcome)
 
 def local_bundle():
     """명시 환경값이 없을 때만 검증 후 기록한 로컬 포인터를 읽는다. 경로 이탈/깨진 포인터는 실패다."""
@@ -110,15 +128,29 @@ def create_app(predictor=None, settings=None, today=None):
         model = application.state.predictor
         if model is None:
             raise HTTPException(status_code=503, detail='MODEL_NOT_READY')
+        # 요청 시작·종료를 따로 남긴다. 접속 로그는 응답을 끝낸 요청만 기록해서, 호출자가 먼저
+        # 끊은 요청은 흔적이 남지 않았다(2026-09-18). 개인정보·요청 본문은 남기지 않는다.
+        segments = len(request.segments)
+        LOGGER.info('ML_REQUEST_START request_id=%s segments=%d', request.request_id, segments)
+        timings, start = {}, time.perf_counter()
         try:
-            return await application.state.inference_queue.run(model.predict, request)
+            response = await application.state.inference_queue.run(model.predict, request, timings)
+            _log_end(request.request_id, segments, timings, start, 'SUCCESS')
+            return response
         except QueueBusy:
+            _log_end(request.request_id, segments, timings, start, 'MODEL_BUSY')
             raise HTTPException(status_code=503, detail='MODEL_BUSY') from None
+        except asyncio.CancelledError:
+            # 호출자가 timeout 으로 연결을 끊은 경우다. 계산 자체는 슬롯을 끝까지 쓴다.
+            _log_end(request.request_id, segments, timings, start, 'CLIENT_CANCELLED')
+            raise
         except BundleError as error:
             code = 'MODEL_BUSY' if str(error) == 'MODEL_BUSY' else 'MODEL_UNAVAILABLE'
+            _log_end(request.request_id, segments, timings, start, code)
             raise HTTPException(status_code=503, detail=code) from None
         except Exception as error:
             LOGGER.error('PREDICTION_FAILED type=%s', type(error).__name__)
+            _log_end(request.request_id, segments, timings, start, 'MODEL_UNAVAILABLE')
             raise HTTPException(status_code=503, detail='MODEL_UNAVAILABLE') from None
 
     @application.post('/v1/bus/environment:prepare', responses={422: {'model': InvalidRequest}})

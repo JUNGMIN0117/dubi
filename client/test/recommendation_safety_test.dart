@@ -93,7 +93,7 @@ void main() {
     );
     expect(find.textContaining('secret-'), findsNothing);
     expect(find.textContaining('PRIVATE_NEW_CODE'), findsNothing);
-    expect(find.textContaining('일부 버스 구간의 실시간 정보 부족'), findsOneWidget);
-    expect(find.textContaining('일부 지하철 구간의 운행정보 부족'), findsOneWidget);
+    expect(find.textContaining('일부 버스 구간의 실시간 정보가 부족해요'), findsOneWidget);
+    expect(find.textContaining('일부 지하철 구간의 운행정보가 부족해요'), findsOneWidget);
   });
 }

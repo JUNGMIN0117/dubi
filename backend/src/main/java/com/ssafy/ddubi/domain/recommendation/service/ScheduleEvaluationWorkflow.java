@@ -27,12 +27,37 @@ public class ScheduleEvaluationWorkflow {
     private final ScheduleMonitoringPolicy monitoring;
     private final com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking;
     private final com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher;
+    private final Budget budget;
+
+    /**
+     * 트리거별 계산 예산(ms). 최초 등록은 화면이 "최대 30초" 안내와 함께 기다리고, 자동 갱신은 백그라운드,
+     * 사용자 수동 갱신은 "최대 10초" 안내다. 상한이며 계산이 끝나면 즉시 응답한다.
+     * 수동 갱신은 REFRESH에 사용자 ID가 함께 오는 경우(컨트롤러)이고, 사용자 ID가 없는 REFRESH·EVENT는 서버 자동 갱신이다.
+     */
+    public record Budget(long initialMillis, long autoRefreshMillis, long manualRefreshMillis) {
+        public static final Budget DEFAULT = new Budget(30000, 15000, 10000);
+        public Budget {
+            for (long value : new long[]{initialMillis, autoRefreshMillis, manualRefreshMillis})
+                if (value < 1 || value > 60000) throw new IllegalArgumentException("계산 예산 범위 오류");
+        }
+        public long forTrigger(TriggerType trigger, Long userId) {
+            if (trigger == TriggerType.INITIAL) return initialMillis;
+            if (trigger == TriggerType.REFRESH && userId != null) return manualRefreshMillis;
+            return autoRefreshMillis;
+        }
+    }
 
     public ScheduleEvaluationWorkflow(ScheduleEvaluationStore store, PublicTransitRouteClient routes,
             RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
             com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking,
             @Value("${ddubi.recommendation.candidate-ttl-seconds:900}") int candidateTtl) {
         this(store, routes, evidence, conditional, notifications, walking, candidateTtl, null);
+    }
+    public ScheduleEvaluationWorkflow(ScheduleEvaluationStore store, PublicTransitRouteClient routes,
+            RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
+            com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking, int candidateTtl,
+            com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher) {
+        this(store, routes, evidence, conditional, notifications, walking, candidateTtl, mappingRefresher, Budget.DEFAULT);
     }
 
     /** 운영에서는 캐시 재사용에도 현재 매핑 판정을 적용한다. 외부 API TTL과 매핑 버전 수명은 별개다. */
@@ -41,9 +66,19 @@ public class ScheduleEvaluationWorkflow {
             RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
             com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking,
             @Value("${ddubi.recommendation.candidate-ttl-seconds:900}") int candidateTtl,
-            com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher) {
+            com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher,
+            @Value("${ddubi.recommendation.budget.initial-millis:30000}") long initialBudgetMillis,
+            @Value("${ddubi.recommendation.budget.auto-refresh-millis:15000}") long autoRefreshBudgetMillis,
+            @Value("${ddubi.recommendation.budget.manual-refresh-millis:10000}") long manualRefreshBudgetMillis) {
+        this(store, routes, evidence, conditional, notifications, walking, candidateTtl, mappingRefresher,
+                new Budget(initialBudgetMillis, autoRefreshBudgetMillis, manualRefreshBudgetMillis));
+    }
+    public ScheduleEvaluationWorkflow(ScheduleEvaluationStore store, PublicTransitRouteClient routes,
+            RouteEvidenceAssembler evidence, ConditionalDepartureEvaluator conditional, EvaluationNotificationPlanner notifications,
+            com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService walking, int candidateTtl,
+            com.ssafy.ddubi.domain.route.service.RouteMappingRefresher mappingRefresher, Budget budget) {
         this.store = store; this.routes = routes; this.evidence = evidence; this.conditional = conditional;
-        this.notifications = notifications; this.walking=walking;
+        this.notifications = notifications; this.walking=walking; this.budget = Objects.requireNonNull(budget);
         this.mappingRefresher = mappingRefresher;
         // 초기 실험 주기이며 검증된 도착 보장 임계값이 아니다. 여유시간으로 가산하지 않는다.
         monitoring = new ScheduleMonitoringPolicy(Duration.ofHours(1), Duration.ofMinutes(30), Duration.ofMinutes(10),
@@ -140,7 +175,8 @@ public class ScheduleEvaluationWorkflow {
             Instant departure = job.departure().isBefore(now) ? now : job.departure();
             var walkingSession=new com.ssafy.ddubi.domain.route.client.WalkingEnrichmentService.Session();
             var enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now,selectedKey(job,search),walkingSession);
-            var calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
+            long budgetMillis = budget.forTrigger(trigger, userId);
+            var calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy(), budgetMillis).withWalking(enriched.evidence());
             var comparison = calculation.proposedComparison();
             var suggestion = calculation.suggestion();
             String selectedKey = selectedKey(job, search);
@@ -159,7 +195,7 @@ public class ScheduleEvaluationWorkflow {
 
                 snapshot = evidence.read(search.candidates(), now);
                 enriched=walking.prepare(search.candidates(),job.origin(),job.destination(),now,selectedKey(job,search),walkingSession);
-                calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy()).withWalking(enriched.evidence());
+                calculation = conditional.evaluate(enriched.candidates(), snapshot, now, job.departure(), job.arriveBy(), budgetMillis).withWalking(enriched.evidence());
                 comparison = calculation.proposedComparison();
                 suggestion = calculation.suggestion();
                 selectedKey = selectedKey(job, search); selected = selected(suggestion, selectedKey); candidatesChanged = true;

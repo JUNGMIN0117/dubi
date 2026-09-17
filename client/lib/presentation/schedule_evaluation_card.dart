@@ -129,34 +129,30 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
       actionError = null;
       notice = null;
     });
-    var stale = false;
-    var succeeded = false;
+    ScheduleEvaluationFailure? actionFailure;
+    var unexpectedFailure = false;
     try {
       await action();
-      succeeded = true;
     } on ScheduleEvaluationFailure catch (failure) {
-      stale = failure.kind == EvaluationFailureKind.staleEvaluation;
-      if (mounted) {
-        setState(() {
-          if (stale) {
-            error = null;
-            notice = '추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.';
-          } else {
-            actionError = _failureMessage(failure);
-          }
-        });
-      }
+      actionFailure = failure;
     } on Object {
-      if (mounted) {
-        setState(
-          () => actionError = '요청을 처리하지 못했습니다. 다시 시도해 주세요.',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
+      unexpectedFailure = true;
     }
     if (!mounted) return;
-    if (succeeded) setState(() => notice = '서버 처리 결과를 다시 확인했습니다.');
+    final failure = actionFailure;
+    setState(() {
+      busy = false;
+      if (failure?.kind == EvaluationFailureKind.staleEvaluation) {
+        error = null;
+        notice = '추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.';
+      } else if (failure != null) {
+        actionError = _failureMessage(failure);
+      } else if (unexpectedFailure) {
+        actionError = '요청을 처리하지 못했습니다. 다시 시도해 주세요.';
+      } else {
+        notice = '서버 처리 결과를 다시 확인했습니다.';
+      }
+    });
     await _load();
   }
 

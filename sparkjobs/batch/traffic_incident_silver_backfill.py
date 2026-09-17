@@ -8,7 +8,8 @@ from pyspark.sql import SparkSession, functions as F
 
 from common.archive_source import read_archive_events
 from common.traffic_incident_enrichment import VerifiedLinkMaster, normalize_incident
-from streaming.traffic_incident_silver import SCHEMA, policy
+from common.traffic_incident_policy import policy
+from streaming.traffic_incident_silver import SCHEMA
 
 
 def main():
@@ -22,6 +23,8 @@ def main():
         parser.error("start must not be after end")
     if "traffic-incident-backfill/" not in args.output:
         parser.error("output must be a new traffic-incident-backfill/<version> root")
+    # 설정 오류가 부분 _run/output 디렉터리를 남기기 전에 먼저 실패시킨다.
+    incident_policy = policy(os.environ)
     spark = SparkSession.builder.appName("traffic_incident_silver_backfill").config("spark.sql.session.timeZone", "Asia/Seoul").getOrCreate()
     events = incidents = None
     try:
@@ -34,9 +37,16 @@ def main():
             .dropDuplicates(["incidentId", "contentHash"]).select("rawEventJson").cache())
         master = VerifiedLinkMaster.load(os.environ.get("TRAFFIC_LINK_MASTER_PATH", "").strip(),
                                          os.environ.get("TRAFFIC_LINK_MASTER_SHA256", "").strip())
-        stale, tolerance, nearby = policy(os.environ)
-        rows = [normalize_incident(json.loads(item.rawEventJson), master, stale, tolerance, nearby)
-                for item in incidents.toLocalIterator()]
+        rows = [
+            normalize_incident(
+                json.loads(item.rawEventJson),
+                master,
+                incident_policy.stale_seconds,
+                incident_policy.direct_tolerance_meters,
+                incident_policy.nearby_max_meters,
+            )
+            for item in incidents.toLocalIterator()
+        ]
         result = spark.createDataFrame(rows, SCHEMA).withColumn("eventDate", F.to_date("collectedAt"))
         output_count = result.count()
         if not output_count:

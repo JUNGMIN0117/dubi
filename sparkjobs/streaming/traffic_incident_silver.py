@@ -11,6 +11,7 @@ from common.kafka_source import read_events_stream
 from common.redis_sink import write_latest_with_row_ttl
 from common.settings import Settings
 from common.traffic_incident_enrichment import VerifiedLinkMaster, normalize_incident
+from common.traffic_incident_policy import policy
 from common.traffic_incident_runtime import supervise
 
 JOB = "traffic_incident_silver"
@@ -47,15 +48,6 @@ def load_master(env):
                                    env.get("TRAFFIC_LINK_MASTER_SHA256", "").strip())
 
 
-def policy(env):
-    values = (int(env.get("TRAFFIC_INCIDENT_STALE_SECONDS", "2700")),
-              int(env.get("TRAFFIC_LINK_COORD_TOLERANCE_METERS", "200")),
-              int(env.get("TRAFFIC_NEARBY_MAX_METERS", "100")))
-    if not 900 <= values[0] <= 86400 or not 10 <= values[1] <= 2000 or not 10 <= values[2] <= 1000:
-        raise ValueError("traffic incident stale/distance policy is out of range")
-    return values
-
-
 def enrich_batch(batch, master, stale_seconds, direct_tolerance, nearby_max):
     values = batch.filter(F.col("eventType") == "traffic.incident").select("rawEventJson").collect()
     unique, rows = {}, []
@@ -89,8 +81,8 @@ def redis_rows(df):
 
 def main():
     logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    incident_policy = policy(os.environ)
     settings, target = Settings.from_env(), output_uri(os.environ)
-    stale, tolerance, nearby = policy(os.environ)
     master = load_master(os.environ)
     if not master.available:
         log.warning("Verified traffic link master is unavailable; no DIRECT/NEARBY mapping will be produced")
@@ -98,7 +90,13 @@ def main():
     events = read_events_stream(spark, settings, TOPIC)
 
     def normalize(frame):
-        return enrich_batch(frame, master, stale, tolerance, nearby)
+        return enrich_batch(
+            frame,
+            master,
+            incident_policy.stale_seconds,
+            incident_policy.direct_tolerance_meters,
+            incident_policy.nearby_max_meters,
+        )
 
     def redis_batch(frame, batch_id):
         normalized = normalize(frame).cache()

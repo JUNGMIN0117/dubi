@@ -1,5 +1,17 @@
 # 조건부 출발시간 추천 — 팀 작업 안내
 
+## 2026-09-17 BE 계약 정정
+
+사용자가 지정한 [카카오맵 공식 도보 문서](https://developers.kakao.com/docs/ko/kakaomap/rest-api#walking)를 기준으로 `GET https://dapi.kakao.com/v2/routing/walk`를 사용한다. 이전 제휴 API·service·priority·default_speed 설명은 이 정정으로 대체한다. REST API 키와 `start_x/start_y/end_x/end_y`, WGS84, `route_mode=SHORTEST`를 사용하며 운영 기본값은 OFF다.
+
+- `durationSource`: `KAKAO_WALKING_API`, `PUBLIC_TRANSIT_STEP`, `PROVIDER_TOTAL_FALLBACK`, `ML_PREVIEW`, `TIMETABLE`. 최종 계산에 사용된 출처를 표시한다.
+- `endpointEvidence`: nullable 객체. `verified`, `source`, `masterVersion`, `mappingVersion`, `policyVersion`, `distanceMeters`, `coordinateType`, `judgment`, `reason`을 보존한다. HTTP 실패와 좌표 검증 실패는 구분한다.
+- `legRole`: `ACCESS_WALK`, `TRANSFER_WALK`, `EGRESS_WALK`, `RIDE`. 승하차 없는 WALK는 표시상 `ACCESS_WALK`로 정규화하고 `WALK_NO_TRANSIT_ENDPOINT`로 별도 API 호출을 생략한다.
+- provider 전체시간 fallback에서는 개별 `segments[].durationSeconds=null`이다. 전체 `durationSeconds`를 구간별로 중복 배분하지 않는다.
+- `causes`: `eventId`, `source`, `segmentIds`, `effect`, `confirmed`를 최종 BE 계약으로 유지한다. `effect=BLOCKED|POTENTIAL_IMPACT`이며 `confirmed`는 실제 영향 검증 결과다. FE !147 최신 파서는 이 필드들의 호환 읽기를 지원한다. 확인되지 않은 설명·사건 revision은 만들어 넣지 않는다.
+
+기계 계약과 비어 있지 않은 도보·사건 예제는 `docs/contracts/schedule-evaluation-v2.schema.json`, `docs/contracts/examples/conditional-departure/details/`를 따른다. 상세 검증·DT 소비 조건은 `docs/contracts/conditional-departure-be-runtime.md`에 기록한다.
+
 ## 이번에 무엇을 바꾸나요?
 
 지금은 사용자가 입력한 일정 시작시각과 경로의 전체 소요시간을 이용해 출발시각을 단순하게 보여 주는 부분이 있습니다.
@@ -296,7 +308,7 @@ BE/ML은 이 예제를 읽는 테스트를 먼저 만듭니다.
 
 팀원이 전체 흐름을 이해할 때는 이 문서를 사용합니다. 실제 구현 내용을 AI나 개발 도구에 전달할 때는 아래 상세 문서를 함께 사용합니다.
 
-- `docs/handoffs/conditional-departure-integration.md`
-- `docs/handoffs/conditional-departure-fe.md`
-- `docs/handoffs/conditional-departure-be-ml.md`
-- `docs/handoffs/conditional-departure-dt.md`
+- `docs/MVP_plan/conditional-departure-integration.md`
+- `docs/MVP_plan/conditional-departure-fe.md`
+- `docs/MVP_plan/conditional-departure-be-ml.md`
+- `docs/MVP_plan/conditional-departure-dt.md`

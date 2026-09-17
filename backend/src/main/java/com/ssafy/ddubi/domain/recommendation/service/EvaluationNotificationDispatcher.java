@@ -29,7 +29,7 @@ public class EvaluationNotificationDispatcher {
         try {
             var original=store.read(delivery.json(),NotificationCommand.class);
             var command=new NotificationCommand(original.userId(),original.scheduleId(),original.recommendationId(),
-                    original.type(),original.title(),original.body(),delivery.dedup());
+                    original.type(),original.title(),original.body(),delivery.dedup(),original.evaluationId(),original.decision());
             if(!outbox.current(delivery,java.time.Instant.now())) { outbox.finish(delivery,"CANCELED",null,java.time.Instant.now()); return; }
             var prepared=notifications.prepareForOutbox(command,delivery.notificationId());
             if(!outbox.attach(delivery,prepared.notification().getId())) return;

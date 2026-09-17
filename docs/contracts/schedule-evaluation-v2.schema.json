@@ -369,18 +369,110 @@
                   "ACCESS_WALK",
                   "TRANSFER_WALK",
                   "EGRESS_WALK",
-                  "RIDE",
-                  "WALK_ONLY"
+                  "RIDE"
                 ]
               },
               "durationSeconds": {
-                "type": "integer",
+                "type": [
+                  "integer",
+                  "null"
+                ],
                 "minimum": 0
               },
               "durationSource": {
-                "type": "string"
+                "enum": [
+                  "KAKAO_WALKING_API",
+                  "PUBLIC_TRANSIT_STEP",
+                  "PROVIDER_TOTAL_FALLBACK",
+                  "ML_PREVIEW",
+                  "TIMETABLE"
+                ]
               },
               "endpointEvidence": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "verified": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "masterVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "mappingVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "policyVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "coordinateType": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "judgment": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "distanceMeters": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "verified",
+                  "source",
+                  "masterVersion",
+                  "mappingVersion",
+                  "policyVersion",
+                  "coordinateType",
+                  "judgment",
+                  "reason",
+                  "distanceMeters"
+                ],
+                "additionalProperties": false
+              },
+              "mode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fromName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "toName": {
                 "type": [
                   "string",
                   "null"
@@ -393,7 +485,10 @@
               "legRole",
               "durationSeconds",
               "durationSource",
-              "endpointEvidence"
+              "endpointEvidence",
+              "mode",
+              "fromName",
+              "toName"
             ],
             "additionalProperties": false
           }

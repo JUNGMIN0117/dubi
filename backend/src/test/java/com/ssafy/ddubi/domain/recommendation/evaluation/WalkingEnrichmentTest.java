@@ -75,4 +75,70 @@ class WalkingEnrichmentTest {
         var output=service(r->{throw new AssertionError("호출 금지");}).prepare(List.of(route(0)),origin,destination,now,points(null));
         assertThat(output.evidence().fallbackReasons()).contains("WALK_ENDPOINT_UNVERIFIED");
     }
+
+    @Test void walkingOnlyNormalizesRoleWithoutInventingBoardingEndpoint() {
+        var route=new RouteCandidate(0,RouteType.BUS,50,60,0,null,0,0,List.of(walk(1)));
+        var output=service(r->{throw new AssertionError("호출 금지");}).prepare(List.of(route),origin,destination,now,List.of());
+        assertThat(output.evidence().legs().get(0).legRole()).isEqualTo("ACCESS_WALK");
+        assertThat(output.evidence().fallbackReasons()).contains("WALK_NO_TRANSIT_ENDPOINT");
+    }
+
+    @Test void verifiedEndpointRemainsStructuredWhenHttpFails() {
+        var output=service(r->new WalkingRouteClient.Evidence(null,null,null,"WALK_HTTP_403"))
+                .prepare(List.of(route(0)),origin,destination,now,points("BUS_STOP"));
+        var leg=output.evidence().legs().get(0);
+        assertThat(leg.durationSource()).isEqualTo("PUBLIC_TRANSIT_STEP");
+        assertThat(leg.endpointEvidence().verified()).isTrue();
+        assertThat(leg.endpointEvidence().source()).isEqualTo("OFFICIAL_FIXTURE");
+        assertThat(leg.endpointEvidence().mappingVersion()).isEqualTo("policy");
+        assertThat(output.evidence().fallbackReasons()).contains("WALK_HTTP_403");
+    }
+
+    @Test void candidateRefreshSharesBudgetAndCachedResponses() {
+        var seen=new ArrayList<WalkingRouteClient.Request>();
+        var service=new WalkingEnrichmentService(r->{seen.add(r);return new WalkingRouteClient.Evidence(90L,now.plusSeconds(60),"fixture",null);},
+                new ObjectMapper(),true,2,20,"");
+        var session=new WalkingEnrichmentService.Session();
+        service.prepare(List.of(route(0)),origin,destination,now,points("BUS_STOP"),session);
+        var repeated=service.prepare(List.of(route(0)),origin,destination,now,points("BUS_STOP"),session);
+        assertThat(seen).hasSize(2); assertThat(repeated.candidates().get(0).totalDurationSeconds()).isEqualTo(780);
+        var changed=service.prepare(List.of(route(0)),destination,origin,now,points("BUS_STOP"),session);
+        assertThat(seen).hasSize(2); assertThat(changed.evidence().fallbackReasons()).contains("WALK_CALL_BUDGET_EXHAUSTED");
+    }
+
+    @Test void dtCoordinateArtifactIsConsumedWithoutGuessingMissingEvidence(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        var json=new ObjectMapper().findAndRegisterModules();
+        var root=json.readTree(java.nio.file.Path.of("src/test/resources/conditional-departure-dt/transit-coordinates.json").toFile());
+        var artifact=new WalkingCoordinateArtifact(root);
+        assertThat(artifact.matching(route(0).segments().get(1),true,now)).isEmpty();
+        // 계약 fixture의 ID/순번을 현재 합성 노선에 맞춘다. 운영 데이터나 매핑을 생성하는 코드가 아니다.
+        var rows=((com.fasterxml.jackson.databind.node.ObjectNode)root).putArray("records");
+        for(int i=0;i<2;i++) {
+            var point=i==0?board:alight;
+            rows.addObject().put("mode","BUS").put("providerNamespace","SEOUL_BUS").put("providerRouteId","1")
+                    .put("providerStopId",String.valueOf(i+2)).put("canonicalNodeId","BUS_STOP:SEOUL_BUS:"+(i+2))
+                    .put("masterVersion","master").put("mappingStatus","EXACT").put("occurrence",1)
+                    .put("direction","FORWARD").put("coordinateType","STOP_POINT").put("source","SYNTHETIC_FIXTURE")
+                    .put("sourceRef","route=1;sequence="+(i+1)).put("longitude",point.longitude()).put("latitude",point.latitude());
+        }
+        var file=dir.resolve("coordinates.json"); json.writeValue(file.toFile(),root);
+        var service=new WalkingEnrichmentService(r->new WalkingRouteClient.Evidence(90L,now.plusSeconds(60),"fixture",null),json,true,4,20,file.toString());
+        assertThat(service.prepare(List.of(route(0)),origin,destination,now).candidates().get(0).totalDurationSeconds()).isEqualTo(780);
+        var row=(com.fasterxml.jackson.databind.node.ObjectNode)rows.get(0);
+        row.put("direction","REVERSE");
+        assertThat(new WalkingCoordinateArtifact(root).matching(route(0).segments().get(1),true,now)).isEmpty();
+        row.put("direction","FORWARD").put("validUntil",now.toString());
+        assertThat(new WalkingCoordinateArtifact(root).matching(route(0).segments().get(1),true,now)).isEmpty();
+    }
+
+    @Test void legacyStoredEvidenceRemainsReadableButDoesNotClaimNewVerification() throws Exception {
+        var leg=new ObjectMapper().readValue("""
+                {"candidateKey":"candidate-0","sequence":1,"legRole":"WALK_ONLY","durationSeconds":60,
+                 "durationSource":"KAKAO_TRANSIT","endpointEvidence":"EXACT:source:master:BUS_STOP"}
+                """,WalkingEnrichmentService.Leg.class);
+        assertThat(leg.legRole()).isEqualTo("ACCESS_WALK");
+        assertThat(leg.durationSource()).isEqualTo("PUBLIC_TRANSIT_STEP");
+        assertThat(leg.endpointEvidence().verified()).isFalse();
+        assertThat(leg.endpointEvidence().reason()).isEqualTo("LEGACY_ENDPOINT_EVIDENCE");
+    }
 }

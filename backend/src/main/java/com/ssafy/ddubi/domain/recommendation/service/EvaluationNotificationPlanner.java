@@ -137,6 +137,8 @@ public class EvaluationNotificationPlanner {
                 .title(title)
                 .body(outcome.preview()!=null&&!outcome.preview().productionReady()?"[검증용] "+body:body)
                 .suppressKey(suppressKey)
+                .evaluationId(outcome.evaluationId())
+                .decision(outcome.conditional()==null?null:outcome.conditional().decision().name())
                 .build();
     }
 

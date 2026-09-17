@@ -44,7 +44,7 @@ public class EvaluationOutboxStore {
     }
     /** 전송 직전 읽기. 조회 이후의 사용자 변경과 외부 발송 사이에는 원자성 보장이 없음을 운영 계약에 명시한다. */
     public boolean current(long id,Instant now) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM evaluation_notification_outbox o JOIN schedule s ON s.id=o.schedule_id JOIN schedule_evaluation e ON e.schedule_id=s.id WHERE o.id=? AND o.status IN ('PENDING','SENDING') AND s.status='UPCOMING' AND s.journey_state='NOT_STARTED' AND s.input_revision=o.input_revision AND e.event_revision=o.event_revision AND e.stopped=false AND o.valid_until>?)",Boolean.class,id,ts(now)));
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM evaluation_notification_outbox o JOIN schedule s ON s.id=o.schedule_id JOIN schedule_evaluation e ON e.schedule_id=s.id WHERE o.id=? AND o.status IN ('PENDING','SENDING') AND s.status='UPCOMING' AND s.journey_state='NOT_STARTED' AND s.input_revision=o.input_revision AND e.event_revision=o.event_revision AND e.stopped=false AND JSON_UNQUOTE(JSON_EXTRACT(e.result_json,'$.evaluationId'))=o.evaluation_id AND s.arrive_by>? AND o.valid_until>?)",Boolean.class,id,ts(now),ts(now)));
     }
     /** 만료 lease를 다른 worker가 회수한 뒤에는 이전 worker가 외부 발송을 시작하지 못한다. */
     public boolean current(Delivery d,Instant now) {

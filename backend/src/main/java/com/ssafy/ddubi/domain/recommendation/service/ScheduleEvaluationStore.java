@@ -143,11 +143,16 @@ public class ScheduleEvaluationStore {
         Instant validUntil=ScheduleEvaluationV2.validity(outcome.conditional(),outcome.evidence(),outcome.checkedAt(),nextAt);
         jdbc.update("UPDATE schedule_evaluation SET input_revision=?,valid_until=?,failure_count=0,failed_input_revision=NULL,retry_exhausted=false WHERE schedule_id=?",
                 job.inputRevision(),ts(validUntil),job.scheduleId());
+        // 같은 입력 revision이어도 새 평가가 기존 제안을 대체하면 이전 대기/발송 lease는 무효다.
+        jdbc.update("UPDATE evaluation_notification_outbox SET status='CANCELED',lease_token=NULL,lease_until=NULL WHERE schedule_id=? AND status IN ('PENDING','SENDING')",job.scheduleId());
         if(notificationJson!=null && notificationKey!=null) {
             String dedup=java.util.HexFormat.of().formatHex(digest(job.scheduleId()+":"+job.inputRevision()+":"+job.eventRevision()+":"+notificationKey));
             jdbc.update("INSERT IGNORE INTO evaluation_notification_outbox(schedule_id,evaluation_id,input_revision,event_revision,dedup_key,payload_json,next_attempt_at,valid_until,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
                     job.scheduleId(),job.token(),job.inputRevision(),job.eventRevision(),dedup,notificationJson,ts(now),ts(validUntil),ts(now));
-            // 新 outbox로 이행한 결과는 legacy dispatcher 대상에서 제거하여 이중 발송을 막는다.
+            // 아직 보내지 못한 같은 의미의 알림은 최신 평가로 교체한다. SENT와 소진한 재시도는 되살리지 않는다.
+            jdbc.update("UPDATE evaluation_notification_outbox SET evaluation_id=?,payload_json=?,valid_until=?,status='PENDING' WHERE dedup_key=? AND status='CANCELED' AND attempts<5",
+                    job.token(),notificationJson,ts(validUntil),dedup);
+            // 새 outbox로 이행한 결과는 legacy dispatcher 대상에서 제거하여 이중 발송을 막는다.
             jdbc.update("UPDATE schedule_evaluation SET notification_json=NULL,notification_key=NULL WHERE schedule_id=?",job.scheduleId());
         }
         return saved;

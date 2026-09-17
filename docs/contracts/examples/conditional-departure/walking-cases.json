@@ -89,5 +89,7 @@
       "providerCalls": 0,
       "fallbackReason": "STATION_CENTER_ONLY"
     }
-  ]
+  ],
+  "api": "kakaomap-walk-v2",
+  "endpointPolicy": "walk-endpoint-v2"
 }

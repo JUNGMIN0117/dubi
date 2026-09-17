@@ -108,7 +108,7 @@ public class ConditionalDepartureEvaluator {
         }
         Result best = policy.best();
         MlRoutePreview.Comparison bestComparison=initial;
-        boolean complete = !initial.budgetExhausted();
+        boolean complete = !initial.budgetExhausted() && count<=maxEvaluations && System.nanoTime()<budgetEnd;
         for (Instant at : times) {
             if (at.equals(effective)) continue;
             if (count+candidateCount>maxEvaluations || System.nanoTime()>=budgetEnd) { complete=false; break; }

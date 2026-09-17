@@ -228,6 +228,8 @@ public class NotificationService {
         Map<String, String> data = new HashMap<>();
         data.put("notificationId", String.valueOf(notification.getId()));
         data.put("type", command.type().name());
+        if (command.evaluationId() != null) data.put("evaluationId", command.evaluationId());
+        if (command.decision() != null) data.put("decision", command.decision());
         if (command.scheduleId() != null) {
             data.put("scheduleId", String.valueOf(command.scheduleId()));
         }

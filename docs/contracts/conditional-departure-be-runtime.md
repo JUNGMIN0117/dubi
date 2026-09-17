@@ -32,7 +32,7 @@
 
 - KEEP: `targetArriveAt=D`, buffer 0, `meetsAdjustedTarget=null`이다. 내부 순수 정책의 target=null과 외부 표시 계약을 혼동하지 않는다.
 - 조정: `targetArriveAt=D-600초`, buffer 600이다. Client가 ETA나 출발시각에 10분을 다시 가산/차감하면 안 된다.
-- 도보 역할: `ACCESS_WALK`, `TRANSFER_WALK`, `EGRESS_WALK`, `RIDE`. 대중교통 승하차가 없는 후보에는 추가 역할 `WALK_ONLY`를 사용하며 제휴 접근·이탈 보강 대상에서 제외한다.
+- 도보 역할: `ACCESS_WALK`, `TRANSFER_WALK`, `EGRESS_WALK`, `RIDE`. 대중교통 승하차가 없는 WALK는 `ACCESS_WALK`로 정규화하고 `WALK_NO_TRANSIT_ENDPOINT`로 별도 호출을 생략한다.
 - 도보 적용 여부는 호출 성공뿐 아니라 최종 타임라인에 교체 시간이 적용됐는지 확인한다. `costCoverage`는 비용 분해 범위이지 예측 정확도 보장이 아니다.
 - v1 저장 JSON은 v1로 계속 읽는다. conditional 결과가 없는 구형 JSON을 v2 READY로 가장하지 않고 v2에서는 PENDING으로 반환한다.
 - `quality.preview=true`, `productionEligible=false`가 현재 기본 실행 결과다. 미래 production 승인을 이 MR이 대신하지 않는다.
@@ -52,7 +52,7 @@
 | 도로 사건 | DT road mapping artifact + `road:incidents:{namespace}:{linkId}` hash | artifact SHA256/masterVersion/namespace/direction/occurrence/적용 기간, 사건 eventId/collectedAt/startsAt/expectedEndsAt. raw 사건은 잠재 영향으로 표시. FULL/EXACT 증거 없는 사건을 임의 BLOCKED/지연초로 승격하지 않음 |
 | 버스 ML | 기존 `/v1/bus/predictions:batch`, ml-serving runtime | provider namespace/노선·정류장 pair/순번/service_date/hour_slot. 모델 version, 지원 날짜, computed_at, mean_seconds, missing/history/data_insufficient. 부분 edge 실패는 전체 step API fallback. 모델 버전 혼합은 평가 전체 무효화 |
 | 도보 endpoint 좌표 | **DT가 별도로 제공해야 하는** 공식 정류장/역 출입구 artifact | 아래 MasterPoint 필드. EXACT 매핑과 path endpoint, 방향·연속 순번이 모두 검증돼야 사용. 역 중심은 출입구로 바꾸지 않음 |
-| 별도 도보시간 | **권한·실제 응답 fixture가 필요한** 카카오모빌리티 제휴 도보 API | 이 MR은 `WalkingRouteClient` port와 fake/fallback만 제공. 검증된 adapter가 초 단위 seconds, validUntil, source/reason으로 변환해야 함. 비활성/403/429/timeout/빈 응답은 기존 WALK 유지 |
+| 별도 도보시간 | 카카오맵 공식 `GET /v2/routing/walk` | `KakaoWalkingRouteClient`가 `status=OK`, 정수 `totalTime`(초), `totalDistance`(미터)를 검증. 비활성/403/429/timeout/빈 응답은 기존 WALK 유지 |
 
 좌표 artifact의 합성 형식:
 
@@ -78,10 +78,10 @@ DT는 `redis-keys.yaml`, `events/*.schema.json`, 기존 transit/time-table 계�
 | `ddubi.recommendation.readonly-per-minute` | 6 | 사용자별 조회 API 비용 제한 |
 | `ddubi.recommendation.auto-notify-enabled` | false | 자동 알림 |
 | `ddubi.recommendation.shadow-preview-notify-enabled` | false | 검증용 알림 허용. 켜면 `[검증용]` 본문 |
-| `ddubi.walking.enabled` | false | 제휴 도보 사용 의도. adapter/좌표 검증까지 통과해야 적용 |
-| `ddubi.walking.max-calls` | 4 | 보강 준비 1회 호출 예산, 최대 32. 후보 재검색이 1회 일어나면 새 준비 session 사용 |
+| `ddubi.walking.enabled` | false | 공식 카카오맵 도보 사용. 키/좌표/비용 검증까지 통과해야 적용 |
+| `ddubi.walking.max-calls` | 4 | 일정 평가 전체 호출 예산, 최대 32. 후보 재검색도 같은 session/cache 사용 |
 | `ddubi.walking.endpoint-max-meters` | 0 | 0이면 검증 비활성. corpus로 합의한 값만 설정 |
-| `ddubi.walking.master-coordinate-path` | 빈 값 | MasterPoint JSON 배열 파일. 32 MiB 상한 |
+| `ddubi.walking.master-coordinate-path` | 빈 값 | DT transit-coordinate-v1 객체 또는 이전 MasterPoint 배열. 32 MiB 상한 |
 | `ddubi.bus-waiting.decomposition-verified` | false | 이동/대기 비용 분해 검증 후 켬 |
 | `ddubi.subway-timing.decomposition-verified` | false | 지하철 이동/대기 비용 분해 검증 후 켬 |
 
@@ -125,10 +125,62 @@ JSON 검증은 Python `jsonschema==4.26.0`이 필요하다. Java `ScheduleEvalua
 
 | 담당 | 필요한 작업 | 현재 동작 |
 |---|---|---|
-| BE/제휴 담당 | 카카오 도보 제휴 승인, service/key, 실제 응답 fixture, timeout/쿼터 정책 확인 후 adapter 구현 | 기본 OFF, port/fake/명시적 fallback |
+| BE/운영 담당 | 공식 REST API 키의 실제 호출 권한/쿼터, endpoint 거리 corpus 확인 | adapter 구현 완료, 기본 OFF와 검증된 endpoint만 사용 |
 | DT | 공식 endpoint 좌표·버전·의미, EXACT crosswalk, 검증된 운행표/실시간/도로 artifact 제공 | 결측·stale·모호한 매핑은 미적용/품질 저하 |
 | ML/DT | 지원 날짜·학습 ID·feature snapshot manifest, 승인 데이터와 운영 모델 승인 | PREVIEW 표시·저장, 수락 차단 |
 | FE | 기본 v2와 상태/새 nullable 필드/알림 notificationId 소비, Client 자체 역산 제거 | 이 MR에서 Flutter 변경 없음 |
 | PM·전 파트 | FE/BE/DT 동일 fixture의 화면 E2E, 실제 제공자 corpus, 후보 수·worker 수·외부 호출을 고정한 p95 부하 시험 | 로컬 합성/DB/HTTP 회귀 검증과 구분. 운영 성능·전체 팀 연동 완료로 간주하지 않음 |
 
 실데이터가 필요한 `BusPreviewLiveModelTest`, `CapturedTransitFlowIntegrationTest`, `MappingCorpusReplayTest`는 해당 URL/corpus 설정 없이 자동 활성화하지 않는다. CI 통과·리뷰 승인 후 MR을 병합한다.
+
+## 2026-09-17 MR 재검토와 수정
+
+MR !146 (`d9a2bac` 기준)의 GitLab 병합 검사는 draft 외 충돌이 없었다. 대상은 현재 `dt/dev`이며 임의로 바꾸지 않았다. !147(`37f2160f`)의 FE 파서, !148의 DT exporter/schema/fixture, !141의 알림 변경 파일을 대조했다. FE/DT 제품 코드는 수정하지 않았다. !141은 기존 알림 command builder를 그대로 사용할 수 있다.
+
+### 공개 계약
+
+- 실제 적용된 도보는 `KAKAO_WALKING_API`, 원본 step은 `PUBLIC_TRANSIT_STEP`이다. 전체시간 fallback은 `PROVIDER_TOTAL_FALLBACK`이고 개별 구간 시간은 null이다. ML/지하철 시간표 적용 시 `ML_PREVIEW`/`TIMETABLE`과 실제 구간 시간을 반환한다.
+- `endpointEvidence`는 nullable 객체다. 검증 여부, 공식 출처, master/mapping/policy 버전, 비교 거리, 좌표 의미, 판단과 미검증 사유를 보존한다. API 403이어도 좌표 검증 성공 근거를 문자열 오류로 덮지 않는다.
+- `WALK_ONLY`는 공개 enum에서 제거했다. 과거 저장 JSON의 이 enum·출처명·문자열 endpointEvidence도 읽되 객체로 변환하고 재검증한 것으로 표시하지 않는다.
+- `causes`는 `{eventId, source, segmentIds, effect, confirmed}`다. `BLOCKED`는 확인된 통제, `POTENTIAL_IMPACT`는 잠재 영향이다. 같은 사건의 여러 구간을 묶고 중복 시간 가산은 하지 않는다. 최신 FE !147은 eventId/segmentIds/effect/confirmed를 읽는다. reasonCode/description/revision은 BE가 확인한 원천이 없으므로 임의 생성하지 않는다.
+- `examples/conditional-departure/details/`의 성공·403 fallback·provider total·confirmed cause 예제는 실제 Java DTO에서 생성한다. JSON Schema는 과거 문자열 evidence와 잘못된 enum을 거부한다.
+- FCM payload에 `evaluationId`, `decision`을 추가했다. 새 평가 완료 시 이전 대기/전송 lease를 취소하고, 미전송인 동일 의미 알림만 최신 평가로 교체한다. 발송 완료와 소진된 재시도는 다시 열지 않는다.
+
+### 공식 도보 설정
+
+공식 근거: https://developers.kakao.com/docs/ko/kakaomap/rest-api#walking (2026-09-17 확인).
+
+`GET https://dapi.kakao.com/v2/routing/walk`에 `start_x/start_y/end_x/end_y`, `input_coord=output_coord=WGS84`, `route_mode=SHORTEST`를 전송한다. 기존 `KAKAO_REST_API_KEY`를 KakaoAK 헤더로 재사용한다. 과거 계획서의 affiliate endpoint와 service/priority/default_speed는 사용하지 않는다.
+
+추가 설정은 `ddubi.walking.timeout-millis=1500`(연결/읽기 각각), `cache-seconds=60`(BE 정책 TTL, provider 보장 아님)이다. `DDUBI_WALKING_ENABLED`, `DDUBI_WALKING_ENDPOINT_MAX_METERS`, `DDUBI_WALKING_MASTER_COORDINATE_PATH` 환경변수로 켠다. 승인되지 않은 거리 임계값을 코드에서 자동 선택하지 않는다. 좌표 반올림 없는 session cache를 사용하며 재검색도 호출 예산 4회를 공유한다.
+
+403·429·timeout·5xx·비정상 status·빈/깨진 응답은 기존 WALK로 돌아간다. 429는 Retry-After(초/HTTP date)까지 이후 호출을 생략하고 즉시 재시도하지 않는다. `ddubi.walking.requests{result}`와 actuator `kakaoWalkingRouteClient` health 상세에 상태를 제공한다. 선택적 도보 장애가 전체 대중교통 readiness를 내리지 않는다. 실제 유료 API 호출과 운영 활성화는 이 변경의 테스트에 포함하지 않았다.
+
+### DT 소비 결과와 필요한 보완
+
+- !148 `transit-coordinate-v1` 객체를 직접 읽는다. schema/좌표계, masterVersion, EXACT, 노선/namespace, 방향, sourceRef의 공식 sequence, 유효기간, path 거리와 유일성을 검사한다.
+- DT `BUS_STOP:{namespace}:{id}`와 BE canonical 구성요소는 기존 CanonicalSegmentIdFactory로 명시적으로 변환한다. `SUBWAY_STATION:{id}`는 정적 역 ID와 확인된 providerLineId로 대조한다. 이름 기반 연결은 하지 않는다.
+- SEQUENCE_FORWARD는 원천 상·하행 코드가 아니므로 단일 검증 버스 대안의 원본 stop.direction을 확인한다. 방향/순번이 없거나 중심점뿐이면 호출하지 않는다. DT에는 이 필드와 역 출입구 좌표 보강이 필요하다.
+- !148의 실제 Spark bus_stream_sink는 providerIds/observation/occurredAt을 만든다. 제공된 redis-bus-arrival.json 예제는 평면 구조이고 stopOrder도 없어 현재 안전한 소비를 통과하지 못한다. 해당 원본 fixture를 Backend 테스트에 고정하고 `BUS_WAIT_IDENTITY_OR_UNIT_UNVERIFIED`로 거부함을 검증했다. DT는 실제 sink와 일치하는 stopOrder 포함 fixture를 제공해야 한다.
+- copied fixture는 `backend/src/test/resources/conditional-departure-dt/`에 원본 그대로 보존했다. 운영 데이터가 아니다.
+
+### BE/ML 작업서 재점검
+
+| 범위 | 결과 / 확인 근거 |
+|---|---|
+| P/D 정책, 탐색 | 기존 순수 정책·불연속 출발 재평가 유지. 초기 평가가 예산을 이미 초과한 경우에도 SEARCH_INCOMPLETE 보존 |
+| 공통 여정 계산 | JourneyEvaluationService/세션/전체 BUS step fallback/모델 버전 혼합 차단 유지. 공개 구간 시간·출처를 실제 타임라인에 맞춤 |
+| 도보 | 실제 공식 adapter, DT 좌표 소비, 객체 근거, 역할 정규화, 비용 교체, 세션 예산·재사용 구현 |
+| 저장·수락·v1 | V7/V8 그대로 유지. 새 migration 불필요. input/event revision·lease·validity·PREVIEW 수락 차단과 구형 JSON 호환 유지 |
+| 알림 | payload 평가 식별자 보완, 같은 revision의 구형 outbox 차단. 기본 자동알림 OFF 유지 |
+| ML runtime | 고정 requirements로 45 passed/1 skipped. FastAPI 현재 runtime의 422 설명에 맞게 공개 OpenAPI 두 설명 수정 |
+| 데이터·운영 승인 | ML/DT 미확보 버전을 추측하지 않음. 지원 기간/production_ready 검증과 PREVIEW 유지. 실제 키·DT 원천·PM 화면 E2E·부하 p95는 별도 운영 검증 |
+
+기존 ML 배치 endpoint는 여정 edge 진입시각이 순차 의존하므로 session cache를 공유하며 순차 호출한다. 모델/feature version의 실제 운영 승인, independent edge 배치 최적화와 원천 corpus 확보는 완료로 주장하지 않는다.
+
+### 2026-09-17 검증
+
+- JDK 17에서 로컬 실행 가능한 BE 테스트 260개: 실패/오류 0, 조건부 skip 2개. Docker가 필요한 MySQL/Redis 통합 테스트는 GitLab backend-test에서 확인한다.
+- 고정 개발 의존성으로 ML 테스트 45 passed, 1 skipped. 실제 모델 자료가 필요한 테스트는 활성화하지 않았다.
+- 공개 응답 fixture 13개와 실제 Java DTO 상세 fixture 4개가 JSON Schema 검증을 통과했다. 잘못된 도보 enum·문자열 evidence의 거부도 확인했다.
+- DT !148은 작업 중 dt/dev에 병합되었다. 최신 대상 브랜치를 반영하여 기존 MR !146에서 검증한다.

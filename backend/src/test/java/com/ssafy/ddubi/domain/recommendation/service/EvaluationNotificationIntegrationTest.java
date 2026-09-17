@@ -139,6 +139,25 @@ class EvaluationNotificationIntegrationTest extends IntegrationTestSupport {
         dispatch(); org.mockito.Mockito.verifyNoInteractions(pushSender);
     }
 
+    @Test void replacementEvaluationUpdatesPendingPayloadAndRejectsPreviousLease() {
+        schedule(600);
+        var first=workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
+        long id=jdbc.queryForObject("SELECT id FROM evaluation_notification_outbox",Long.class);
+        var previous=outbox.claim(id,Instant.now());
+        var latest=workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(1));
+        assertThat(latest.evaluationId()).isNotEqualTo(first.evaluationId());
+        assertThat(outbox.current(previous,Instant.now())).isFalse();
+        assertThat(jdbc.queryForObject("SELECT evaluation_id FROM evaluation_notification_outbox",String.class)).isEqualTo(latest.evaluationId());
+        when(pushSender.send(any())).thenAnswer(call->{
+            var message=call.getArgument(0,com.ssafy.ddubi.global.push.PushMessage.class);
+            assertThat(message.data()).containsEntry("evaluationId",latest.evaluationId())
+                    .containsEntry("decision",latest.conditional().decision().name()).containsKey("notificationId");
+            return PushResult.ok();
+        });
+        dispatch();
+        assertThat(sent()).singleElement().satisfies(n->assertThat(n.getStatus()).isEqualTo(NotificationStatus.SENT));
+    }
+
     @Test void expiredWorkerCannotSendOrAckReclaimedLease() {
         schedule(600); workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
         long id=jdbc.queryForObject("SELECT id FROM evaluation_notification_outbox",Long.class);

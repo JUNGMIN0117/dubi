@@ -29,7 +29,23 @@ def main():
     http = root / "backend/target/conditional-departure-http.json"
     if http.exists():
         validator.validate(read(http))
-    print("PASS: %d response fixtures, HTTP artifact=%s" % (len(responses), http.exists()))
+    details = sorted((contracts / "examples/conditional-departure/details").glob("*.json"))
+    assert len(details) == 4, "도보 성공/실패/전체시간 fallback/사건 근거 예제가 필요합니다."
+    for path in details:
+        value = read(path)
+        validator.validate(value)
+        generated = root / "backend/target/conditional-departure-details" / path.name
+        if generated.exists():
+            assert value == read(generated), "Java 상세 DTO와 예제가 다릅니다: " + path.name
+    # 비어 있는 배열 예제만으로는 계약 타입 오류를 잡을 수 없으므로 이전 잘못된 계약도 명시적으로 거부한다.
+    import copy
+    value = read(contracts / "examples/conditional-departure/details/walking-applied.json")
+    for field, invalid in [("endpointEvidence", "EXACT:old"), ("legRole", "WALK_ONLY"),
+                           ("durationSource", "KAKAO_AFFILIATE_WALKING"), ("durationSource", "KAKAO_TRANSIT")]:
+        broken = copy.deepcopy(value)
+        broken["segments"][0][field] = invalid
+        assert not validator.is_valid(broken), "잘못된 도보 계약을 허용했습니다: " + field
+    print("PASS: %d response fixtures, %d detail fixtures, HTTP artifact=%s" % (len(responses), len(details), http.exists()))
 
 
 if __name__ == "__main__":

@@ -22,15 +22,17 @@ public class ScheduleEvaluationScheduler {
     private final ScheduleEvaluationWorkflow workflow;
     private final EvaluationNotificationDispatcher dispatcher;
     private final JdbcTemplate jdbc;
+    private final EvaluationOutboxStore outbox;
 
     public ScheduleEvaluationScheduler(ScheduleEvaluationStore store, ScheduleEvaluationWorkflow workflow,
-            EvaluationNotificationDispatcher dispatcher, JdbcTemplate jdbc) {
-        this.store = store; this.workflow = workflow; this.dispatcher = dispatcher; this.jdbc = jdbc;
+            EvaluationNotificationDispatcher dispatcher, JdbcTemplate jdbc, EvaluationOutboxStore outbox) {
+        this.store = store; this.workflow = workflow; this.dispatcher = dispatcher; this.jdbc = jdbc; this.outbox=outbox;
     }
 
     /** 기본 15초는 due 목록 확인 간격이며 각 일정의 10/5/1분 재평가 간격과 다르다. */
     @Scheduled(fixedDelayString="${ddubi.recommendation.scheduler-delay-ms:15000}", initialDelayString="${ddubi.recommendation.scheduler-delay-ms:15000}")
     public void tick() {
+        for(Long id:outbox.due(Instant.now())) dispatcher.dispatchOutbox(id);
         for (Long id : store.due(Instant.now())) {
             try { workflow.evaluate(id, null, TriggerType.REFRESH, Instant.now()); }
             catch (RuntimeException failure) { log.warn("일정 평가 실패 scheduleId={} type={}", id, failure.getClass().getSimpleName()); }

@@ -1,5 +1,17 @@
 # 조건부 출발 조정 3파트 통합 계약
 
+## 2026-09-17 BE 계약 정정
+
+사용자가 지정한 [카카오맵 공식 도보 문서](https://developers.kakao.com/docs/ko/kakaomap/rest-api#walking)를 기준으로 `GET https://dapi.kakao.com/v2/routing/walk`를 사용한다. 이전 제휴 API·service·priority·default_speed 설명은 이 정정으로 대체한다. REST API 키와 `start_x/start_y/end_x/end_y`, WGS84, `route_mode=SHORTEST`를 사용하며 운영 기본값은 OFF다.
+
+- `durationSource`: `KAKAO_WALKING_API`, `PUBLIC_TRANSIT_STEP`, `PROVIDER_TOTAL_FALLBACK`, `ML_PREVIEW`, `TIMETABLE`. 최종 계산에 사용된 출처를 표시한다.
+- `endpointEvidence`: nullable 객체. `verified`, `source`, `masterVersion`, `mappingVersion`, `policyVersion`, `distanceMeters`, `coordinateType`, `judgment`, `reason`을 보존한다. HTTP 실패와 좌표 검증 실패는 구분한다.
+- `legRole`: `ACCESS_WALK`, `TRANSFER_WALK`, `EGRESS_WALK`, `RIDE`. 승하차 없는 WALK는 표시상 `ACCESS_WALK`로 정규화하고 `WALK_NO_TRANSIT_ENDPOINT`로 별도 API 호출을 생략한다.
+- provider 전체시간 fallback에서는 개별 `segments[].durationSeconds=null`이다. 전체 `durationSeconds`를 구간별로 중복 배분하지 않는다.
+- `causes`: `eventId`, `source`, `segmentIds`, `effect`, `confirmed`를 최종 BE 계약으로 유지한다. `effect=BLOCKED|POTENTIAL_IMPACT`이며 `confirmed`는 실제 영향 검증 결과다. FE !147 최신 파서는 이 필드들의 호환 읽기를 지원한다. 확인되지 않은 설명·사건 revision은 만들어 넣지 않는다.
+
+기계 계약과 비어 있지 않은 도보·사건 예제는 `docs/contracts/schedule-evaluation-v2.schema.json`, `docs/contracts/examples/conditional-departure/details/`를 따른다. 상세 검증·DT 소비 조건은 `docs/contracts/conditional-departure-be-runtime.md`에 기록한다.
+
 ## 1. 목적과 적용 기준
 
 이 문서는 조건부 출발 조정 기능을 FE, BE/ML, DT 세 담당자가 병렬로 구현한 뒤 PM 로컬 통합 브랜치에서 바로 연결하기 위한 공통 계약이다. 세부 계산·원천 정책은 아래 문서를 기준으로 하며, 충돌 시 이 문서의 역할 경계와 최신 코드 정정 사항을 먼저 적용한다.
@@ -297,8 +309,8 @@ Backend는 Redis 키 부재를 정상으로 해석하지 않는다. DT는 빈 �
 ### FE
 
 ```text
-docs/handoffs/conditional-departure-integration.md와
-docs/handoffs/conditional-departure-fe.md를 먼저 전부 읽어라.
+docs/MVP_plan/conditional-departure-integration.md와
+docs/MVP_plan/conditional-departure-fe.md를 먼저 전부 읽어라.
 현재 FE 공식 작업 브랜치와 사용자 변경을 확인한 뒤, FE 작업서의 AI 실행 절차를 0단계부터 순서대로 수행하라.
 공통 fixture/schema를 먼저 고정하고 Client가 출발시각이나 도보시간을 자체 계산하지 않게 하라.
 Backend나 DT 파일은 수정하지 말고 필요한 계약 변경은 handoff에 기록하라.
@@ -308,8 +320,8 @@ Backend나 DT 파일은 수정하지 말고 필요한 계약 변경은 handoff�
 ### BE/ML
 
 ```text
-docs/handoffs/conditional-departure-integration.md와
-docs/handoffs/conditional-departure-be-ml.md를 먼저 전부 읽어라.
+docs/MVP_plan/conditional-departure-integration.md와
+docs/MVP_plan/conditional-departure-be-ml.md를 먼저 전부 읽어라.
 현재 BE/ML 공식 작업 브랜치, migration, 사용자 변경과 실제 호출 흐름을 확인한 뒤 AI 실행 절차를 0단계부터 순서대로 수행하라.
 schema/fixture와 순수 정책 테스트를 제품 연결보다 먼저 만들고, 접근·이탈 도보는 실제 제휴 fixture와 검증된 endpoint가 있을 때만 활성화하라.
 Collector/Spark/Flutter는 수정하지 말고 필요한 입력·계약은 handoff에 기록하라.
@@ -319,8 +331,8 @@ Collector/Spark/Flutter는 수정하지 말고 필요한 입력·계약은 hando
 ### DT
 
 ```text
-docs/handoffs/conditional-departure-integration.md와
-docs/handoffs/conditional-departure-dt.md를 먼저 전부 읽어라.
+docs/MVP_plan/conditional-departure-integration.md와
+docs/MVP_plan/conditional-departure-dt.md를 먼저 전부 읽어라.
 현재 DT 공식 작업 브랜치와 기존 수집·Spark·artifact 작업을 보존한 뒤 AI 실행 절차를 0단계부터 순서대로 수행하라.
 원천 fixture/schema와 시간·ID·버전 의미를 먼저 고정하고, 실제 통과·예측·기준선을 섞지 마라.
 Backend DB/API, Flutter, 제휴 도보 Client는 수정하지 말고 필요한 소비 계약은 handoff에 기록하라.

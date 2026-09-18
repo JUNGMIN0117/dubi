@@ -61,14 +61,18 @@ public interface SavedRouteRepository extends JpaRepository<SavedRoute, Long> {
      * <p>지난 추천이 가리키는 후보까지 지우면 "그때 무엇을 추천했는지" 기록이 깨진다.
      * 구간과 구간 간선은 경로에 매달려 있어 함께 지워진다(cascade).
      *
-     * @param before 이 시각보다 먼저 저장된 후보만 고른다. 보통 {@code now - STALE_CANDIDATE_GRACE}.
+     * <p>시각 비교는 {@code route_request.requested_at} 으로 한다. 이 값은 저장하는 쪽이 KST 로 직접
+     * 넣는 값이라 호출자의 {@code before} 와 같은 시계다. 엔티티 생성 시각({@code createdAt})은
+     * JVM 기본 시간대로 채워져 서버 설정에 따라 9시간이 어긋날 수 있어 쓰지 않는다.
+     *
+     * @param before 이 시각(KST)보다 먼저 요청된 검색분의 후보만 고른다. 보통 {@code now - STALE_CANDIDATE_GRACE}.
      */
     @Query("""
             select r from SavedRoute r
             where r.schedule.id = :scheduleId
               and r.routeRequest.id < :keepRequestId
               and r.selected = false
-              and r.createdAt < :before
+              and r.routeRequest.requestedAt < :before
               and not exists (select 1 from Recommendation c where c.route = r)
             """)
     List<SavedRoute> findStaleCandidates(@Param("scheduleId") Long scheduleId,

@@ -147,7 +147,7 @@ class MlApplyModeTest {
         var exhausted = service.compare(List.of(MlRoutePreviewTest.route(0,"1",300,0,1)), empty, now, now, now.plusSeconds(1000),
                 JourneyEvaluationService.Session.withDeadlines(nowNanos + Duration.ofSeconds(20).toNanos(), nowNanos - 1));
         assertThat(exhausted.fastest().reasons()).contains("step-1:ML_BUDGET_EXHAUSTED","step-1:ML_NOT_APPLIED:ML_BUDGET_EXHAUSTED","step-1:API_FALLBACK");
-        assertThat(exhausted.budgetExhausted()).isTrue();
+        assertThat(exhausted.budgetExhausted()).isFalse(); // 보조 ML 예산 부족이어도 전체 API 후보 계산은 완료됐다.
         verify(client, never()).predict(any());
         // 선조회가 비어 있고(mock) edge마다 개별 호출이 필요할 때 INDIVIDUAL_CALL_LIMIT까지만 부른다.
         var many = new ArrayList<com.ssafy.ddubi.domain.route.model.RouteCandidate>();
@@ -155,7 +155,7 @@ class MlApplyModeTest {
         var capped = service.compare(many, empty, now, now, now.plusSeconds(1000));
         verify(client, times(JourneyEvaluationService.INDIVIDUAL_CALL_LIMIT)).predict(any());
         assertThat(capped.candidates().stream().filter(c -> c.mlSteps()==1).count()).isEqualTo(JourneyEvaluationService.INDIVIDUAL_CALL_LIMIT);
-        assertThat(capped.budgetExhausted()).isTrue();
+        assertThat(capped.budgetExhausted()).isFalse();
     }
 
     @Test void mlCallIsNotStartedWhenTheRemainingBudgetCannotCoverOneCall() {
@@ -173,7 +173,7 @@ class MlApplyModeTest {
         verify(client, never()).predictBatch(anyList(), any());
         assertThat(result.fastest().steps().get(0).source()).isEqualTo("FALLBACK");
         assertThat(result.fastest().reasons()).contains("step-1:ML_BUDGET_EXHAUSTED","step-1:API_FALLBACK");
-        assertThat(result.budgetExhausted()).isTrue();
+        assertThat(result.budgetExhausted()).isFalse();
 
         // 같은 마감이라도 호출 제한이 짧으면(여유가 충분하면) 호출을 시작한다.
         when(client.timeoutMillis()).thenReturn(500L);

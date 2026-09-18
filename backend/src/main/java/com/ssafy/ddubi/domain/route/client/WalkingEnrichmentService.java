@@ -11,7 +11,8 @@ import static com.ssafy.ddubi.domain.route.model.RouteLegRoleClassifier.Role;
 
 /**
  * 접근·이탈 WALK를 검증된 제휴 결과로 교체한다. 환승 WALK와 provider 총시간은 중복 가산하지 않는다.
- * 공식 좌표 artifact/권한/schema가 없는 기본 환경은 기존 WALK와 명시적 실패 근거를 반환한다.
+ * 카카오 경로 끝점 또는 검증된 공식 좌표를 사용하고 출처를 구별한다. 권한/비용 분해/schema가
+ * 확인되지 않으면 기존 WALK·총시간과 실패 근거를 반환한다.
  * 캐시는 한 평가 안에서만 유지하고 좌표 반올림/장기 TTL은 실측 전 적용하지 않는다.
  */
 @Service
@@ -22,11 +23,19 @@ public class WalkingEnrichmentService {
     private final double maxMeters;
     private final List<WalkingEndpointResolver.MasterPoint> points;
     private final WalkingCoordinateArtifact artifact;
+    private final boolean providerEndpoints;
+    /** 기존 fixture는 공식 마스터 좌표 검증 정책을 유지한다. 운영은 명시적인 provider 좌표 정책을 주입한다. */
     public WalkingEnrichmentService(WalkingRouteClient client,ObjectMapper json,
-            @Value("${ddubi.walking.enabled:false}") boolean enabled,
-            @Value("${ddubi.walking.max-calls:4}") int budget,
+            boolean enabled,int budget,double maxMeters,String path) {
+        this(client,json,enabled,budget,maxMeters,path,false);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public WalkingEnrichmentService(WalkingRouteClient client,ObjectMapper json,
+            @Value("${ddubi.walking.enabled:true}") boolean enabled,
+            @Value("${ddubi.walking.max-calls:10}") int budget,
             @Value("${ddubi.walking.endpoint-max-meters:0}") double maxMeters,
-            @Value("${ddubi.walking.master-coordinate-path:}") String path) {
+            @Value("${ddubi.walking.master-coordinate-path:}") String path,
+            @Value("${ddubi.walking.provider-endpoints:true}") boolean providerEndpoints) {
         if(budget<0||budget>32||maxMeters<0||!Double.isFinite(maxMeters)) throw new IllegalArgumentException("도보 정책 범위 오류");
         this.client=client;this.enabled=enabled;this.budget=budget;this.maxMeters=maxMeters;
         List<WalkingEndpointResolver.MasterPoint> loaded=List.of();
@@ -41,6 +50,7 @@ public class WalkingEnrichmentService {
         } catch(Exception invalid) { loaded=List.of(); }
         points=List.copyOf(loaded);
         artifact=coordinateArtifact;
+        this.providerEndpoints=providerEndpoints;
     }
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
     public record Leg(String candidateKey,int sequence,String legRole,long durationSeconds,String durationSource,EndpointEvidence endpointEvidence) {
@@ -92,11 +102,25 @@ public class WalkingEnrichmentService {
         Instant validUntil=null;
         for(var route:routes) {
             var routeReasons=new LinkedHashSet<String>();
-            var roles=new RouteLegRoleClassifier().classify(route.segments());
             var transit=route.segments().stream().filter(s->s.mode()!=TransportMode.WALK).toList();
             boolean complete=route.unassignedDurationSeconds()==0 && route.totalDurationSeconds()==route.segments().stream().mapToLong(RouteSegment::durationSeconds).sum();
+            var originalRoles=new RouteLegRoleClassifier().classify(route.segments());
+            var inputSteps=new ArrayList<>(route.segments());
+            // provider에 없는 양 끝 WALK는 평가용으로만 추가한다. 미분류 잔여시간이 있으면
+            // 그 안에 도보가 포함됐는지 알 수 없으므로 원본 총시간을 보존하고 사유를 반환한다.
+            if(!transit.isEmpty()) {
+                boolean accessMissing=!originalRoles.containsValue(Role.ACCESS_WALK);
+                boolean egressMissing=!originalRoles.containsValue(Role.EGRESS_WALK);
+                if(complete && enabled) {
+                    if(accessMissing) inputSteps.add(0,syntheticWalk(0));
+                    if(egressMissing) inputSteps.add(syntheticWalk(route.segments().stream().mapToInt(RouteSegment::sequence).max().orElse(0)+1));
+                } else if(accessMissing || egressMissing) {
+                    routeReasons.add(enabled?"WALK_COST_COVERAGE_UNRESOLVED":"WALK_DISABLED");
+                }
+            }
+            var roles=new RouteLegRoleClassifier().classify(inputSteps);
             long delta=0;var steps=new ArrayList<RouteSegment>();
-            for(var step:route.segments()) {
+            for(var step:inputSteps) {
                 Role role=roles.get(step.sequence());long seconds=step.durationSeconds();String source="PUBLIC_TRANSIT_STEP";
                 EndpointEvidence endpoint=null;String fallback=null;
                 if(role==Role.ACCESS_WALK||role==Role.EGRESS_WALK) {
@@ -109,6 +133,9 @@ public class WalkingEnrichmentService {
                         var coordinates=artifact==null?master:artifact.matching(ride,access,asOf);
                         coordinates=coordinates.stream().filter(p->p.validUntil()==null||p.validUntil().isAfter(asOf)).toList();
                         var resolved=new WalkingEndpointResolver().resolve(ride,access,coordinates,maxMeters);
+                        // 카카오 경로 자체의 끝점을 사용할 때는 canonical EXACT/역 출입구라고
+                        // 표시하지 않는다. 외부 경로 좌표를 이용한 접근·이탈 예상이라는 출처를 남긴다.
+                        if(providerEndpoints && artifact==null && master.isEmpty()) resolved=providerEndpoint(ride,access);
                         endpoint=resolved.evidence();
                         if(resolved.verified()) {
                             var request=new WalkingRouteClient.Request(access?origin:resolved.coordinate(),access?resolved.coordinate():destination,"SHORTEST",EndpointEvidence.POLICY_VERSION);
@@ -134,6 +161,11 @@ public class WalkingEnrichmentService {
                         if(endpoint==null) endpoint=EndpointEvidence.unavailable(fallback);
                     }
                 }
+                if("EVALUATION_ENDPOINT_WALK".equals(step.providerRouteKey()) && !"KAKAO_WALKING_API".equals(source)) {
+                    // 원본에 없던 도보의 API 실패를 0초 성공으로 만들지 않는다.
+                    routeReasons.add("WALK_ENDPOINT_DURATION_UNAVAILABLE");
+                    continue;
+                }
                 delta+=seconds-step.durationSeconds();
                 steps.add(new RouteSegment(step.sequence(),step.mode(),step.segmentId(),step.providerRouteKey(),step.guidance(),step.fromName(),step.toName(),step.distanceMeters(),seconds,step.stopNames(),step.vehicles(),step.geometry(),step.mapping()));
                 // 동일 카카오 후보에서 전개한 버스 대안도 서로 다른 증거 key를 유지한다.
@@ -142,7 +174,20 @@ public class WalkingEnrichmentService {
             output.add(new RouteCandidate(route.providerCandidateIndex(),route.type(),route.totalDistanceMeters(),route.totalDurationSeconds()+delta,
                     route.transfers(),route.fare(),route.unassignedDistanceMeters(),route.unassignedDurationSeconds(),steps));
             candidateReasons.put(com.ssafy.ddubi.domain.recommendation.evaluation.RouteEvidenceAssembler.key(route),List.copyOf(routeReasons));
+            reasons.addAll(routeReasons);
         }
         return new Prepared(List.copyOf(output),new Evidence(List.copyOf(metadata),List.copyOf(reasons),session.calls,validUntil,candidateReasons));
+    }
+
+    private static RouteSegment syntheticWalk(int sequence) {
+        return new RouteSegment(sequence,TransportMode.WALK,null,"EVALUATION_ENDPOINT_WALK",null,null,null,0,0,List.of(),List.of(),List.of(),null);
+    }
+    private static WalkingEndpointResolver.Endpoint providerEndpoint(RouteSegment ride,boolean access) {
+        Coordinate point=ride.geometry().isEmpty()?null:ride.geometry().get(access?0:ride.geometry().size()-1);
+        if(point==null || !Double.isFinite(point.latitude()) || !Double.isFinite(point.longitude())
+                || Math.abs(point.latitude())>90 || Math.abs(point.longitude())>180)
+            return new WalkingEndpointResolver.Endpoint(null,EndpointEvidence.unavailable("WALK_PROVIDER_ENDPOINT_MISSING"),false);
+        return new WalkingEndpointResolver.Endpoint(point,new EndpointEvidence(true,"KAKAO_PUBLIC_TRANSIT",null,null,
+                "provider-path-endpoint-v1",null,"PROVIDER_PATH_ENDPOINT","PROVIDER_COORDINATE",null),true);
     }
 }

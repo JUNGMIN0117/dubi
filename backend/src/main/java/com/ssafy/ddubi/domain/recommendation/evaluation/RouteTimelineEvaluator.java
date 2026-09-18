@@ -111,6 +111,12 @@ public class RouteTimelineEvaluator {
                 boolean overlaps = !w.availableAt().isAfter(asOf)
                         && enteredAt.isBefore(w.validUntil()) && !cursor.plusSeconds(leg.entryUncertaintySeconds()).isBefore(w.validFrom());
                 if (overlaps && leg.segmentIds().stream().anyMatch(closure.segmentIds()::contains)) {
+                    // 전체시간 fallback은 해당 edge의 실제 통과 시각을 모른다. 통제가
+                    // 여행 전체를 덮지 않으면 영향 가능성으로 제외하되 확정 원인으로 단정하지 않는다.
+                    if(leg.kind()==Kind.PROVIDER_TOTAL && (w.validFrom().isAfter(enteredAt) || w.validUntil().isBefore(cursor))) {
+                        reasons.add("CLOSURE_POSSIBLE:"+closure.eventId());
+                        return result(journey,departureAt,null,Assessment.INSUFFICIENT_DATA,true,steps,reasons);
+                    }
                     if (leg.entryUncertaintySeconds() > 0 && (enteredAt.plusSeconds(leg.entryUncertaintySeconds()).compareTo(w.validUntil()) >= 0
                             || cursor.isBefore(w.validFrom()))) {
                         reasons.add("CLOSURE_POSSIBLE:" + closure.eventId());

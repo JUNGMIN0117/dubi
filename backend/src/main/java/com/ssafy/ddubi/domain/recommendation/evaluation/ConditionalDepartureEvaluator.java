@@ -11,8 +11,8 @@ import static com.ssafy.ddubi.domain.recommendation.evaluation.RouteTimelineEval
 
 /**
  * P 평가 후 필요한 경우에만 D-10분 목표를 탐색한다. 모든 시각은 초 단위 Instant다.
- * 고정 증거와 한 ML/실시간 세션으로 매 출발마다 전체 여정을 다시 계산한다.
- * 제한 격자의 최선만 제안하며 연속시간 전역 최적이나 실제 정시 도착을 보장하지 않는다.
+ * 고정 API 시간은 직접 역산하고, 시간에 따라 달라지는 유효 증거는 한 세션의 제한 격자로 평가한다.
+ * 동적 계산이 완료되지 않거나 시험 결과이면 원본 시간으로 복귀한다. 실제 정시 도착 보장은 아니다.
  */
 @Service
 public class ConditionalDepartureEvaluator {
@@ -57,12 +57,26 @@ public class ConditionalDepartureEvaluator {
                                Instant asOf, Instant planned, Instant deadline, long budgetMillis) {
         if (budgetMillis < 1 || budgetMillis > 60000) throw new IllegalArgumentException("계산 예산 범위 오류");
         var session = journeys.newSession(budgetMillis);
+        Instant effective=planned.isBefore(asOf)?asOf:planned;
+        var initial=journeys.compare(candidates,snapshot,asOf,effective,deadline,session);
+        // 고정 API 예상은 시간별 탐색 대상이 아니다. 후보 수×분 단위 예산 때문에
+        // 계산 가능한 출발을 놓치지 않도록 바로 역산한다. 시험 ML도 기본 예상으로 복귀한다.
+        boolean providerOnly=initial.candidates().stream().allMatch(c->c.result().steps().stream()
+                .allMatch(step->"FALLBACK".equals(step.source())));
+        boolean experimental=initial.candidates().stream().anyMatch(c->c.result().steps().stream()
+                .anyMatch(step->"ML_PREVIEW".equals(step.source())));
+        if(providerOnly || experimental) return journeys.providerFallback(candidates,snapshot,asOf,planned,deadline,initial,
+                experimental?"ML_PREVIEW_PROVIDER_FALLBACK":"FIXED_PROVIDER_BACKSOLVE");
         var boundaries = new TreeSet<Instant>();
         // 운행표 경계 외에도 시간대·통제 적용 경계를 포함한다. 접근시간 때문에 경계만으로
         // 최적 출발을 증명할 수 없으므로 제한 격자라는 한계를 응답에 유지한다.
-        if (timetable.data() != null) timetable.data().trips().forEach(t -> t.calls().forEach(c -> {
-            if (c.departureAt()!=null) boundaries.add(c.departureAt());
-        }));
+        if (timetable.data() != null) candidates.stream().flatMap(r->r.segments().stream())
+                .filter(s->s.mode()==com.ssafy.ddubi.domain.route.model.TransportMode.SUBWAY)
+                .map(RouteEvidenceAssembler::edges).filter(edges->!edges.isEmpty()).map(edges->edges.get(0))
+                .flatMap(edge->timetable.tripsFor(edge.routeId(),edge.direction(),edge.fromNodeId()).stream()).distinct()
+                .forEach(t->t.calls().forEach(c->{
+                    if(c.departureAt()!=null && !c.departureAt().isBefore(asOf) && !c.departureAt().isAfter(planned)) boundaries.add(c.departureAt());
+                }));
         for (var row : snapshot.states().values()) for (String field : List.of("computedAt", "validUntil")) {
             try { boundaries.add(Instant.parse(row.path(field).asText())); } catch (RuntimeException ignored) { /* 선택 필드 결측 */ }
         }
@@ -71,13 +85,13 @@ public class ConditionalDepartureEvaluator {
         Instant hour=upper.truncatedTo(java.time.temporal.ChronoUnit.HOURS);
         for(int i=0;i<=maxEvaluations && !hour.isBefore(asOf);i++,hour=hour.minusSeconds(3600)) boundaries.add(hour);
         var evaluated = evaluate(candidates.size(), asOf, planned, deadline, boundaries,
-                at -> journeys.compare(candidates, snapshot, asOf, at, deadline, session), budgetMillis);
+                at -> at.equals(effective)?initial:journeys.compare(candidates, snapshot, asOf, at, deadline, session), budgetMillis);
         // 탐색 도중 모델이 교체되면 이전 출발 후보의 숫자도 비교 근거를 잃는다.
-        // 마지막 batch만 무효화하면 앞 batch의 ETA가 최선으로 살아남으므로 평가 전체를 폐기한다.
-        if (session.mixedModel) return new Evaluation(Decision.DATA_INSUFFICIENT,null,evaluated.targetArriveAt(),
-                evaluated.appliedBufferSeconds(),evaluated.departureMissed(),null,null,
-                JourneyEvaluationService.rejectMixedModel(evaluated.originalComparison()),
-                JourneyEvaluationService.rejectMixedModel(evaluated.proposedComparison()),evaluated.search(),null);
+        // 마지막 batch만 무효화하면 앞 batch의 ETA가 남으므로 원본 시간으로 평가 전체를 다시 만든다.
+        if((session.mixedModel && journeys.applyMode()!=MlApplyMode.SHADOW) || !evaluated.search().complete()
+                || evaluated.proposed()==null || !EvaluationGuidance.from(evaluated).canAccept())
+            return journeys.providerFallback(candidates,snapshot,asOf,planned,deadline,initial,
+                    session.mixedModel?"ML_MODEL_VERSION_MISMATCH_PROVIDER_FALLBACK":"DYNAMIC_SEARCH_PROVIDER_FALLBACK");
         return evaluated;
     }
 

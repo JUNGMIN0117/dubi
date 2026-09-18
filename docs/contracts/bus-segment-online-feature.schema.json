@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "bus-segment-online-feature.schema.json",
   "title": "BusSegmentOnlineFeatureV1",
-  "description": "Spark가 Redis에 발행하고 실시간 버스 구간 예측이 읽는 최신 Feature Snapshot",
+  "description": "ML Serving이 Spark 최신값을 요청 시점에 조립해 Redis에 짧게 저장하고 실시간 버스 구간 예측이 읽는 Feature Snapshot",
   "type": "object",
   "additionalProperties": false,
   "required": [

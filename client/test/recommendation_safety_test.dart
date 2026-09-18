@@ -68,8 +68,8 @@ void main() {
           ),
         ),
       );
-      expect(find.textContaining('제안 출발:'), findsNothing);
-      expect(find.textContaining('예상 도착:'), findsNothing);
+      expect(find.textContaining('제안 출발'), findsNothing);
+      expect(find.textContaining('예상 도착'), findsNothing);
       expect(find.textContaining('제안 시각에 출발하면'), findsNothing);
       expect(find.textContaining('일부 구간에 실시간 정보 반영'), findsNothing);
     });

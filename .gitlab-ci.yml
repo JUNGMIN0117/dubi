@@ -213,6 +213,9 @@ backend-test:
 backend-lint:
   stage: test
   image: eclipse-temurin:17-jdk
+  # ratchet 은 git 이력이 필요하다. 러너의 얕은 클론에서 첫 실행을 확인하기 전까지는 경고로 두고,
+  # 통과가 확인되면 이 줄을 지워 필수로 바꾼다.
+  allow_failure: true
   cache:
     key: backend-maven
     paths: [.m2/repository]

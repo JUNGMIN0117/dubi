@@ -89,6 +89,8 @@ compose-validate:
   script:
     - cd infra
     - cp .env.example .env
+    # 비밀번호 4개는 .env.example 에서 비어 있고 compose 가 필수로 요구한다. 문법 검증만 하는 자리라 더미 값을 넣는다(2026-09-18).
+    - export MYSQL_PASSWORD=ci-dummy MYSQL_ROOT_PASSWORD=ci-dummy REDIS_PASSWORD=ci-dummy GRAFANA_ADMIN_PASSWORD=ci-dummy
     - docker compose --profile core --profile collect --profile data --profile serving --profile spark
       --profile batch --profile archive --profile hdfs --profile hdfs2 --profile monitoring
       --profile exporters config -q

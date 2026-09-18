@@ -158,6 +158,7 @@ public record ScheduleEvaluationV2(String schemaVersion, String variant, String 
             Long seconds=total||step==null||step.exitedAt()==null?null:Duration.between(step.enteredAt(),step.exitedAt()).getSeconds();
             String source=total?"PROVIDER_TOTAL_FALLBACK":leg.durationSource();
             if(!total && step!=null && "ML_PREVIEW".equals(step.source())) source="ML_PREVIEW";
+            else if(!total && step!=null && "BUS_HISTORICAL_REFERENCE".equals(step.source())) source="BUS_HISTORICAL_REFERENCE";
             else if(!total && evaluation.proposedComparison().subwayPredictions().stream().anyMatch(s->s.applied()
                     && s.candidateKey().equals(leg.candidateKey()) && s.stepKey().equals("step-"+leg.sequence()))) source="TIMETABLE";
             var original=routes==null?null:routes.stream().filter(r->RouteEvidenceAssembler.key(r).equals(leg.candidateKey()))

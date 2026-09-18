@@ -1,12 +1,26 @@
 import '../domain/models.dart';
 import '../domain/schedule_evaluation.dart';
+import '../domain/transit_reference.dart';
 import 'schedule_api.dart';
 
 class ApiScheduleRepository
-    implements ScheduleRepository, ScheduleEvaluationRepository {
+    implements
+        ScheduleRepository,
+        ScheduleEvaluationRepository,
+        TransitReferenceRepository {
   const ApiScheduleRepository(this._api);
 
   final ScheduleApi _api;
+
+  @override
+  Future<TransitReferenceStatus> transitReferenceStatus() =>
+      _api.transitReferenceStatus();
+
+  @override
+  Future<TransitReferenceDetail> transitReferenceDetail(
+    String kind,
+    String referenceId,
+  ) => _api.transitReferenceDetail(kind, referenceId);
 
   @override
   Future<ScheduleEvaluationV2> latestEvaluation(String id) =>

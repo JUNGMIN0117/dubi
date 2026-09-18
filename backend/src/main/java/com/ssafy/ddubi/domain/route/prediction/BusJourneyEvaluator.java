@@ -112,8 +112,7 @@ public class BusJourneyEvaluator {
             String reason=Set.of("UNSUPPORTED_PROVIDER","REFERENCE_DATE_UNSUPPORTED","UNSEEN_PROVIDER_ID",
                     "ML_HISTORY_INSUFFICIENT","ML_BUDGET_EXHAUSTED","ML_MODEL_VERSION_MISMATCH","ML_NOT_CONFIGURED",
                     "ML_HTTP_UNAVAILABLE","ML_TIMEOUT","ML_UNAVAILABLE","ML_INVALID_RESPONSE","ML_INVALID_DURATION",
-                    "ML_INTERRUPTED","MAPPING_NOT_VERIFIED","ML_SHADOW_ONLY","ML_STATIC_EVIDENCE_INVALID",
-                    "ML_API_VERSION_INVALID","DATE_UNSUPPORTED","EDGE_NOT_VERIFIED","INVALID_DURATION").contains(e.getMessage())?e.getMessage():"MODEL_CALL_FAILED";
+                    "ML_INTERRUPTED","MAPPING_NOT_VERIFIED").contains(e.getMessage())?e.getMessage():"MODEL_CALL_FAILED";
             return fallback(a,c,path.providerName(),fallback,reason,input.digest(),ids);
         } catch(RuntimeException e) {
             // 어댑터 예외 원문에는 서버 URL/비밀값이 포함될 수 있어 응답에 복제하지 않는다.

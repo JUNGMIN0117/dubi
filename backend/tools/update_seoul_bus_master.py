@@ -93,11 +93,11 @@ def main():
     encoded=gzip.compress(json.dumps(artifact,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode(),mtime=0)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(encoded)
-    args.output.with_suffix('.sources.json').write_text(metadata,encoding='utf-8')
+    args.output.with_suffix('.sources.json').write_text(metadata,encoding='utf-8',newline='\n')
     manifest=dict(version=artifact['version'],routes=len(artifact['routes']),stops=sum(len(r['stops']) for r in artifact['routes']),
         reviewedScopes=len(artifact['reviews']),sha256=sha(encoded),sourceCsvSha256=artifact['sourceCsvSha256'],
         sourceMetadataSha256=artifact['sourceMetadataSha256'])
-    args.output.with_suffix('.manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
+    args.output.with_suffix('.manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
     write_crosswalk(artifact,manifest['sha256'],args.output.with_suffix('').with_suffix('.crosswalk.json.gz'))
     print(json.dumps(manifest))
 

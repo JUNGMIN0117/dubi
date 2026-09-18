@@ -34,24 +34,6 @@ class MlRoutePreviewTest {
         return new BusPreviewClient.Estimate(seconds,"MODEL_NOT_PRODUCTION_READY","test-model",now,0,8,false);
     }
 
-    @Test void staticTrainingEvidenceDoesNotRequireHistoricalLookupCount() {
-        // v13은 날짜별 lag 조회 횟수가 없다. 학습 조합 근거와 TEST_APPLY가 있으면 전체 step을 계산한다.
-        when(client.predict(any())).thenReturn(new BusPreviewClient.Estimate(40.0, "ML_TEST_APPLY", "v13-test",
-                Instant.now(), 0, null, false, 130, "bus-request-static-v13.1", "master", Instant.now().plusSeconds(300)));
-        var result = service.compare(List.of(route(0, "1", 300, 0, 2)), empty, now, now, now.plusSeconds(1000));
-        assertThat(result.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(80));
-        assertThat(result.predictions()).allMatch(p -> p.applied());
-        assertThat(result.productionReady()).isFalse();
-    }
-
-    @Test void staticShadowDoesNotReplaceKakaoEvenWithValidNumericPrediction() {
-        when(client.predict(any())).thenReturn(new BusPreviewClient.Estimate(40.0, "ML_SHADOW_ONLY", "v13-test",
-                Instant.now(), 0, null, false, 130, "bus-request-static-v13.1", "master", Instant.now().plusSeconds(300)));
-        var result = service.compare(List.of(route(0, "1", 300, 0, 2)), empty, now, now, now.plusSeconds(1000));
-        assertThat(result.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(300));
-        assertThat(result.predictions()).allMatch(p -> !p.applied());
-    }
-
     @Test void modelSwitchDuringDepartureSearchInvalidatesEarlierBestToo() {
         var journeys=new JourneyEvaluationService(client,evidence,new RouteTimelineEvaluator(),mock(SubwayTimingService.class),
                 new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false));

@@ -38,20 +38,29 @@ void main() {
     expect(content.title, isNot(contains('이전에 계산한')));
   });
 
-  test('검증용(preview) 결과는 만료 여부와 상관없이 시각을 결론으로 쓰지 않고 이유를 말한다', () async {
+  test('검증용(preview) 결과는 시각을 참고값으로 보여주되 확정 색을 쓰지 않는다', () async {
     final raw = await _raw('keep');
     (raw['quality'] as Map<String, dynamic>)['preview'] = true;
     raw['computedAt'] = now.subtract(const Duration(minutes: 2)).toUtc().toIso8601String();
     raw['validUntil'] = now.subtract(const Duration(minutes: 1)).toUtc().toIso8601String();
     final preview = ScheduleEvaluationV2.fromJson(raw);
+    expect(preview.canAcceptAt(now), isFalse, reason: '적용 규칙은 그대로다');
 
     final content = DepartureHeadlineContent.of(preview, now);
 
+    // 숫자는 보여주고, "참고"라는 말과 파란색으로 확정과 구분한다.
+    expect(content.tone, DepartureHeadlineTone.reference);
+    expect(content.title, contains('에 나가면'));
+    expect(content.title, contains('도착 예상'));
+    expect(content.detail, contains('아직 확정 전 참고값이에요'));
+  });
+
+  test('시각이 없는 결과(자료 부족)는 여전히 확정하지 못했다고 말한다', () async {
+    final data = ScheduleEvaluationV2.fromJson(await _raw('data'));
+    final content = DepartureHeadlineContent.of(data, now);
+
     expect(content.tone, DepartureHeadlineTone.attention);
     expect(content.title, '아직 출발 시각을 확정하지 못했어요.');
-    expect(content.title, isNot(contains('에 나가면')));
-    expect(content.detail, isNotNull);
-    expect(content.detail, contains('자동으로 다시 계산해요'));
   });
 
   test('서버가 stale 로 판정한 결과는 다시 확인하라고 크게 알린다', () async {

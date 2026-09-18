@@ -396,6 +396,15 @@ services:
       # 개발용 테스트 알림 발송(POST /api/v1/dev/notifications/test). 프론트 연동 확인용이다.
       # 기본 false — 켜면 로그인한 본인에게 알림을 임의로 만들 수 있다. 발표 전에 되돌린다.
       DDUBI_DEV_ENDPOINTS_ENABLED: ${DDUBI_DEV_ENDPOINTS_ENABLED:-false}
+      # 평가 결과로 자동 FCM 발송. .env 에 값이 있어도 여기서 넘기지 않으면 컨테이너에
+      # 닿지 않아 backend 가 기본값(false)을 쓴다 — 2026-09-18 알림이 0건이던 원인이다.
+      #
+      # 기본 false 를 유지한다. 지금 나가는 숫자는 미승인 모델이 계산한 값이라
+      # (production_ready=false) 켜면 검증 안 된 값으로 사용자 폰이 울린다.
+      # 연동 확인 때만 켜고 발표 전에 되돌린다.
+      DDUBI_AUTO_NOTIFY_ENABLED: ${DDUBI_AUTO_NOTIFY_ENABLED:-false}
+      # 아침 브리핑 스케줄러. 끄면 스케줄러 빈 자체가 만들어지지 않는다.
+      DDUBI_BRIEFING_ENABLED: ${DDUBI_BRIEFING_ENABLED:-true}
       DDUBI_TRANSIT_MASTER_IMPORT_ENABLED: ${DDUBI_TRANSIT_MASTER_IMPORT_ENABLED:-false}
       DDUBI_TRANSIT_MASTER_DATA_VERSION: ${DDUBI_TRANSIT_MASTER_DATA_VERSION:-}
       DDUBI_TRANSIT_MASTER_BUS_WORKBOOK: ${DDUBI_TRANSIT_MASTER_BUS_WORKBOOK:-}

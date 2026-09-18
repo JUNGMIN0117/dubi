@@ -111,7 +111,7 @@ class BusHistoricalReferenceServiceTest {
         assertEquals("BUS_HISTORICAL_REFERENCE",result.fastest().steps().get(0).source());
         assertTrue(result.fastest().reasons().contains("step-1:ML_BUDGET_EXHAUSTED"));
         assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_APPLIED"));
-        assertTrue(result.budgetExhausted());
+        assertFalse(result.budgetExhausted()); // 보조 ML 실패와 전체 후보 탐색 실패를 구별한다.
         // 기본 세션은 ML 마감이 전체 마감보다 앞선다. 전체 예산은 그대로다.
         var normal=evaluator.newSession(5000);assertTrue(normal.mlDeadline<normal.deadline);
         assertThrows(IllegalArgumentException.class,()->new JourneyEvaluationService(ml,new RouteEvidenceAssembler(mock(StringRedisTemplate.class),new ObjectMapper()),new RouteTimelineEvaluator(),mock(SubwayTimingService.class),new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false),history,1.5));

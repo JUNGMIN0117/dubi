@@ -148,10 +148,13 @@ public class ScheduleEvaluationStore {
         var saved = stored.withRecommendationId(recommendationId);
         // 계산 중 들어온 이벤트는 다음 평가를 앞당긴다. 완료가 event-trigger를 지우지 않는다.
         if (((Number) state.get("event_revision")).longValue() != job.eventRevision()) nextAt = now;
+        Instant validUntil=ScheduleEvaluationV2.validity(outcome.conditional(),outcome.evidence(),outcome.checkedAt(),nextAt);
+        // 실제 적용한 도보/실시간 증거가 정기 주기보다 먼저 만료되면 그때 재평가한다.
+        // 이미 만료된 결과는 유효기간을 늘리지 않고 짧은 재시도 간격만 둔다.
+        nextAt=ScheduleEvaluationV2.nextRefresh(now,nextAt,validUntil);
         jdbc.update("UPDATE schedule_evaluation SET input_updated_at=?,candidates_json=?,result_json=?,next_check_at=?,"
                         + "lease_token=NULL,lease_until=NULL,last_error=NULL,notification_json=?,notification_key=? WHERE schedule_id=?",
                 job.version(), write(cache), write(saved), ts(nextAt), notificationJson, notificationKey, job.scheduleId());
-        Instant validUntil=ScheduleEvaluationV2.validity(outcome.conditional(),outcome.evidence(),outcome.checkedAt(),nextAt);
         jdbc.update("UPDATE schedule_evaluation SET input_revision=?,valid_until=?,failure_count=0,failed_input_revision=NULL,retry_exhausted=false WHERE schedule_id=?",
                 job.inputRevision(),ts(validUntil),job.scheduleId());
         // 같은 입력 revision이어도 새 평가가 기존 제안을 대체하면 이전 대기/발송 lease는 무효다.
@@ -244,7 +247,7 @@ public class ScheduleEvaluationStore {
                 s.getUserInputDepartAt()==null?null:instant(s.getUserInputDepartAt()),outcome.plannedDepartAt(),outcome.arriveBy(),outcome.checkedAt(),
                 databaseTime(row.get("valid_until")).atZone(KST).toInstant(),databaseTime(row.get("next_check_at")).atZone(KST).toInstant(),
                 cache==null?null:cache.routeIds().get(outcome.selectedKey()),
-                cache==null||proposed==null?null:cache.routeIds().get(proposed.journeyKey()),outcome.evidence().reasons(),outcome.evidence(),cache==null?List.of():cache.search().candidates(),outcome.selected());
+                cache==null||proposed==null?null:cache.routeIds().get(proposed.journeyKey()),outcome.evidence().reasons(),outcome.evidence(),cache==null?List.of():cache.search().candidates(),outcome.selected(),cache==null?Map.of():cache.routeIds());
     }
 
     /** 입력 수정과 출발/완료를 동시에 확인할 수 있도록 bounded 대상만 조회한다. 입력 없는 기존 일정은 건너뛴다. */
@@ -291,17 +294,17 @@ public class ScheduleEvaluationStore {
         var row = pending.get(0);
         if(evaluationId.equals(row.get("accepted_evaluation_id"))) return;
         var result = read((String) row.get("result_json"), ScheduleEvaluationWorkflow.Outcome.class);
-        // 저장(기록)은 허용해도 수락(사용자 출발시각 실제 변경)은 막는다. 모델이 승인되기 전까지
-        // 검증 안 된 숫자로 사용자를 실제로 움직이게 하지 않는다. complete()의 판정과 다른 것이 의도다.
-        if (result != null && (result.preview() == null || !result.preview().productionReady()))
-            throw new BusinessException(ErrorCode.INVALID_STATE, "검증용 ML 결과는 일정에 적용할 수 없습니다.");
+        // 모델 승인과 사용자 안내는 별개다. 원본 API 예상은 수락할 수 있지만 시험 적용
+        // ML 또는 미완료 탐색은 동일한 공개 guidance 정책으로 차단한다.
+        if (result != null && !EvaluationGuidance.from(result.conditional()).canAccept())
+            throw new BusinessException(ErrorCode.INVALID_STATE, "검증 중이거나 계산이 끝나지 않은 제안은 적용할 수 없습니다.");
         if (result == null || !result.evaluationId().equals(evaluationId) || result.suggestion().proposed() == null
                 || !(row.get("input_revision") instanceof Number rev) || rev.longValue()!=s.getInputRevision()
                 || !"NOT_STARTED".equals(s.getJourneyState())
                 || databaseTime(row.get("valid_until"))==null || !databaseTime(row.get("valid_until")).isAfter(local(now))
                 || row.get("last_error") != null || Boolean.TRUE.equals(row.get("stopped")) || s.getStatus() != ScheduleStatus.UPCOMING
                 || ((Number) row.get("event_revision")).longValue() != result.eventRevision()
-                || result.suggestion().proposed().departureAt().isBefore(now) || result.checkedAt().plusSeconds(60).isBefore(now))
+                || result.suggestion().proposed().departureAt().isBefore(now))
             throw new BusinessException(ErrorCode.STALE_RECOMMENDATION);
         var proposed = result.suggestion().proposed();
         Cache cache = read((String) row.get("candidates_json"), Cache.class);

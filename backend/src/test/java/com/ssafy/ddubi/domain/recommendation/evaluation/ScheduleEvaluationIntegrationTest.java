@@ -67,7 +67,7 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
 
     @Test void inputIsStoredAndPeriodicEvaluationReusesCandidates() {
         var first = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
-        assertThat(first.selected().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.LATE_ESTIMATE);
+        assertThat(first.selected().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.ON_TIME_ESTIMATE);
         assertThat(first.suggestion().proposed().journeyKey()).isEqualTo("candidate-1");
         // 비교 계약은 JPA가 반환한 버전과 JDBC 저장/조회 버전의 일치다.
         // Hibernate의 Timestamp 변환이 개입하는 원본 DB 컬럼끼리 직접 비교하지 않는다.
@@ -87,14 +87,10 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
     }
 
     /**
-     * 저장은 하되 수락·알림은 막는다(2026-09-14).
-     *
-     * <p>예전에는 PREVIEW면 추천 행 자체를 만들지 않았다. 그런데 모델이 미승인이라 <b>모든</b>
-     * 결과가 PREVIEW라, 추천이 하나도 안 생기고 프론트의 최신 추천·근거 화면이 계속 빈손이었다.
-     * 이제 기록은 남기되 <b>사용자를 실제로 움직이게 하는 두 가지</b>는 그대로 막는다 —
-     * 일정 출발시각을 바꾸는 수락과, 폰을 울리는 자동 알림이다.
+     * 기본 provider 예상의 표시·수락과 모델 운영 승인을 분리한다.
+     * 승인 플래그를 올리지 않아도 사용자는 기본 제안을 수락할 수 있다. 자동 알림 기본값은 유지한다.
      */
-    @Test void previewIsStoredWithItsMarkingButCannotBeAcceptedOrNotified() {
+    @Test void providerEstimateIsStoredAndCanBeAcceptedWithoutModelApproval() {
         var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
         assertThat(result.preview().status()).isEqualTo("PREVIEW");
 
@@ -117,14 +113,15 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         assertThat(storedReason(result.recommendationId(),"productionReady")).isEqualTo("false");
         assertThat(storedReason(result.recommendationId(),"source")).isEqualTo("API_ONLY");
 
-        // 여기부터는 막힌 채로 남는다.
+        // 소유권은 유지하고 실제 수락 전에는 일정 시각을 변경하지 않는다.
         assertThatThrownBy(() -> store.accept(scheduleId,owner+1000,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> store.accept(scheduleId,owner,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
+        assertThat(store.response(result,owner).guidance().canAccept()).isTrue();
         assertThat(jdbc.queryForObject("SELECT notification_json FROM schedule_evaluation WHERE schedule_id=?",String.class,scheduleId)).isNull();
         assertThat(schedules.findById(scheduleId).orElseThrow().getPlannedDepartAt())
-                .as("수락이 막혔으니 일정 출발시각은 그대로다")
+                .as("사용자가 수락하기 전에는 일정 출발시각은 그대로다")
                 .isEqualTo(LocalDateTime.ofInstant(now.plusSeconds(600),ZoneId.of("Asia/Seoul")));
         assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("READY");
+        store.accept(scheduleId,owner,result.evaluationId(),now);
     }
 
     /**

@@ -16,7 +16,13 @@ for name in list(os.environ):
     if name.startswith('ML_'):
         os.environ.pop(name)
 from fastapi.testclient import TestClient
+import tempfile
+from pathlib import Path
+import app as app_module
 from app import create_app
+# 개발자가 설치해 둔 v12 bundle 유무와 독립적으로 신규 체크아웃 조건을 재현한다.
+empty = tempfile.TemporaryDirectory()
+app_module.local_bundle = lambda: Path(empty.name) / 'not-installed'
 app = create_app()
 assert not any(name.startswith('static_bus_') for name in sys.modules)
 with TestClient(app) as client:

@@ -60,9 +60,13 @@ public class ConditionalDepartureEvaluator {
         var boundaries = new TreeSet<Instant>();
         // 운행표 경계 외에도 시간대·통제 적용 경계를 포함한다. 접근시간 때문에 경계만으로
         // 최적 출발을 증명할 수 없으므로 제한 격자라는 한계를 응답에 유지한다.
-        if (timetable.data() != null) timetable.data().trips().forEach(t -> t.calls().forEach(c -> {
-            if (c.departureAt()!=null) boundaries.add(c.departureAt());
-        }));
+        if (timetable.data() != null) candidates.stream().flatMap(r->r.segments().stream())
+                .filter(s->s.mode()==com.ssafy.ddubi.domain.route.model.TransportMode.SUBWAY)
+                .map(RouteEvidenceAssembler::edges).filter(edges->!edges.isEmpty()).map(edges->edges.get(0))
+                .flatMap(edge->timetable.tripsFor(edge.routeId(),edge.direction(),edge.fromNodeId()).stream()).distinct()
+                .forEach(t->t.calls().forEach(c->{
+                    if(c.departureAt()!=null && !c.departureAt().isBefore(asOf) && !c.departureAt().isAfter(planned)) boundaries.add(c.departureAt());
+                }));
         for (var row : snapshot.states().values()) for (String field : List.of("computedAt", "validUntil")) {
             try { boundaries.add(Instant.parse(row.path(field).asText())); } catch (RuntimeException ignored) { /* 선택 필드 결측 */ }
         }
@@ -74,7 +78,7 @@ public class ConditionalDepartureEvaluator {
                 at -> journeys.compare(candidates, snapshot, asOf, at, deadline, session), budgetMillis);
         // 탐색 도중 모델이 교체되면 이전 출발 후보의 숫자도 비교 근거를 잃는다.
         // 마지막 batch만 무효화하면 앞 batch의 ETA가 최선으로 살아남으므로 평가 전체를 폐기한다.
-        if (session.mixedModel) return new Evaluation(Decision.DATA_INSUFFICIENT,null,evaluated.targetArriveAt(),
+        if (session.mixedModel && journeys.applyMode()!=MlApplyMode.SHADOW) return new Evaluation(Decision.DATA_INSUFFICIENT,null,evaluated.targetArriveAt(),
                 evaluated.appliedBufferSeconds(),evaluated.departureMissed(),null,null,
                 JourneyEvaluationService.rejectMixedModel(evaluated.originalComparison()),
                 JourneyEvaluationService.rejectMixedModel(evaluated.proposedComparison()),evaluated.search(),null);

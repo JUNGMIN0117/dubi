@@ -94,10 +94,9 @@ class BusRetryTest(unittest.TestCase):
                     )
                 )
 
-            with (
-                patch("sources.kafka_adapter.RequestBudget", side_effect=budget_factory),
-                httpx.Client(transport=httpx.MockTransport(handler)) as client,
-            ):
+            with patch("sources.kafka_adapter.RequestBudget", side_effect=budget_factory), httpx.Client(
+                transport=httpx.MockTransport(handler)
+            ) as client:
                 with self.assertRaises(RetryScheduled) as caught:
                     collect("bus_location", settings, client)
                 self.assertEqual(caught.exception.wait_seconds, 300)
@@ -125,10 +124,9 @@ class BusRetryTest(unittest.TestCase):
             def factory(*args, **kwargs):
                 return RequestBudget(*args, **kwargs, clock=lambda: clock[0])
 
-            with (
-                patch("sources.kafka_adapter.RequestBudget", side_effect=factory),
-                httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(503))) as client,
-            ):
+            with patch("sources.kafka_adapter.RequestBudget", side_effect=factory), httpx.Client(
+                transport=httpx.MockTransport(lambda request: httpx.Response(503))
+            ) as client:
                 with self.assertRaises(RetryScheduled):
                     collect("bus_location", settings, client)
                 clock[0] += 300

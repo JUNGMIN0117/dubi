@@ -12,7 +12,7 @@ import json
 import os
 import re
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -173,7 +173,7 @@ def fetch_all_subway_locations(
 
     empty_lines = [line for line, result in line_results.items() if result["receivedCount"] == 0]
     return {
-        "collectedAt": datetime.now(UTC).isoformat(),
+        "collectedAt": datetime.now(timezone.utc).isoformat(),
         "lineCount": len(line_results),
         "positionCount": position_count,
         "emptyLines": empty_lines,
@@ -224,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         line = args.subway_line.strip()
         result = fetch_subway_location(api_key, line)
         data = {
-            "collectedAt": datetime.now(UTC).isoformat(),
+            "collectedAt": datetime.now(timezone.utc).isoformat(),
             "lineCount": 1,
             "positionCount": result["receivedCount"],
             "emptyLines": [line] if result["receivedCount"] == 0 else [],

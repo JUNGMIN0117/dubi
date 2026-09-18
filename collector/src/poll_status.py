@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 import pydantic
@@ -24,6 +24,8 @@ else:
 
 
 class PollStatusEvent(StrictModel):
+    """Pydantic가 타입을 실제 평가하므로 Spark 연동의 Python 3.8에서도 유효한 표기를 쓴다."""
+
     pollId: str
     source: str = Field(min_length=1)
     scopeKey: str = Field(min_length=1)
@@ -33,8 +35,8 @@ class PollStatusEvent(StrictModel):
     completeSnapshot: bool
     pageCount: int = Field(ge=0)
     rowCount: int = Field(ge=0)
-    errorCode: str | None = None
-    nextAllowedAt: datetime | None = None
+    errorCode: Optional[str] = None
+    nextAllowedAt: Optional[datetime] = None
     contentHash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 

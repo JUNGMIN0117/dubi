@@ -13,7 +13,7 @@ import hashlib
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import pydantic
@@ -42,23 +42,23 @@ class TransportEvent(StrictModel):
     eventId: str
     eventType: str = Field(min_length=1)
     source: str = Field(min_length=1)
-    region: str | None = None
+    region: Optional[str] = None
     occurredAt: datetime
     collectedAt: datetime
-    sourceGeneratedAt: datetime | None = None
+    sourceGeneratedAt: Optional[datetime] = None
     timestampBasis: str
-    providerNamespace: str | None = None
-    providerIds: dict[str, str] = Field(default_factory=dict)
-    mappingVersion: str | None = None
-    masterVersion: str | None = None
-    validUntil: datetime | None = None
+    providerNamespace: Optional[str] = None
+    providerIds: Dict[str, str] = Field(default_factory=dict)
+    mappingVersion: Optional[str] = None
+    masterVersion: Optional[str] = None
+    validUntil: Optional[datetime] = None
     contentHash: str = Field(pattern=r"^[a-f0-9]{64}$")
-    qualityFlags: list[str] = Field(default_factory=list)
-    missingFields: list[str] = Field(default_factory=list)
-    rejectionReasons: list[str] = Field(default_factory=list)
-    location: Location | None = None
-    segmentIds: list[str] | None = None
-    payload: dict[str, Any]
+    qualityFlags: List[str] = Field(default_factory=list)
+    missingFields: List[str] = Field(default_factory=list)
+    rejectionReasons: List[str] = Field(default_factory=list)
+    location: Optional[Location] = None
+    segmentIds: Optional[List[str]] = None
+    payload: Dict[str, Any]
 
 
 class CityEvent(StrictModel):
@@ -69,26 +69,26 @@ class CityEvent(StrictModel):
     source: str = Field(min_length=1)
     occurredAt: datetime
     collectedAt: datetime
-    sourceGeneratedAt: datetime | None = None
+    sourceGeneratedAt: Optional[datetime] = None
     timestampBasis: str
-    providerNamespace: str | None = None
-    providerIds: dict[str, str] = Field(default_factory=dict)
-    mappingVersion: str | None = None
-    masterVersion: str | None = None
-    validUntil: datetime | None = None
+    providerNamespace: Optional[str] = None
+    providerIds: Dict[str, str] = Field(default_factory=dict)
+    mappingVersion: Optional[str] = None
+    masterVersion: Optional[str] = None
+    validUntil: Optional[datetime] = None
     contentHash: str = Field(pattern=r"^[a-f0-9]{64}$")
-    qualityFlags: list[str] = Field(default_factory=list)
-    missingFields: list[str] = Field(default_factory=list)
-    rejectionReasons: list[str] = Field(default_factory=list)
-    location: Location | None = None
-    segmentIds: list[str] | None = None
-    payload: dict[str, Any]
+    qualityFlags: List[str] = Field(default_factory=list)
+    missingFields: List[str] = Field(default_factory=list)
+    rejectionReasons: List[str] = Field(default_factory=list)
+    location: Optional[Location] = None
+    segmentIds: Optional[List[str]] = None
+    payload: Dict[str, Any]
 
 
 SCHEMA_MODELS = {"transport": TransportEvent, "city": CityEvent}
 
 
-def _model_json(model: BaseModel) -> dict[str, Any]:
+def _model_json(model: BaseModel) -> Dict[str, Any]:
     """Collector 이미지의 Pydantic v1과 개발환경 v2를 모두 지원한다."""
     if hasattr(model, "model_dump"):
         return model.model_dump(mode="json", exclude_none=True)
@@ -101,7 +101,7 @@ def _to_kst(dt: datetime) -> datetime:
     return dt.astimezone(KST)
 
 
-def _metadata(record: Record, collected_at: datetime) -> dict[str, Any]:
+def _metadata(record: Record, collected_at: datetime) -> Dict[str, Any]:
     """기존 payload를 보존하면서 모든 source에 공통 소비 메타데이터를 만든다."""
     payload = record.payload
     legacy_basis = str(payload.get("timestampBasis") or "").lower()
@@ -130,7 +130,7 @@ def _metadata(record: Record, collected_at: datetime) -> dict[str, Any]:
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
         content_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    result: dict[str, Any] = {
+    result: Dict[str, Any] = {
         "sourceGeneratedAt": _to_kst(generated_at) if generated_at else None,
         "timestampBasis": timestamp_basis,
         "providerNamespace": str(provider_namespace) if provider_namespace else None,
@@ -152,7 +152,7 @@ def _metadata(record: Record, collected_at: datetime) -> dict[str, Any]:
     return result
 
 
-def build_event(spec: SourceSpec, record: Record, collected_at: datetime) -> dict[str, Any]:
+def build_event(spec: SourceSpec, record: Record, collected_at: datetime) -> Dict[str, Any]:
     """Record 를 계약에 맞는 이벤트 dict 로 만든다 (JSON 직렬화 가능한 형태)."""
     location = Location(latitude=record.location[0], longitude=record.location[1]) if record.location else None
     segment_ids = sorted(set(record.segment_ids)) if record.segment_ids else None  # uniqueItems

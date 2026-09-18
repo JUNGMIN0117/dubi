@@ -11,7 +11,7 @@ import argparse
 import json
 import os
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -92,7 +92,7 @@ def fetch_all_subway_arrivals(
         received_count = len(arrivals)
 
         return {
-            "collectedAt": datetime.now(UTC).isoformat(),
+            "collectedAt": datetime.now(timezone.utc).isoformat(),
             "totalCount": total_count,
             "receivedCount": received_count,
             "isComplete": True,

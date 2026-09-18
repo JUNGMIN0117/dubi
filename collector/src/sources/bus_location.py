@@ -12,7 +12,7 @@ import json
 import os
 import re
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -200,7 +200,7 @@ def fetch_all_bus_locations(
             http_client.close()
 
     return {
-        "collectedAt": datetime.now(UTC).isoformat(),
+        "collectedAt": datetime.now(timezone.utc).isoformat(),
         "routeCount": len(route_results),
         "vehicleCount": total_vehicle_count,
         "routeResults": route_results,
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         route_id = args.bus_route_id.strip()
         response = fetch_bus_location(api_key, route_id)
         data = {
-            "collectedAt": datetime.now(UTC).isoformat(),
+            "collectedAt": datetime.now(timezone.utc).isoformat(),
             "routeCount": 1,
             "vehicleCount": _vehicle_count(response),
             "routeResults": {route_id: response},

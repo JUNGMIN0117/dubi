@@ -12,7 +12,7 @@ import json
 import os
 import re
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -207,7 +207,7 @@ def fetch_incidents(
 
     is_complete = fetch_all and last_page_size < page_size
     return {
-        "collectedAt": datetime.now(UTC).isoformat(),
+        "collectedAt": datetime.now(timezone.utc).isoformat(),
         "datasetId": "OA-13315",
         "service": SERVICE_NAME,
         "sourceType": "traffic_incident",

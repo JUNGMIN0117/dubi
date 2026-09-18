@@ -13,7 +13,7 @@ import json
 import os
 import re
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -236,7 +236,7 @@ def fetch_notices(
             http_client.close()
 
     return {
-        "collectedAt": datetime.now(UTC).isoformat(),
+        "collectedAt": datetime.now(timezone.utc).isoformat(),
         "datasetId": "OA-22861",
         "service": SERVICE_NAME,
         "sourceType": "topis_notice",

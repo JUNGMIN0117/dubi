@@ -12,7 +12,7 @@ import json
 import os
 import re
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -213,7 +213,7 @@ def fetch_city_areas(
             http_client.close()
 
     return {
-        "collectedAt": datetime.now(UTC).isoformat(),
+        "collectedAt": datetime.now(timezone.utc).isoformat(),
         "requestedAreaCount": len(areas),
         "receivedAreaCount": len(area_results),
         "isComplete": len(area_results) == len(areas),

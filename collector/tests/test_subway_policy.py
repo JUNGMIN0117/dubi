@@ -3,7 +3,7 @@
 import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,7 +33,7 @@ class SubwayPolicyTests(unittest.TestCase):
 
     def test_timezone_special_dates_and_disable(self):
         now = moment("04:20:00")
-        self.assertEqual(pause_until("subway_location", {}, now.astimezone(UTC)), moment("04:30:00"))
+        self.assertEqual(pause_until("subway_location", {}, now.astimezone(timezone.utc)), moment("04:30:00"))
         self.assertIsNone(pause_until("subway_location", {"SUBWAY_SKIP_ENABLED": "false"}, now))
         self.assertIsNone(pause_until("subway_location", {"SUBWAY_SKIP_OVERRIDE_DATES": "2026-09-15,2026-09-16"}, now))
         self.assertIsNotNone(pause_until("subway_location", {"SUBWAY_SKIP_OVERRIDE_DATES": "2026-09-15"}, now))
@@ -94,9 +94,8 @@ class SubwayPolicyTests(unittest.TestCase):
                     200, json={"errorMessage": {"code": "INFO-200", "total": None}, "realtimeArrivalList": None}
                 )
 
-            with (
-                httpx.Client(transport=httpx.MockTransport(handler)) as client,
-                patch("sources.kafka_adapter.now_kst", return_value=moment("04:20:00")),
+            with httpx.Client(transport=httpx.MockTransport(handler)) as client, patch(
+                "sources.kafka_adapter.now_kst", return_value=moment("04:20:00")
             ):
                 self.assertEqual(collect("subway_arrival", settings, client), [])
             self.assertEqual(len(calls), 1)
@@ -111,14 +110,9 @@ class SubwayPolicyTests(unittest.TestCase):
                 {"errorMessage": {"code": "INFO-200", "total": None}, list_name: None},
                 {"RESULT": {"CODE": "INFO-200"}},
             ):
-                with (
-                    self.subTest(list_name=list_name, response=response),
-                    httpx.Client(
-                        transport=httpx.MockTransport(
-                            lambda request, response=response: httpx.Response(200, json=response)
-                        )
-                    ) as client,
-                ):
+                with self.subTest(list_name=list_name, response=response), httpx.Client(
+                    transport=httpx.MockTransport(lambda request, response=response: httpx.Response(200, json=response))
+                ) as client:
                     result = fetch(client)
                     self.assertEqual(result["receivedCount"], 0)
                     self.assertEqual(result["response"][list_name], [])
@@ -140,14 +134,9 @@ class SubwayPolicyTests(unittest.TestCase):
                 {"errorMessage": {"code": "INFO-000", "total": -1}, list_name: []},
             ]
             for response in cases:
-                with (
-                    self.subTest(list_name=list_name, response=response),
-                    httpx.Client(
-                        transport=httpx.MockTransport(
-                            lambda request, response=response: httpx.Response(200, json=response)
-                        )
-                    ) as client,
-                ):
+                with self.subTest(list_name=list_name, response=response), httpx.Client(
+                    transport=httpx.MockTransport(lambda request, response=response: httpx.Response(200, json=response))
+                ) as client:
                     with self.assertRaises(error_type):
                         fetch(client)
 
@@ -166,12 +155,9 @@ class SubwayPolicyTests(unittest.TestCase):
                 extra={"API_BUDGET_PATH": str(Path(directory) / "budget.db"), "SUBWAY_LINES": "2호선"},
             )
             response = {"RESULT": {"CODE": "INFO-100", "MESSAGE": "SECRET_API_KEY"}}
-            with (
-                httpx.Client(
-                    transport=httpx.MockTransport(lambda request, response=response: httpx.Response(200, json=response))
-                ) as client,
-                patch("sources.kafka_adapter.now_kst", return_value=moment("12:00:00")),
-            ):
+            with httpx.Client(
+                transport=httpx.MockTransport(lambda request, response=response: httpx.Response(200, json=response))
+            ) as client, patch("sources.kafka_adapter.now_kst", return_value=moment("12:00:00")):
                 with self.assertRaisesRegex(RuntimeError, "호선=2호선.*INFO-100") as caught:
                     collect("subway_location", settings, client)
             self.assertNotIn("SECRET_API_KEY", str(caught.exception))

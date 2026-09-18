@@ -111,6 +111,16 @@ class DepartureHeadlineContent {
         tone: DepartureHeadlineTone.reference,
       );
     }
+    // 확정 조건은 못 넘겼지만 계산이 끝난 결과: 시각을 참고값으로 보여준다(2026-09-18 결정).
+    // 색(파랑)과 "참고"라는 말로 확정과 구분한다. 적용 버튼은 카드의 규칙이 그대로 잠근다.
+    if (evaluationHasReferenceTimes(evaluation) && depart != null && arrival != null) {
+      final reason = evaluationShortfallReason(evaluation);
+      return DepartureHeadlineContent(
+        title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착 예상',
+        detail: reason == null ? '아직 확정 전 참고값이에요.' : '아직 확정 전 참고값이에요. $reason',
+        tone: DepartureHeadlineTone.reference,
+      );
+    }
     return DepartureHeadlineContent(
       title: '아직 출발 시각을 확정하지 못했어요.',
       detail: _shortfallDetail(evaluation),

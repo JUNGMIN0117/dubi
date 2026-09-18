@@ -27,6 +27,29 @@ String evaluationMissingInputLabel(String value) => switch (value) {
   _ => '일부 교통정보를 확인하지 못했어요',
 };
 
+/// 출발·도착 시각이 뜻을 가지는 판단. 이 다섯 가지면 확정이 아니어도 시각을 참고값으로 보여준다.
+const Set<DepartureDecision> evaluationTimeDecisions = {
+  DepartureDecision.keepDeparture,
+  DepartureDecision.advanceDeparture,
+  DepartureDecision.departNow,
+  DepartureDecision.marginUnavailable,
+  DepartureDecision.lateExpected,
+};
+
+/// 확정 조건은 못 넘겼지만 계산이 끝나 시각이 있는 결과인지. 참고값으로 보여줄 대상이다.
+///
+/// 확정 규칙([ScheduleEvaluationV2.canRecommendAt])과 적용 규칙은 바꾸지 않는다. 숫자를 숨기던
+/// 것만 멈추고, 색과 문구로 "아직 확정 전"임을 말한다(2026-09-18 결정).
+bool evaluationHasReferenceTimes(ScheduleEvaluationV2 evaluation) =>
+    evaluation.state == EvaluationState.ready &&
+    evaluationTimeDecisions.contains(evaluation.decision) &&
+    evaluation.proposedDepartAt != null &&
+    evaluation.estimatedArrivalAt != null;
+
+/// 참고값일 때 카드에 쓰는 상태 문장.
+const String evaluationReferenceMessage =
+    '참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.';
+
 /// 확정하지 못한 결과에서 사용자에게 말할 대표 이유 한 문장.
 ///
 /// 이유가 여럿이면 가장 설명력이 큰 것 하나만 고른다. 후보 전체의 부족 목록(missingInputs)보다
@@ -57,7 +80,7 @@ String? evaluationShortfallReason(ScheduleEvaluationV2 evaluation) {
     return '지하철 구간의 운행정보가 아직 없어서예요.';
   }
   if (evaluation.quality.preview || !evaluation.quality.productionEligible) {
-    return '아직 시험 중인 계산이라 확정으로 보여주지 않아요.';
+    return '아직 시험 중인 계산이라 확정으로 표시하지 않아요.';
   }
   if (missing.isNotEmpty) return '일부 교통정보를 아직 확인하지 못해서예요.';
   return null;
@@ -759,6 +782,9 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
     final usableWhenComputed =
         computedAt != null && evaluation.canRecommendAt(computedAt);
     final showTimes = usable || (expiredOnly && usableWhenComputed);
+    // 확정은 아니지만 계산이 끝난 결과는 시각을 참고값으로 보여준다. 과거 평균 참고 표시가 있으면 그쪽을 쓴다.
+    final referenceTimes =
+        !showTimes && !historicalEstimate && evaluationHasReferenceTimes(evaluation);
     final diagnostics = widget.developerDiagnostics;
     // 짧은 배지는 뜻이 전달되지 않아 문장으로 바꿨다. 판단 기준은 그대로다.
     final notes = [
@@ -784,6 +810,8 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
               ? '이전 결과입니다. 최신 결과를 다시 확인해 주세요.'
               : expiredOnly && usableWhenComputed
               ? '마지막으로 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.'
+              : referenceTimes
+              ? evaluationReferenceMessage
               : evaluation.state == EvaluationState.ready && !usable
               ? '정확한 출발 추천을 아직 확정하지 못했어요.'
               : _stateMessage(evaluation.state),
@@ -824,6 +852,11 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           _timeRow(Icons.directions_run_rounded, '제안 출발', evaluation.proposedDepartAt),
         if (showTimes)
           _timeRow(Icons.flag_outlined, '예상 도착', evaluation.estimatedArrivalAt),
+        // 확정 전 결과의 시각. 라벨을 "참고"로 붙여 제안 출발과 섞이지 않게 한다.
+        if (referenceTimes) ...[
+          _timeRow(Icons.directions_run_rounded, '참고 출발', evaluation.proposedDepartAt),
+          _timeRow(Icons.flag_outlined, '참고 도착', evaluation.estimatedArrivalAt),
+        ],
         // 유효시간이 지난 결과는 언제 확인한 값인지 접지 않고 바로 보여준다.
         if (expiredOnly && computedAt != null)
           _timeRow(Icons.update_rounded, '마지막 확인', computedAt),

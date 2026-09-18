@@ -81,6 +81,7 @@ forbidden-output-check:
         - collector/**/*
         - archiver/**/*
         - sparkjobs/**/*
+        - .gitlab-ci.yml   # 검사 규칙 자체가 바뀌면 다시 돌린다
 
 # compose 문법·변수 참조 검증 (데몬 불필요: config 는 파싱만 한다)
 compose-validate:
@@ -213,12 +214,14 @@ backend-test:
 # 정리되기 전까지 경고로 둔다 — 정리 커밋 뒤 allow_failure 를 지운다.
 backend-lint:
   stage: test
+  # backend-test 와 같은 Maven 잡이라 같은 자원 그룹으로 묶는다. 러너 동시 실행 2 에서 둘이 겹치면 느려진다.
+  resource_group: backend-test
   image: eclipse-temurin:17-jdk
   # ratchet 은 git 이력이 필요하다. 러너의 얕은 클론에서 첫 실행을 확인하기 전까지는 경고로 두고,
   # 통과가 확인되면 이 줄을 지워 필수로 바꾼다.
   allow_failure: true
   cache:
-    key: backend-maven
+    key: backend-m2
     paths: [.m2/repository]
     unprotect: true
   variables:
@@ -233,6 +236,7 @@ backend-lint:
   rules:
     - changes:
         - backend/**/*
+        - .gitlab-ci.yml   # 검사 규칙 자체가 바뀌면 다시 돌린다
 
 # 파이썬 컨벤션 (2026-09-18). 루트 pyproject.toml 의 Ruff 규칙으로 검사한다.
 # 기존 코드 전체 정리(ruff format) 커밋 전까지는 경고로 둔다.
@@ -252,6 +256,7 @@ python-lint:
         - sparkjobs/**/*
         - tests/**/*
         - pyproject.toml
+        - .gitlab-ci.yml   # 검사 규칙 자체가 바뀌면 다시 돌린다
 
 client-test:
   extends: .flutter
@@ -265,6 +270,7 @@ client-test:
   rules:
     - changes:
         - client/**/*
+        - .gitlab-ci.yml   # 검사 규칙 자체가 바뀌면 다시 돌린다
 
 # ---------------------------------------------------------------------------
 # build (수동): 이미지 빌드 검증. dind(privileged) 러너 필요

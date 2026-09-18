@@ -14,10 +14,17 @@ FACT_SCHEMA = T.StructType(
             "eventId",
             "segmentId",
             "masterVersion",
+            "mappingVersion",
+            "vehicleId",
             "occurredAt",
+            "observedAt",
+            "enteredAt",
+            "exitedAt",
             "collectedAt",
+            "validUntil",
             "weatherBucket",
             "sampleKind",
+            "quality",
             "source",
         )
     ]
@@ -54,14 +61,26 @@ def validate(facts, registry, as_of):
         raise ValueError("registry mixes master versions for one segment")
     keyed = (
         facts.withColumn("rawOccurredAt", F.col("occurredAt"))
+        .withColumn("rawObservedAt", F.col("observedAt"))
+        .withColumn("rawEnteredAt", F.col("enteredAt"))
+        .withColumn("rawExitedAt", F.col("exitedAt"))
         .withColumn("rawCollectedAt", F.col("collectedAt"))
+        .withColumn("rawValidUntil", F.col("validUntil"))
         .withColumn(
             "kstInput",
             F.col("occurredAt").rlike(r"\+09:00$")
-            & F.col("collectedAt").rlike(r"\+09:00$"),
+            & F.col("observedAt").rlike(r"\+09:00$")
+            & F.col("enteredAt").rlike(r"\+09:00$")
+            & F.col("exitedAt").rlike(r"\+09:00$")
+            & F.col("collectedAt").rlike(r"\+09:00$")
+            & F.col("validUntil").rlike(r"\+09:00$"),
         )
         .withColumn("occurredAt", F.to_timestamp("occurredAt"))
+        .withColumn("observedAt", F.to_timestamp("observedAt"))
+        .withColumn("enteredAt", F.to_timestamp("enteredAt"))
+        .withColumn("exitedAt", F.to_timestamp("exitedAt"))
         .withColumn("collectedAt", F.to_timestamp("collectedAt"))
+        .withColumn("validUntil", F.to_timestamp("validUntil"))
     )
     # 같은 원본을 다른 시각에 재수집한 것은 중복이지만 측정값/대상 변경은 충돌이다.
     fingerprint = F.sha2(
@@ -69,9 +88,16 @@ def validate(facts, registry, as_of):
             F.struct(
                 "segmentId",
                 "masterVersion",
+                "mappingVersion",
+                "vehicleId",
                 "occurredAt",
+                "observedAt",
+                "enteredAt",
+                "exitedAt",
+                "validUntil",
                 "weatherBucket",
                 "sampleKind",
+                "quality",
                 "source",
                 "durationSeconds",
             )
@@ -97,6 +123,15 @@ def validate(facts, registry, as_of):
         .when(F.col("versions") > 1, "CONFLICTING_EVENT_ID")
         .when(F.col("registered").isNull(), "UNKNOWN_EDGE_OR_MASTER_VERSION")
         .when(
+            F.col("mappingVersion").isNull()
+            | (F.length("mappingVersion") == 0),
+            "MISSING_MAPPING_VERSION",
+        )
+        .when(
+            F.col("vehicleId").isNull() | (F.length("vehicleId") == 0),
+            "MISSING_VEHICLE_ID",
+        )
+        .when(
             ~F.col("segmentId").rlike(
                 r"^(BUS|SUB):[A-Za-z0-9._-]{1,50}(:[A-Za-z0-9._-]{1,50}){2}$"
             )
@@ -107,11 +142,20 @@ def validate(facts, registry, as_of):
         .when(
             ~F.col("sampleKind").eqNullSafe("ACTUAL_TRAVERSAL"), "NOT_ACTUAL_TRAVERSAL"
         )
+        .when(~F.col("quality").eqNullSafe("VERIFIED"), "UNVERIFIED_TRAVERSAL")
         .when(
             ~F.coalesce(F.col("kstInput"), F.lit(False))
             | F.col("occurredAt").isNull()
+            | F.col("observedAt").isNull()
+            | F.col("enteredAt").isNull()
+            | F.col("exitedAt").isNull()
             | F.col("collectedAt").isNull()
-            | (F.col("occurredAt") > F.col("collectedAt"))
+            | F.col("validUntil").isNull()
+            | (F.col("enteredAt") >= F.col("exitedAt"))
+            | (F.col("occurredAt").cast("long") != F.col("exitedAt").cast("long"))
+            | (F.col("exitedAt") > F.col("observedAt"))
+            | (F.col("observedAt") > F.col("collectedAt"))
+            | (F.col("validUntil") <= F.col("observedAt"))
             | (F.col("collectedAt") > F.lit(as_of).cast("timestamp")),
             "INVALID_TIME",
         )
@@ -121,6 +165,13 @@ def validate(facts, registry, as_of):
             | (F.col("durationSeconds") <= 0)
             | (F.col("durationSeconds") == float("inf")),
             "INVALID_DURATION",
+        )
+        .when(
+            F.abs(
+                (F.col("exitedAt").cast("double") - F.col("enteredAt").cast("double"))
+                - F.col("durationSeconds")
+            ) > 1.0,
+            "DURATION_TIME_MISMATCH",
         )
         .when(
             F.col("weatherBucket").isNull()
@@ -144,7 +195,11 @@ def validate(facts, registry, as_of):
             "rejectionReason",
             "kstInput",
             "rawOccurredAt",
+            "rawObservedAt",
+            "rawEnteredAt",
+            "rawExitedAt",
             "rawCollectedAt",
+            "rawValidUntil",
         )
     )
     return valid, rejected

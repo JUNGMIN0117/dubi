@@ -107,6 +107,37 @@ class _ControlledAcceptRepository implements ScheduleEvaluationRepository {
   Future<void> refreshEvaluation(String id) async {}
 }
 
+class _FailOnceRefreshRepository implements ScheduleEvaluationRepository {
+  _FailOnceRefreshRepository(this.evaluation);
+
+  final ScheduleEvaluationV2 evaluation;
+  var latestCalls = 0;
+  var refreshCalls = 0;
+
+  @override
+  Future<ScheduleEvaluationV2> latestEvaluation(String scheduleId) async {
+    latestCalls++;
+    return evaluation;
+  }
+
+  @override
+  Future<void> acceptEvaluation(String id, String evaluationId) async {}
+
+  @override
+  Future<void> confirmDeparture(String id) async {}
+
+  @override
+  Future<void> refreshEvaluation(String id) async {
+    refreshCalls++;
+    if (refreshCalls == 1) {
+      throw const ScheduleEvaluationFailure(
+        kind: EvaluationFailureKind.network,
+        message: '첫 요청 실패',
+      );
+    }
+  }
+}
+
 void main() {
   late Map<String, ScheduleEvaluationV2> fixtures;
 
@@ -314,6 +345,33 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('사용자 동작을 재시도하면 이전 오류를 지우고 성공 상태를 표시한다', (tester) async {
+    final repository = _FailOnceRefreshRepository(fixtures['keep']!);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEvaluationCard(
+            repository: repository,
+            scheduleId: 'schedule-1',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('다시 계산'));
+    await tester.pumpAndSettle();
+    expect(find.text('첫 요청 실패'), findsOneWidget);
+
+    await tester.tap(find.text('다시 계산'));
+    await tester.pumpAndSettle();
+    expect(repository.refreshCalls, 2);
+    expect(find.byKey(const Key('evaluationActionError')), findsNothing);
+    expect(find.text('서버 처리 결과를 다시 확인했습니다.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('확인된 BLOCKED 통제는 가능성이 아니라 확정 원인으로 표시한다', (tester) async {
     final evaluation = ScheduleEvaluationV2.fromJson({
       'schemaVersion': 'schedule-evaluation-v2',
@@ -461,5 +519,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.acceptCalls, 1);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('사용자 동작 처리 중 화면을 벗어나도 상태 갱신이나 후속 조회를 하지 않는다', (tester) async {
+    final repository = _ControlledAcceptRepository(fixtures['keep']!);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEvaluationCard(
+            repository: repository,
+            scheduleId: 'schedule-1',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('acceptEvaluationButton')));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    repository.acceptCompleter.complete();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(repository.latestCalls, 1);
   });
 }

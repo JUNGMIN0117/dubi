@@ -3,7 +3,8 @@
 파이프라인 위치는 ``Collector → Kafka(transport.raw/city.raw) → 이 Spark 잡 → Redis``다.
 Kafka 원문은 별도 Archiver가 Parquet/HDFS에 보존하므로 이 잡은 서비스가 지금 필요한 작은
 상태만 만든다. 지원 자료는 버스 위치·도착, 지하철 위치·도착·알림, TOPIS 소통·돌발,
-서울 실시간 도시데이터, S-DoT 유동인구다. 날씨는 격자·관측 구조가 달라 기존
+S-DoT 유동인구다. 서울 실시간 도시데이터는 전용 ``city_realtime_silver.py``가 담당한다.
+날씨는 격자·관측 구조가 달라 기존
 ``weather_latest.py``가 계속 담당한다.
 
 BUS는 버전 고정 대응표로 검증하고 Collector와 버전이 다르면 ID를 비운다. 그 외 제공자
@@ -55,7 +56,6 @@ EVENT_POLICY = {
     "subway.arrival": ("transit:latest:subway-arrival", 1080),
     "traffic.flow": ("traffic:latest:flow", 900),
     "traffic.incident": ("traffic:latest:incident", 2700),
-    "city.realtime": ("city:latest:area", 64800),
     "sdot.population": ("city:latest:sdot-population", 1800),
     "subway.alert": ("transit:latest:subway-alert", 2700),
     "topis.notice": ("traffic:latest:topis-notice", 2700),
@@ -65,7 +65,7 @@ EVENT_POLICY = {
 FRESHNESS_SECONDS = {
     "bus.position": 120, "bus.arrival": 120, "subway.position": 120,
     "subway.arrival": 120, "traffic.flow": 900, "traffic.incident": 600,
-    "city.realtime": 900, "sdot.population": 1800, "subway.alert": 600, "topis.notice": 1800,
+    "sdot.population": 1800, "subway.alert": 600, "topis.notice": 1800,
 }
 
 log = logging.getLogger(JOB_NAME)
@@ -106,7 +106,7 @@ def _usable_id(value: Column) -> Column:
 
 def _provider_key(event_type: Column, route_id: Column, vehicle_id: Column, stop_id: Column,
                   line_id: Column, station_id: Column, train_id: Column, link_id: Column,
-                  incident_id: Column, area_id: Column, sensor_id: Column, alert_id: Column,
+                  incident_id: Column, sensor_id: Column, alert_id: Column,
                   notice_id: Column) -> Column:
     """이벤트별 provider ID 조합으로 충돌 없는 최신값 키의 뒷부분을 만든다.
 
@@ -126,7 +126,6 @@ def _provider_key(event_type: Column, route_id: Column, vehicle_id: Column, stop
               & _usable_id(train_id), F.concat_ws(":", line_id, station_id, train_id))
         .when((event_type == "traffic.flow") & _usable_id(link_id), link_id)
         .when((event_type == "traffic.incident") & _usable_id(incident_id), incident_id)
-        .when((event_type == "city.realtime") & _usable_id(area_id), area_id)
         .when((event_type == "sdot.population") & _usable_id(sensor_id), sensor_id)
         .when((event_type == "subway.alert") & _usable_id(alert_id), alert_id)
         .when((event_type == "topis.notice") & _usable_id(notice_id), notice_id)
@@ -156,6 +155,8 @@ def transform(events: DataFrame, crosswalk=None) -> DataFrame:
     train_id = _json("$.providerTrainId")
     link_id = _json("$.providerLinkId")
     incident_id = _json("$.providerIncidentId")
+    # providerIds 구조는 기존 Redis 계약과 호환되도록 유지하되 city.realtime 자체는
+    # EVENT_POLICY에서 제외되어 전용 City Silver 잡만 해당 키를 쓴다.
     area_id = _json("$.providerAreaId")
     sensor_id = _json("$.providerSensorId")
     alert_id = _json("$.providerAlertId")
@@ -231,41 +232,6 @@ def transform(events: DataFrame, crosswalk=None) -> DataFrame:
         _for("traffic.incident", _first("$.raw.ROAD_NM", "$.raw.ROAD_NAME")).alias("roadName"),
         _for("traffic.incident", _first("$.raw.EXP_CLR_DATE", "$.raw.expectedClearDate", "$.raw.END_DATE")).alias("expectedClearAt"),
 
-        # CITYDATA는 제공 시점에 따라 객체 또는 1건 배열이다. 두 구조와 하위 단건/배열을 모두
-        # 허용하되, 값의 의미와 단위가 같은 공식 필드만 하나의 출력으로 합친다.
-        _for("city.realtime", _first(
-            "$.raw.LIVE_PPLTN_STTS.AREA_CONGEST_LVL",
-            "$.raw.LIVE_PPLTN_STTS[0].AREA_CONGEST_LVL",
-            "$.raw[0].LIVE_PPLTN_STTS.AREA_CONGEST_LVL",
-            "$.raw[0].LIVE_PPLTN_STTS[0].AREA_CONGEST_LVL",
-        )).alias("areaCongestionLevel"),
-        _for("city.realtime", _first(
-            "$.raw.LIVE_PPLTN_STTS.AREA_PPLTN_MIN",
-            "$.raw.LIVE_PPLTN_STTS[0].AREA_PPLTN_MIN",
-            "$.raw[0].LIVE_PPLTN_STTS.AREA_PPLTN_MIN",
-            "$.raw[0].LIVE_PPLTN_STTS[0].AREA_PPLTN_MIN",
-        ).cast("long")).alias("areaPopulationMin"),
-        _for("city.realtime", _first(
-            "$.raw.LIVE_PPLTN_STTS.AREA_PPLTN_MAX",
-            "$.raw.LIVE_PPLTN_STTS[0].AREA_PPLTN_MAX",
-            "$.raw[0].LIVE_PPLTN_STTS.AREA_PPLTN_MAX",
-            "$.raw[0].LIVE_PPLTN_STTS[0].AREA_PPLTN_MAX",
-        ).cast("long")).alias("areaPopulationMax"),
-        _for("city.realtime", _first(
-            "$.raw.ROAD_TRAFFIC_STTS.AVG_ROAD_DATA_SPEED",
-            "$.raw.ROAD_TRAFFIC_STTS[0].AVG_ROAD_DATA_SPEED",
-            "$.raw[0].ROAD_TRAFFIC_STTS.AVG_ROAD_DATA_SPEED",
-            "$.raw[0].ROAD_TRAFFIC_STTS[0].AVG_ROAD_DATA_SPEED",
-        ).cast("double")).alias("areaRoadSpeedKph"),
-        _for("city.realtime", _first(
-            "$.raw.WEATHER_STTS.TEMP", "$.raw.WEATHER_STTS[0].TEMP",
-            "$.raw[0].WEATHER_STTS.TEMP", "$.raw[0].WEATHER_STTS[0].TEMP",
-        ).cast("double")).alias("areaTemperatureCelsius"),
-        _for("city.realtime", _first(
-            "$.raw.WEATHER_STTS.PCP_MSG", "$.raw.WEATHER_STTS[0].PCP_MSG",
-            "$.raw[0].WEATHER_STTS.PCP_MSG", "$.raw[0].WEATHER_STTS[0].PCP_MSG",
-        )).alias("areaPrecipitationMessage"),
-
         _for("sdot.population", _first("$.raw.VISITOR_COUNT", "$.raw.VISITOR_CNT", "$.raw.PEOPLE").cast("long")).alias("visitorCount"),
         _for("sdot.population", _first("$.raw.ADMINISTRATIVE_DISTRICT", "$.raw.GU_NM", "$.raw.GU_NAME")).alias("sensorDistrict"),
 
@@ -283,7 +249,7 @@ def transform(events: DataFrame, crosswalk=None) -> DataFrame:
     #    upstream의 segmentIds만으로 성공 처리하지 않으며 다른 모드의 기존 ID는 유지한다.
     provider_key = _provider_key(
         F.col("eventType"), route_id, vehicle_id, stop_id, line_id, station_id, train_id,
-        link_id, incident_id, area_id, sensor_id, alert_id, notice_id,
+        link_id, incident_id, sensor_id, alert_id, notice_id,
     )
     # 서울의 기존 provider 키는 유지하고 다른 출처는 별도 공간으로 분리한다.
     is_bus=F.col("eventType").isin("bus.position","bus.arrival")

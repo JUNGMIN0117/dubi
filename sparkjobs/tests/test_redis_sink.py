@@ -75,15 +75,15 @@ class _FakeDataFrame:
         writer(iter(self.rows))
 
 
-def _row(event_id, occurred_at, collected_at):
+def _row(event_id, occurred_at, collected_at, key="traffic:latest:flow:L1", ttl=900):
     value = json.dumps(
         {"eventId": event_id, "occurredAt": occurred_at, "collectedAt": collected_at},
         separators=(",", ":"),
     )
     return {
-        KEY_COL: "traffic:latest:flow:L1",
+        KEY_COL: key,
         VALUE_COL: value,
-        TTL_COL: 900,
+        TTL_COL: ttl,
         EVENT_TIME_COL: occurred_at,
         COLLECTED_TIME_COL: collected_at,
     }
@@ -103,6 +103,18 @@ def test_late_event_cannot_replace_newer_redis_value(monkeypatch):
     stored_value, stored_ttl = state[newer[KEY_COL]]
     assert json.loads(stored_value)["eventId"] == "new"
     assert stored_ttl == 900
+
+
+def test_late_city_snapshot_cannot_replace_newer_area_value(monkeypatch):
+    state = {}
+    monkeypatch.setitem(sys.modules, "redis", SimpleNamespace(Redis=lambda **kwargs: _FakeRedis(state, **kwargs)))
+    key = "city:latest:area:POI009"
+    newer = _row("city-new", "2026-09-17T16:25:00.000+09:00", "2026-09-17T16:30:00.000+09:00", key, 64800)
+    older = _row("city-old", "2026-09-17T10:25:00.000+09:00", "2026-09-17T16:31:00.000+09:00", key, 64800)
+    write_latest_with_row_ttl(_FakeDataFrame([newer]), "redis", 6379, None)
+    write_latest_with_row_ttl(_FakeDataFrame([older]), "redis", 6379, None)
+    assert json.loads(state[key][0])["eventId"] == "city-new"
+    assert state[key][1] == 64800
 
 
 def test_latest_sink_rejects_missing_order_timestamp(monkeypatch):

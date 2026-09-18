@@ -46,9 +46,13 @@ bool evaluationHasReferenceTimes(ScheduleEvaluationV2 evaluation) =>
     evaluation.proposedDepartAt != null &&
     evaluation.estimatedArrivalAt != null;
 
-/// 참고값일 때 카드에 쓰는 상태 문장.
-const String evaluationReferenceMessage =
-    '참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.';
+/// 확정은 아니지만 시각을 보여줄 때 쓰는 상태 문장. 출처에 따라 말을 바꾼다.
+String evaluationGuidanceMessage(EvaluationGuidance guidance) =>
+    switch (guidance.source) {
+      'PROVIDER_ESTIMATE' => '기본 경로 기준으로 계산한 예상이에요. 실시간 정보가 들어오면 더 정확해져요.',
+      'EXPERIMENTAL_ESTIMATE' => '아직 시험 중인 예측이 섞여 있어요. 참고용이고 일정에 자동 적용은 안 해요.',
+      _ => '참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.',
+    };
 
 /// 확정하지 못한 결과에서 사용자에게 말할 대표 이유 한 문장.
 ///
@@ -778,7 +782,9 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final usable = evaluation.canRecommendAt(now);
+    // 시각을 보여줄지는 서버가 정한다. 확정 추천(초록)인지 참고값(파랑)인지만 앱이 나눈다.
+    final usable =
+        evaluation.canDisplayEstimateAt(now) && evaluation.guidance.canAccept;
     final historicalEstimate = evaluation.canShowHistoricalEstimateAt(now);
     // 서버가 stale 로 판정한 결과와, 유효시간(약 1분)만 지난 결과를 구분한다.
     // 앞은 다시 확인이 필요하다고 크게 알리고, 뒤는 "마지막 확인 결과"로 조용히 보여준다(2026-09-18 B안).
@@ -792,7 +798,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
     final referenceTimes =
         !showTimes &&
         !historicalEstimate &&
-        evaluationHasReferenceTimes(evaluation);
+        evaluation.canDisplayEstimateAt(now);
     final diagnostics = widget.developerDiagnostics;
     // 짧은 배지는 뜻이 전달되지 않아 문장으로 바꿨다. 판단 기준은 그대로다.
     final notes = [
@@ -819,7 +825,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
               : expiredOnly && usableWhenComputed
               ? '마지막으로 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.'
               : referenceTimes
-              ? evaluationReferenceMessage
+              ? evaluationGuidanceMessage(evaluation.guidance)
               : evaluation.state == EvaluationState.ready && !usable
               ? '정확한 출발 추천을 아직 확정하지 못했어요.'
               : _stateMessage(evaluation.state),
@@ -868,10 +874,14 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         if (referenceTimes) ...[
           _timeRow(
             Icons.directions_run_rounded,
-            '참고 출발',
+            evaluation.guidance.isProviderEstimate ? '기본 경로 기준 출발' : '참고 출발',
             evaluation.proposedDepartAt,
           ),
-          _timeRow(Icons.flag_outlined, '참고 도착', evaluation.estimatedArrivalAt),
+          _timeRow(
+            Icons.flag_outlined,
+            evaluation.guidance.isProviderEstimate ? '기본 경로 기준 도착' : '참고 도착',
+            evaluation.estimatedArrivalAt,
+          ),
         ],
         // 유효시간이 지난 결과는 언제 확인한 값인지 접지 않고 바로 보여준다.
         if (expiredOnly && computedAt != null)
@@ -963,12 +973,19 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           ),
         if (evaluation.quality.costCoverage != 'COMPLETE')
           _bullet(Icons.timelapse_rounded, '전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'),
+        // 부족한 항목의 건수와 종류는 사용자에게 뜻이 없다(후보 전체 구간을 센 숫자다).
+        // 한 문장으로만 알리고, 자세한 목록은 개발자 진단에서 본다(2026-09-18).
         if (evaluation.quality.missingInputs.isNotEmpty)
           _bullet(
             Icons.help_outline_rounded,
-            '부족한 정보: ${_groupMissing(evaluation.quality.missingInputs)}',
+            diagnostics
+                ? '부족한 정보: ${_groupMissing(evaluation.quality.missingInputs)}'
+                : '일부 실시간 정보가 없어 기본 경로 예상시간을 사용했어요.',
           ),
-        if (!widget.compact && evaluation.quality.fallbackReasons.isNotEmpty)
+        // 대체 계산 사유는 내부 코드를 옮긴 목록이라 일반 화면에서 뺀다.
+        if (!widget.compact &&
+            diagnostics &&
+            evaluation.quality.fallbackReasons.isNotEmpty)
           _bullet(
             Icons.swap_horiz_rounded,
             '대체 계산 사용: '

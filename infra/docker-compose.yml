@@ -245,15 +245,22 @@ services:
     image: mysql:${MYSQL_VERSION:-8.4}
     container_name: mysql
     profiles: ["data"]
-    mem_limit: 1g
+    # 2026-09-18 진단: 사용량 880MB/1GiB(86%)로 여유가 144MB뿐이라 2026-09-17 23:42 커널이
+    # mysqld 를 메모리 초과로 종료했다. 호스트 여유가 10.9GB 라 제한만 올린다.
+    mem_limit: 2g
     ports:
       - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
       - --default-time-zone=+09:00
+      # 버퍼 풀은 그대로 둔다. 16384쪽 중 15365쪽(94%)이 차 있어 줄이면 조회가 더 느려진다.
       - --innodb-buffer-pool-size=256M
-      - --max-connections=200
+      # 최대 연결은 실제 최대 사용 13(앱 연결 풀 10 + 관리·스케줄러)에 맞춘다.
+      # 최악의 경우 연결별 버퍼가 약 400MB에서 80MB 로 줄어든다.
+      - --max-connections=40
+      # 로그 버퍼 기본 64MiB 는 이 쓰기량에 과하다. 48MiB 를 고정 확보에서 되돌린다.
+      - --innodb-log-buffer-size=16M
       - --slow-query-log=ON
       - --long-query-time=1
     environment:
@@ -324,7 +331,9 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       ML_BUNDLE_DIR: /models/v12
       ML_MAX_WAITING_REQUESTS: ${ML_MAX_WAITING_REQUESTS:-4}
-      ML_QUEUE_WAIT_SECONDS: ${ML_QUEUE_WAIT_SECONDS:-5}
+      # 대기 상한 2초. 5초였을 때는 백엔드(호출 제한 5초)가 먼저 끊어 양쪽 모두 헛수고였다(2026-09-18).
+      # 밀린 요청은 빨리 MODEL_BUSY 로 돌려주고 호출자가 남은 예산을 과거 평균 계산에 쓰게 한다.
+      ML_QUEUE_WAIT_SECONDS: ${ML_QUEUE_WAIT_SECONDS:-2}
       ML_REFERENCE_CACHE_MIB: ${ML_REFERENCE_CACHE_MIB:-256}
     volumes:
       - ${ML_BUNDLE_DIR:-../artifacts/ml-serving/20260908-v12}:/models/v12:ro
@@ -417,6 +426,10 @@ services:
       DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE: ${DDUBI_TRANSIT_MAPPING_SUBWAY_MASTER_RESOURCE:-}
       DDUBI_METROPOLITAN_BUS_SHA256: ${DDUBI_METROPOLITAN_BUS_SHA256:-6999b0e67eb1af391de563291ce9cf4251b5ec271307e3f24de55d22d17318e2}   # metropolitan-bus-v6.json.manifest.json 의 sha256
       DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL: ${DDUBI_RECOMMENDATION_ML_PREVIEW_BASE_URL:-http://ml-serving:8000}
+      # ML 호출 한 건의 제한. 실측 단독 응답이 약 4초라 5초는 여유가 없었다. 상한은 코드에서 10초로 막는다.
+      # 이 값은 한 번의 호출에만 적용되고, 평가 전체 예산(첫 계산 30초·수동 10초)을 넘기지 않도록
+      # 남은 시간이 부족하면 호출을 시작하지 않는다.
+      DDUBI_RECOMMENDATION_ML_PREVIEW_TIMEOUT_MS: ${DDUBI_RECOMMENDATION_ML_PREVIEW_TIMEOUT_MS:-7000}
       # 버스 ML 적용 모드. SHADOW=숫자만 기록(기본, 시간 계산에 쓰지 않음) / TEST_APPLY=테스트 환경에서만 시험 적용
       # / PRODUCTION=운영 계약(production_ready·training_ids_verified·feature_version·features_as_of·valid_until·input_digest)을
       # 모두 만족한 응답만 적용. 어느 모드도 productionReady 를 true 로 바꾸지 않는다. 되돌리기는 이 값만 SHADOW 로.

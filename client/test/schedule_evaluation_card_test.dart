@@ -181,8 +181,9 @@ void main() {
 
   testWidgets('실행 상태와 stale 상태를 각각 다른 문구와 배지로 표시한다', (tester) async {
     final cases = <String, String>{
-      'pending': '예측을 준비하고 있습니다.',
-      'running': '최신 경로와 도착시각을 계산하고 있습니다.',
+      // 서버가 첫 계산(예산 30초) 중이면 상한 안내를 보여준다.
+      'pending': ScheduleEvaluationCard.initialComputingMessage,
+      'running': ScheduleEvaluationCard.initialComputingMessage,
       'failed': '최신 예측을 계산하지 못했습니다.',
       'stopped': '이 일정의 출발 전 감시가 종료됐습니다.',
       'departure_required': '일정 수정에서 출발 예정시각을 입력해 주세요.',
@@ -193,14 +194,16 @@ void main() {
       await tester.pumpWidget(_summary(fixtures[entry.key]!));
       expect(find.text(entry.value), findsOneWidget, reason: entry.key);
     }
-    expect(find.text('갱신 필요'), findsOneWidget);
+    expect(find.text('결과가 오래됐어요. 다시 계산해 주세요.'), findsOneWidget);
   });
 
   testWidgets('null ETA와 경로가 없어도 사고 원인을 추측하지 않는다', (tester) async {
     await tester.pumpWidget(_summary(fixtures['data']!));
 
-    expect(find.textContaining('예상 도착:'), findsNothing);
+    expect(find.textContaining('예상 도착'), findsNothing);
     expect(find.text('정확한 출발 추천을 아직 확정하지 못했어요.'), findsOneWidget);
+    // 확정하지 못한 이유는 내부 코드가 아니라 한 문장으로 붙는다.
+    expect(find.byKey(const Key('evaluationShortfallReason')), findsOneWidget);
     expect(find.text('경로 구간'), findsNothing);
     expect(find.textContaining('사고'), findsNothing);
   });
@@ -228,7 +231,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('검증용'), findsOneWidget);
+    expect(find.text('아직 시험 중인 예측이에요.'), findsOneWidget);
     final button = tester.widget<FilledButton>(
       find.byKey(const Key('acceptEvaluationButton')),
     );

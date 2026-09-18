@@ -28,10 +28,13 @@ import 'help_inquiry_screen.dart';
 import 'micro_animations.dart';
 import 'more_page_widgets.dart';
 import 'widgets.dart';
+import 'departure_headline.dart';
 import 'schedule_evaluation_card.dart';
 import '../domain/schedule_evaluation.dart';
+import '../domain/saved_route_display.dart';
 import '../domain/transit_reference.dart';
 import 'transit_reference_panel.dart';
+import '../core/diagnostics/developer_diagnostics.dart';
 
 export 'notification_center.dart';
 
@@ -1323,6 +1326,7 @@ class HomeScreen extends StatelessWidget {
                     schedules: data.summary.todaySchedules,
                     routes: routes,
                     evaluation: data.evaluation,
+                    scheduleId: schedule?.id,
                   );
           },
         );
@@ -1348,11 +1352,15 @@ class _MobileHomeContent extends StatelessWidget {
     required this.schedules,
     required this.routes,
     this.evaluation,
+    this.scheduleId,
   });
 
   final List<Schedule> schedules;
   final List<RouteOption> routes;
   final ScheduleEvaluationV2? evaluation;
+
+  /// 결론 한 줄을 누르면 열 일정. 다음 일정이 없으면 누를 수 없다.
+  final String? scheduleId;
 
   @override
   Widget build(BuildContext context) {
@@ -1410,11 +1418,13 @@ class _MobileHomeContent extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           if (evaluation != null) ...[
-            InfoCard(
-              child: ScheduleEvaluationSummary(
-                evaluation: evaluation!,
-                compact: true,
-              ),
+            // 홈은 결론 한 줄만 보여주고, 자세한 근거는 일정 상세에서 본다.
+            DepartureHeadline(
+              evaluation: evaluation,
+              compact: true,
+              onTap: scheduleId == null
+                  ? null
+                  : () => context.push('/schedules/$scheduleId'),
             ),
             const SizedBox(height: 16),
           ],
@@ -1935,11 +1945,12 @@ class _WebHomeContent extends StatelessWidget {
       ),
       const SizedBox(height: 20),
       if (evaluation != null) ...[
-        InfoCard(
-          child: ScheduleEvaluationSummary(
-            evaluation: evaluation!,
-            compact: true,
-          ),
+        DepartureHeadline(
+          evaluation: evaluation,
+          compact: true,
+          onTap: summary.nextSchedule == null
+              ? null
+              : () => context.push('/schedules/${summary.nextSchedule!.id}'),
         ),
         const SizedBox(height: 20),
       ],
@@ -3565,7 +3576,8 @@ class ScheduleDetailScreen extends StatelessWidget {
   }) {
     return AppPage(
       title: '일정 상세',
-      child: ListView(
+      child: _EvaluationHeadlineScope(
+        builder: (headline) => ListView(
         key: const Key('scheduleRouteOverview'),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: [
@@ -3642,6 +3654,14 @@ class ScheduleDetailScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+          // 사용자가 가장 먼저 알고 싶은 "몇 시에 나가면 되는지"를 맨 위에 둔다.
+          if (repository is ScheduleEvaluationRepository) ...[
+            ValueListenableBuilder<ScheduleEvaluationV2?>(
+              valueListenable: headline,
+              builder: (_, value, _) => DepartureHeadline(evaluation: value),
+            ),
+            const SizedBox(height: 10),
+          ],
           Container(
             padding: const EdgeInsets.fromLTRB(8, 10, 16, 10),
             decoration: BoxDecoration(
@@ -3746,77 +3766,32 @@ class ScheduleDetailScreen extends StatelessWidget {
           ],
           const SizedBox(height: 16),
           _SavedRouteList(
-            routes: savedRoutes,
+            display: SavedRouteDisplay.from(savedRoutes),
             unavailable: routesUnavailable,
             onSelected: recommendationApi == null
                 ? null
-                : (savedRoute) => _open(
-                    c,
-                    RouteMapScreen(
-                      repository: routeRepository,
-                      api: recommendationApi,
-                      savedRoute: savedRoute,
-                      selectedRoute: savedRoute.toRouteOption(schedule),
-                      departureLabel:
-                          savedRoute.fromName ?? schedule.departurePlace,
-                      destinationLabel: savedRoute.toName ?? schedule.place,
-                    ),
-                  ),
+                : (savedRoute) =>
+                      _openSavedRoute(c, schedule, savedRoute, routeRepository),
           ),
           const SizedBox(height: 16),
-          const Text(
-            '오늘의 이동 변수',
-            style: TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w900,
-              color: DdubiColors.navy,
+          // 네 칸 모두 "확인 필요"만 나오던 자리다. 값이 붙기 전까지는 한 줄로만 알린다.
+          const InfoCard(
+            child: Text(
+              '오늘의 이동 변수(날씨·혼잡도·도로 통제·지하철 지연)는 아직 확인되지 않았어요.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
             ),
-          ),
-          const SizedBox(height: 10),
-          const Row(
-            children: [
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.wb_sunny_rounded,
-                  label: '날씨',
-                  value: '확인 필요',
-                  color: Color(0xFFFFB323),
-                ),
-              ),
-              SizedBox(width: 7),
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.groups_rounded,
-                  label: '혼잡도',
-                  value: '확인 필요',
-                  color: Color(0xFF4D80E8),
-                ),
-              ),
-              SizedBox(width: 7),
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.directions_car_rounded,
-                  label: '도로 통제',
-                  value: '확인 필요',
-                  color: Color(0xFF00A873),
-                ),
-              ),
-              SizedBox(width: 7),
-              Expanded(
-                child: _RouteVariable(
-                  icon: Icons.directions_subway_rounded,
-                  label: '지하철 지연',
-                  value: '확인 필요',
-                  color: Color(0xFF00A873),
-                ),
-              ),
-            ],
           ),
           const SizedBox(height: 14),
           if (repository is ScheduleEvaluationRepository)
-            ScheduleEvaluationCard(
-              repository: repository as ScheduleEvaluationRepository,
-              scheduleId: schedule.id,
+            // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.
+            ValueListenableBuilder<bool>(
+              valueListenable: DeveloperDiagnostics.enabled,
+              builder: (_, diagnostics, _) => ScheduleEvaluationCard(
+                repository: repository as ScheduleEvaluationRepository,
+                scheduleId: schedule.id,
+                developerDiagnostics: diagnostics,
+                headline: headline,
+              ),
             )
           else
             const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
@@ -3857,6 +3832,7 @@ class ScheduleDetailScreen extends StatelessWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -3882,7 +3858,18 @@ class ScheduleDetailScreen extends StatelessWidget {
     if (confirmed != true) return;
     try {
       await repository.cancelSchedule(schedule.id);
+      // 서버는 soft 취소(status=CANCELED)라 목록 API가 취소 일정도 돌려준다.
+      // 목록·홈은 저장소에서 취소 일정을 걸러내므로 여기서는 목록으로 돌아가기만 한다.
       if (context.mounted) context.go('/schedules');
+    } on ScheduleCommandFailure catch (failure) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(cancelFailureMessage(failure))),
+      );
+      // 이미 없는 일정은 더 시도할 수 없다. 목록으로 돌아가 실제 상태를 다시 읽는다.
+      if (failure.kind == ScheduleCommandFailureKind.notFound) {
+        context.go('/schedules');
+      }
     } on Object {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3890,6 +3877,53 @@ class ScheduleDetailScreen extends StatelessWidget {
       );
     }
   }
+
+  /// 저장된 추천 경로 상세를 연다.
+  ///
+  /// 화면 순번이나 걸러낸 배열의 위치가 아니라 서버가 준 경로 ID로 연다. 필수 ID가 없으면
+  /// 앱을 끄지 않고 안내만 한다. 이미 상세로 넘어가는 중이면 두 번 열지 않는다.
+  void _openSavedRoute(
+    BuildContext c,
+    Schedule schedule,
+    SavedRouteSummary savedRoute,
+    DdubiRepository routeRepository,
+  ) {
+    if (savedRoute.routeId.trim().isEmpty) {
+      ScaffoldMessenger.of(c).showSnackBar(
+        const SnackBar(
+          key: Key('savedRouteOpenError'),
+          content: Text('경로 상세를 불러올 수 없어요.'),
+        ),
+      );
+      return;
+    }
+    if (ModalRoute.of(c)?.isCurrent != true) return;
+    _open(
+      c,
+      RouteMapScreen(
+        repository: routeRepository,
+        api: recommendationApi,
+        savedRoute: savedRoute,
+        selectedRoute: savedRoute.toRouteOption(schedule),
+        departureLabel: savedRoute.fromName ?? schedule.departurePlace,
+        destinationLabel: savedRoute.toName ?? schedule.place,
+      ),
+    );
+  }
+
+  /// 취소 실패를 원인별로 다른 문구로 안내한다. 남의 일정·없는 일정·완료된 일정·연결 문제를 한 문구로 합치지 않는다.
+  @visibleForTesting
+  static String cancelFailureMessage(ScheduleCommandFailure failure) =>
+      switch (failure.kind) {
+        ScheduleCommandFailureKind.unauthenticated =>
+          '로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.',
+        ScheduleCommandFailureKind.forbidden => '다른 사용자의 일정은 취소할 수 없어요.',
+        ScheduleCommandFailureKind.notFound => '이미 삭제된 일정이에요. 목록을 다시 불러왔어요.',
+        ScheduleCommandFailureKind.conflict => '이미 완료된 일정은 취소할 수 없어요.',
+        ScheduleCommandFailureKind.network =>
+          '연결이 불안정해 일정을 취소하지 못했어요. 잠시 후 다시 시도해주세요.',
+        ScheduleCommandFailureKind.unknown => '일정을 취소하지 못했어요. 잠시 후 다시 시도해주세요.',
+      };
 
   Future<void> _recordArrival(BuildContext context, Schedule schedule) async {
     final confirmed = await showDialog<bool>(
@@ -3942,47 +3976,78 @@ class _ScheduleRecommendationData {
 
 class _SavedRouteList extends StatelessWidget {
   const _SavedRouteList({
-    required this.routes,
+    required this.display,
     required this.unavailable,
     required this.onSelected,
   });
 
-  final List<SavedRouteSummary> routes;
+  final SavedRouteDisplay display;
   final bool unavailable;
   final ValueChanged<SavedRouteSummary>? onSelected;
 
   @override
-  Widget build(BuildContext context) => Column(
-    key: const Key('savedRouteList'),
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text(
-        '저장된 추천 경로',
-        style: TextStyle(
-          fontSize: 19,
-          fontWeight: FontWeight.w900,
-          color: DdubiColors.navy,
+  Widget build(BuildContext context) {
+    final routes = display.visible;
+    return Column(
+      key: const Key('savedRouteList'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '저장된 추천 경로',
+          style: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w900,
+            color: DdubiColors.navy,
+          ),
         ),
-      ),
-      const SizedBox(height: 9),
-      if (unavailable)
-        const InfoCard(child: Text('저장된 경로를 불러오지 못했어요.'))
-      else if (routes.isEmpty)
-        const InfoCard(
-          key: Key('savedRouteEmptyState'),
-          child: Text('아직 평가된 추천 경로가 없어요.'),
-        )
-      else
-        for (final route in routes) ...[
-          _SavedRouteTile(route: route, onTap: onSelected),
-          if (route != routes.last) const SizedBox(height: 8),
+        const SizedBox(height: 9),
+        if (unavailable)
+          const InfoCard(child: Text('저장된 경로를 불러오지 못했어요.'))
+        else if (routes.isEmpty)
+          const InfoCard(
+            key: Key('savedRouteEmptyState'),
+            child: Text('아직 평가된 추천 경로가 없어요.'),
+          )
+        else ...[
+          // 화면 순번은 1부터 다시 매긴다. 중복을 묶은 뒤 서버 순위(1,2,6,8,10)를 그대로
+          // 보여주면 사용자에게는 번호가 건너뛴 것처럼 보인다. 서버 순위는 개발자 진단에 남는다.
+          for (var i = 0; i < routes.length; i++) ...[
+            _SavedRouteTile(
+              route: routes[i],
+              displayRank: i + 1,
+              onTap: onSelected,
+            ),
+            if (i != routes.length - 1) const SizedBox(height: 8),
+          ],
+          // 후보 수와 묶인 개수는 개발자 진단에서만 본다. 일반 사용자 화면에는 숫자를 내보내지 않는다.
+          ValueListenableBuilder<bool>(
+            valueListenable: DeveloperDiagnostics.enabled,
+            builder: (_, diagnostics, _) => diagnostics
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      display.diagnosticsLine,
+                      key: const Key('savedRouteDiagnostics'),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _SavedRouteTile extends StatelessWidget {
-  const _SavedRouteTile({required this.route, required this.onTap});
+  const _SavedRouteTile({
+    required this.route,
+    required this.displayRank,
+    required this.onTap,
+  });
+
+  /// 화면에 보이는 순번(1부터). 서버가 준 순위와 다를 수 있다.
+  final int displayRank;
 
   final SavedRouteSummary route;
   final ValueChanged<SavedRouteSummary>? onTap;
@@ -4030,7 +4095,7 @@ class _SavedRouteTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          route.selected ? '선택된 추천 경로' : '${route.rankNo}순위 경로',
+                          route.selected ? '선택된 추천 경로' : '$displayRank순위 경로',
                           style: const TextStyle(
                             fontWeight: FontWeight.w900,
                             color: DdubiColors.navy,
@@ -4264,52 +4329,6 @@ class _FinalRouteSummary extends StatelessWidget {
 
   Widget _divider() =>
       Container(width: 1, height: 50, color: const Color(0xFFE4ECEF));
-}
-
-class _RouteVariable extends StatelessWidget {
-  const _RouteVariable({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 3),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .09),
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Column(
-      children: [
-        Icon(icon, size: 23, color: color),
-        const SizedBox(height: 5),
-        Text(
-          label,
-          maxLines: 1,
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF617083),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w900,
-            color: DdubiColors.navy,
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 class ScheduleEditScreen extends StatelessWidget {
@@ -5288,6 +5307,7 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
   KakaoMapController? _controller;
   StreamSubscription<CameraMoveEndEvent>? _cameraMoveSubscription;
   List<_ProjectedRouteSegment> _projectedSegments = const [];
+  var _projectionGeneration = 0;
 
   LatLng get _center {
     final bounds = widget.routeMap.bounds;
@@ -5385,29 +5405,51 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
     }
   }
 
+  /// 지도 좌표를 화면 좌표로 바꿔 경로선을 그린다.
+  ///
+  /// 지도가 돌려주는 값은 기기 물리 픽셀이고 캔버스는 논리 픽셀을 쓴다. 화면 배율로 나누지
+  /// 않으면 선이 실제 위치에서 배율만큼 밀려 강 위 같은 엉뚱한 곳에 그려진다.
+  /// 지도를 움직이는 동안 먼저 시작한 계산이 뒤늦게 반영되면 선이 끊겨 보이므로, 세대 번호로
+  /// 가장 최근 계산만 반영한다.
   Future<void> _refreshProjectedSegments() async {
     final controller = _controller;
     if (controller == null || kIsWeb) return;
+    final generation = ++_projectionGeneration;
+    final pixelRatio = View.of(context).devicePixelRatio;
     final projected = <_ProjectedRouteSegment>[];
     try {
       for (final segment in widget.routeMap.segments) {
-        final points = <Offset>[];
-        for (final coordinate in segment.coordinates) {
-          final point = await controller.toScreenPoint(
-            position: LatLng(
-              latitude: coordinate.latitude,
-              longitude: coordinate.longitude,
+        final rawPoints = await Future.wait(
+          segment.coordinates.map(
+            (coordinate) => controller.toScreenPoint(
+              position: LatLng(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+              ),
             ),
-          );
-          if (point != null) points.add(point);
-        }
+          ),
+        );
+        final points = rawPoints
+            .whereType<Offset>()
+            .map((point) => point / pixelRatio)
+            .toList(growable: false);
         projected.add(
           _ProjectedRouteSegment(mode: segment.mode, points: points),
         );
       }
-      if (mounted) setState(() => _projectedSegments = projected);
+      if (mounted && generation == _projectionGeneration) {
+        setState(() => _projectedSegments = projected);
+      }
     } catch (error) {
       debugPrint('Saved route coordinate projection failed: $error');
+    }
+  }
+
+  /// 지도를 만지는 순간 이전 화면 좌표는 더 이상 맞지 않는다. 지우고 이동이 끝나면 다시 그린다.
+  void _hideProjectedRoute(PointerDownEvent _) {
+    _projectionGeneration++;
+    if (_projectedSegments.isNotEmpty) {
+      setState(() => _projectedSegments = const []);
     }
   }
 
@@ -5425,13 +5467,16 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: KakaoMapConfig.isReady
-                ? KakaoMap(
-                    initialPosition: _center,
-                    initialLevel: kIsWeb ? 5 : 13,
-                    onMapCreated: _onMapCreated,
-                  )
-                : const ColoredBox(color: Color(0xFFEAF2EC)),
+            child: Listener(
+              onPointerDown: _hideProjectedRoute,
+              child: KakaoMapConfig.isReady
+                  ? KakaoMap(
+                      initialPosition: _center,
+                      initialLevel: kIsWeb ? 5 : 13,
+                      onMapCreated: _onMapCreated,
+                    )
+                  : const ColoredBox(color: Color(0xFFEAF2EC)),
+            ),
           ),
           if (hasCoordinates)
             Positioned.fill(
@@ -5533,35 +5578,11 @@ class _SavedRoutePolylinePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (projectedSegments.isNotEmpty) {
-      for (final segment in projectedSegments) {
-        _drawSegment(canvas, segment.mode, segment.points);
-      }
-      return;
-    }
-    final bounds = routeMap.bounds;
-    if (bounds == null) return;
-    const padding = 28.0;
-    final width = size.width - padding * 2;
-    final height = size.height - padding * 2;
-    final lngRange = bounds.maxLng - bounds.minLng;
-    final latRange = bounds.maxLat - bounds.minLat;
-
-    Offset point(RouteCoordinate coordinate) => Offset(
-      padding +
-          (lngRange == 0
-              ? width / 2
-              : (coordinate.longitude - bounds.minLng) / lngRange * width),
-      padding +
-          (latRange == 0
-              ? height / 2
-              : (bounds.maxLat - coordinate.latitude) / latRange * height),
-    );
-
-    for (final segment in routeMap.segments) {
-      if (segment.coordinates.length < 2) continue;
-      final points = segment.coordinates.map(point).toList(growable: false);
-      _drawSegment(canvas, segment.mode, points);
+    // 지도 투영으로 얻은 화면 좌표만 그린다. 예전에는 좌표 범위를 위젯 크기에 비례 배치하는
+    // 임시 방식으로도 그렸는데, 실제 지도 타일과 맞지 않아 경로가 강 위 같은 엉뚱한 곳에
+    // 그려졌다. 투영 전에는 아무것도 그리지 않고 지도만 보여준다.
+    for (final segment in projectedSegments) {
+      _drawSegment(canvas, segment.mode, segment.points);
     }
   }
 
@@ -7719,6 +7740,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 14),
             _helpCard(context),
             const SizedBox(height: 14),
+            _developerOptionsCard(),
+            const SizedBox(height: 14),
             _logoutCard(context),
           ],
         ),
@@ -8640,6 +8663,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
+  /// 개발자 옵션. 켜면 일정 상세의 이동 예측 카드에 모델 버전·적용 여부·원본 코드가 붙는다.
+  /// 디버그 빌드는 기본 켜짐, 릴리스는 기본 꺼짐이며 앱을 다시 시작하면 빌드 기본값으로 돌아간다.
+  Widget _developerOptionsCard() => Material(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(22),
+    child: ValueListenableBuilder<bool>(
+      valueListenable: DeveloperDiagnostics.enabled,
+      builder: (_, enabled, _) => SwitchListTile(
+        key: const Key('developerDiagnosticsSwitch'),
+        value: enabled,
+        onChanged: (value) => DeveloperDiagnostics.enabled.value = value,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 17, vertical: 6),
+        title: const Text(
+          '개발자 진단 표시',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: const Text(
+          '이동 예측 카드에 모델 버전·적용 여부·원본 코드를 함께 보여줘요. 일반 사용에는 필요 없어요.',
+        ),
+      ),
+    ),
+  );
+
   Widget _helpCard(BuildContext context) => Material(
     color: Colors.white,
     borderRadius: BorderRadius.circular(22),
@@ -9504,4 +9551,31 @@ class _SettingsPermissionRow extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// 일정 상세 안에서 "결론 한 줄"과 아래 이동 예측 카드가 같은 결과를 쓰게 묶어준다.
+///
+/// 결론을 따로 조회하면 카드와 다른 값이 보일 수 있다. 조회는 카드 한 곳에서만 하고
+/// 그 결과를 이 통로로 위쪽에 전달한다.
+class _EvaluationHeadlineScope extends StatefulWidget {
+  const _EvaluationHeadlineScope({required this.builder});
+
+  final Widget Function(ValueNotifier<ScheduleEvaluationV2?>) builder;
+
+  @override
+  State<_EvaluationHeadlineScope> createState() =>
+      _EvaluationHeadlineScopeState();
+}
+
+class _EvaluationHeadlineScopeState extends State<_EvaluationHeadlineScope> {
+  final ValueNotifier<ScheduleEvaluationV2?> _headline = ValueNotifier(null);
+
+  @override
+  void dispose() {
+    _headline.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_headline);
 }

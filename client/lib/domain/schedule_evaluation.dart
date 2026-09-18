@@ -91,6 +91,9 @@ enum DurationSource {
   realtimeArrival,
   timetable,
   mlPreview,
+
+  /// 운영 계약(PRODUCTION)을 만족한 ML 예측. 현재 서버 기본 모드(SHADOW)에서는 나오지 않는다.
+  mlProduction,
   busHistoricalReference,
   unknown;
 
@@ -101,6 +104,7 @@ enum DurationSource {
     'REALTIME_ARRIVAL' => realtimeArrival,
     'TIMETABLE' || 'SUBWAY_TIMETABLE' => timetable,
     'ML_PREVIEW' => mlPreview,
+    'ML_PRODUCTION' => mlProduction,
     'BUS_HISTORICAL_REFERENCE' => busHistoricalReference,
     _ => unknown,
   };

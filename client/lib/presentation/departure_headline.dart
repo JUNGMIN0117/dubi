@@ -119,29 +119,16 @@ class DepartureHeadlineContent {
     return '일정 시작 ${_minutes(spare)}분 전 도착이에요.';
   }
 
-  /// 확정하지 못한 이유를 한 줄로. 부족한 항목이 여러 건이어도 대표 하나만 말한다.
+  /// 확정하지 못한 이유를 한 줄로. 이유가 여럿이어도 대표 하나만 말하고, 카드와 같은 문장을 쓴다.
+  /// 서버는 새 정보가 들어오면 스스로 다시 계산하므로 그 사실을 덧붙여 "고장"으로 읽히지 않게 한다.
   static String? _shortfallDetail(ScheduleEvaluationV2 evaluation) {
-    if (evaluation.decision == DepartureDecision.searchIncomplete) {
-      return '경로를 끝까지 살펴보지 못했어요. 다시 계산해 주세요.';
+    final reason = evaluationShortfallReason(evaluation);
+    if (reason == null) return null;
+    if (evaluation.decision == DepartureDecision.searchIncomplete ||
+        evaluation.decision == DepartureDecision.routeUnavailable) {
+      return reason;
     }
-    if (evaluation.decision == DepartureDecision.routeUnavailable) {
-      return '지금 이용할 수 있는 경로를 찾지 못했어요.';
-    }
-    final missing = evaluation.quality.missingInputs;
-    if (missing.isNotEmpty) {
-      final labels = <String>{
-        for (final input in missing) evaluationMissingInputLabel(input),
-      };
-      final first = labels.first;
-      return labels.length > 1 ? '$first 외 ${labels.length - 1}가지가 부족해요.' : '$first.';
-    }
-    if (evaluation.quality.costCoverage != 'COMPLETE') {
-      return '이동 시간 일부를 아직 확인하지 못했어요.';
-    }
-    if (evaluation.quality.preview || !evaluation.quality.productionEligible) {
-      return '아직 시험 중인 예측이라 일정에 적용하지 않아요.';
-    }
-    return null;
+    return '$reason 새 정보가 들어오면 자동으로 다시 계산해요.';
   }
 
   static int _minutes(int seconds) => (seconds / 60).round().clamp(1, 1 << 30);

@@ -16,10 +16,13 @@ Future<ScheduleEvaluationV2> _fixture(String name) async {
 
 /// 호출 순서대로 결과·실패·미완료(Completer)를 돌려주는 저장소.
 class _SequenceRepository implements ScheduleEvaluationRepository {
-  _SequenceRepository(this.responses, {this.refreshCompleter});
+  _SequenceRepository(this.responses, {this.refreshCompleter, this.refreshFailure});
 
   final List<Object> responses;
   final Completer<void>? refreshCompleter;
+
+  /// 다시 계산 요청이 이 실패로 끝나게 한다. 409 계산 중 안내 시험에 쓴다.
+  final ScheduleEvaluationFailure? refreshFailure;
   var latestCalls = 0;
   var refreshCalls = 0;
 
@@ -41,6 +44,7 @@ class _SequenceRepository implements ScheduleEvaluationRepository {
   @override
   Future<void> refreshEvaluation(String id) {
     refreshCalls++;
+    if (refreshFailure != null) return Future.error(refreshFailure!);
     return refreshCompleter?.future ?? Future.value();
   }
 }
@@ -137,6 +141,54 @@ void main() {
     second.complete(keep);
     await tester.pump();
     expect(find.text('평가가 완료됐습니다.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('서버가 계산 중(PENDING)이면 다시 계산 버튼을 잠그고 이유를 알린다', (
+    tester,
+  ) async {
+    final repository = _SequenceRepository([pending]);
+    await tester.pumpWidget(_card(repository));
+    await tester.pumpAndSettle();
+
+    // 첫 계산이 도는 동안 사용자가 다시 계산을 눌러 409 를 받는 일을 화면에서 먼저 막는다.
+    expect(_refreshEnabled(tester), isFalse);
+    expect(find.byKey(const Key('refreshLockedNotice')), findsOneWidget);
+    expect(find.text(ScheduleEvaluationCard.refreshLockedMessage), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('계산이 끝나(READY) 결과가 오면 다시 계산 버튼이 열린다', (tester) async {
+    final repository = _SequenceRepository([keep]);
+    await tester.pumpWidget(_card(repository));
+    await tester.pumpAndSettle();
+
+    expect(_refreshEnabled(tester), isTrue);
+    expect(find.byKey(const Key('refreshLockedNotice')), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('409 INVALID_STATE(이미 계산 중)는 오류가 아니라 계산 중 안내로 보여준다', (
+    tester,
+  ) async {
+    final repository = _SequenceRepository(
+      [keep],
+      refreshFailure: const ScheduleEvaluationFailure(
+        kind: EvaluationFailureKind.staleEvaluation,
+        message: '이 일정은 이미 계산 중입니다.',
+        code: 'INVALID_STATE',
+      ),
+    );
+    await tester.pumpWidget(_card(repository));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('다시 계산'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(ScheduleEvaluationCard.alreadyComputingMessage), findsOneWidget);
+    expect(find.byKey(const Key('evaluationActionError')), findsNothing);
+    // 추천이 바뀐 경우의 안내와 섞이지 않는다.
+    expect(find.text('추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
+import '../diagnostics/app_log.dart';
 
 /// Kakao Maps keys are supplied at build/run time so they are never committed.
 class KakaoMapConfig {
@@ -39,8 +40,8 @@ class KakaoMapConfig {
       _initialized = true;
     } catch (error, stackTrace) {
       _initializationError = error;
-      debugPrint('Kakao Maps initialization failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
+      AppLog.debug('Kakao Maps initialization failed: $error');
+      AppLog.stack(stackTrace);
     }
   }
 }

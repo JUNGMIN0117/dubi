@@ -35,6 +35,7 @@ import '../domain/saved_route_display.dart';
 import '../domain/transit_reference.dart';
 import 'transit_reference_panel.dart';
 import '../core/diagnostics/developer_diagnostics.dart';
+import '../core/diagnostics/app_log.dart';
 
 export 'notification_center.dart';
 
@@ -5482,7 +5483,7 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
       }
       await _showEntireRoute();
     } catch (error) {
-      debugPrint('Saved route map setup failed: $error');
+      AppLog.debug('Saved route map setup failed: $error');
     }
   }
 
@@ -5516,7 +5517,7 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
       );
       await _refreshProjectedSegments();
     } catch (error) {
-      debugPrint('Saved route camera move failed: $error');
+      AppLog.debug('Saved route camera move failed: $error');
     }
   }
 
@@ -5556,7 +5557,7 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
         setState(() => _projectedSegments = projected);
       }
     } catch (error) {
-      debugPrint('Saved route coordinate projection failed: $error');
+      AppLog.debug('Saved route coordinate projection failed: $error');
     }
   }
 
@@ -5809,7 +5810,7 @@ class _RouteMapViewState extends State<_RouteMapView> {
       );
       await _showEntireRoute();
     } catch (error) {
-      debugPrint('Kakao Maps marker setup failed: $error');
+      AppLog.debug('Kakao Maps marker setup failed: $error');
     }
   }
 
@@ -5824,7 +5825,7 @@ class _RouteMapViewState extends State<_RouteMapView> {
       if (currentZoomLevel == null) return;
       await _moveCamera(position: _current, zoomLevel: currentZoomLevel);
     } catch (error) {
-      debugPrint('Kakao Maps zoom level lookup failed: $error');
+      AppLog.debug('Kakao Maps zoom level lookup failed: $error');
     }
   }
 
@@ -5840,7 +5841,7 @@ class _RouteMapViewState extends State<_RouteMapView> {
         animation: _cameraAnimation,
       );
     } catch (error) {
-      debugPrint('Kakao Maps camera move failed: $error');
+      AppLog.debug('Kakao Maps camera move failed: $error');
     }
   }
 

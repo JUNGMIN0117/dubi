@@ -5,6 +5,7 @@
 Spring 추천 결과를 자동 변경하지 않는다. 로컬은 127.0.0.1:8000으로 실행한다.
 """
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -15,8 +16,9 @@ from fastapi.responses import JSONResponse
 
 from predictor import BundleError, Predictor
 from environment_features import prepare
-from environment_schema import EnvironmentRequest
+from environment_schema import EnvironmentPoint, EnvironmentRequest
 from environment_model import EnvironmentModel
+from online_feature_assembler import OnlineFeatureAssembler, OnlineFeatureSettings
 from schemas import BatchRequest, BatchResponse, InvalidRequest, ServiceUnavailable
 from serving_runtime import InferenceQueue, QueueBusy, RuntimeSettings
 
@@ -24,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_BUNDLE = Path(__file__).resolve().parent.parent / 'artifacts/ml-serving/20260908-v12'
 
 
-def create_app(predictor=None, settings=None):
+def create_app(predictor=None, settings=None, online_feature_assembler=None):
     """테스트에서는 객체를 주입하며 실서비스에서는 환경변수로 묶음 경로를 고정한다.
 
 로딩 실패를 정상값으로 숨기지 않고 readiness 503으로 노출한다. 예외 원문에는
@@ -35,6 +37,23 @@ def create_app(predictor=None, settings=None):
         policy = settings if settings is not None else RuntimeSettings.from_env(os.environ)
         application.state.inference_queue = InferenceQueue(policy)
         application.state.environment_model = None
+        application.state.online_feature_assembler = online_feature_assembler
+        application.state.online_feature_redis = None
+        try:
+            online_settings = OnlineFeatureSettings.from_env(os.environ)
+            if application.state.online_feature_assembler is None and online_settings.enabled:
+                import redis
+                application.state.online_feature_redis = redis.Redis(
+                    host=online_settings.host, port=online_settings.port,
+                    password=online_settings.password, decode_responses=True,
+                    socket_timeout=online_settings.socket_timeout_seconds,
+                    socket_connect_timeout=online_settings.socket_timeout_seconds,
+                )
+                application.state.online_feature_assembler = OnlineFeatureAssembler(
+                    application.state.online_feature_redis, online_settings.cache_ttl_seconds
+                )
+        except Exception as error:
+            LOGGER.error('ONLINE_FEATURE_STORE_INIT_FAILED type=%s', type(error).__name__)
         environment_path = os.environ.get('ML_ENVIRONMENT_BUNDLE_DIR')
         if environment_path:
             try: application.state.environment_model = EnvironmentModel(environment_path)
@@ -50,6 +69,8 @@ def create_app(predictor=None, settings=None):
             yield
         finally:
             await application.state.inference_queue.close()
+            if application.state.online_feature_redis is not None:
+                application.state.online_feature_redis.close()
 
     application = FastAPI(title='DDUBI 버스 모델 예측 확인', version='1.0.0', lifespan=lifespan)
 
@@ -113,6 +134,20 @@ def create_app(predictor=None, settings=None):
             return dict(prepared=prepared,prediction=prediction)
         except QueueBusy: raise HTTPException(status_code=503,detail='MODEL_BUSY') from None
         except Exception: raise HTTPException(status_code=503,detail='MODEL_UNAVAILABLE') from None
+
+    @application.post('/v1/bus/features:latest', responses={503: {'model': ServiceUnavailable}})
+    async def latest_features(request: EnvironmentPoint):
+        """segmentId 대응표를 따라 Redis 최신값을 읽고 시각 검사를 통과한 Feature만 조립한다."""
+        assembler = application.state.online_feature_assembler
+        if assembler is None:
+            raise HTTPException(status_code=503, detail='FEATURE_STORE_NOT_READY')
+        try:
+            return await asyncio.to_thread(assembler.assemble, request.model_dump(mode='json'))
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(status_code=422, detail='INVALID_ENVIRONMENT_POINT') from None
+        except Exception as error:
+            LOGGER.error('ONLINE_FEATURE_ASSEMBLY_FAILED type=%s', type(error).__name__)
+            raise HTTPException(status_code=503, detail='FEATURE_STORE_UNAVAILABLE') from None
 
     return application
 

@@ -69,12 +69,19 @@ def test_seoul_position_pair_survives_spark_revalidation(spark, tmp_path):
     raw = dict(routeId='1', vehId='V', sectOrd='1', lastStnId='10', stopFlag='0')
     event = build_event(make_source('bus_location'), to_record('bus_location', raw, '1', cw), now_kst())
     index = load_crosswalk(spark, path, sha)
-    result = to_redis_rows(latest_per_provider(transform(_kafka_df(spark, [event]), index))).collect()
+    events = _kafka_df(spark, [event])
+    result = to_redis_rows(latest_per_provider(transform(events, index))).collect()
     assert len(result) == 1
     value = json.loads(result[0][VALUE_COL])
     assert value['segmentIds'] == ['BUS:1:10:11']
     assert value['canonicalMapping']['scope'] == 'EXPLICIT_ADJACENT_STOP_PAIR'
     assert result[0][KEY_COL] == 'transit:latest:bus-position:1:V'
+
+    from common.bus_stream_sink import prepare_live, segment_redis_rows
+    segment = segment_redis_rows(prepare_live(events, transform(events, index))).collect()
+    assert len(segment) == 1
+    assert segment[0].redisKey == 'ml:latest:bus-segment:BUS:1:10:11'
+    assert json.loads(segment[0].redisValue)['segmentId'] == 'BUS:1:10:11'
 
 
 def test_missing_crosswalk_or_unknown_namespace_never_accepts_claimed_bus_ids(spark):

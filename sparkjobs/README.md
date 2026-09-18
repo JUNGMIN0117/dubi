@@ -145,6 +145,25 @@ sh submit.sh batch/export_bus_road_mapping.py \
 기록한다. 동일 segmentId가 서로 다른 도로 경로를 가지거나 일부 occurrence만 매핑되면 링크를
 확정하지 않고 `AMBIGUOUS` 또는 `PARTIAL`로 남긴다. HDFS 쓰기 실패는 Redis 배포를 막지 않는다.
 
+City Silver 도로 좌표가 HDFS에 쌓인 뒤 버스 구간→도시 영역 대응표를 배포한다. 도시데이터는
+서울 전체가 아니라 주요 장소만 제공하므로 먼 구간은 `OUT_OF_COVERAGE`로 보존한다.
+
+```sh
+sh submit.sh batch/export_bus_city_mapping.py \
+  --crosswalk /opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz \
+  --crosswalk-sha e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd \
+  --bus-master /opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz \
+  --bus-master-sha e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64 \
+  --city-road-input 'hdfs://hdfs-namenode:9000/ddubi/silver/city/realtime-v1/live/batches/batch=*/road-link-snapshot' \
+  --output hdfs://hdfs-namenode:9000/ddubi/master/bus-city-area/version=20260918-v1
+```
+
+기본 거리 정책은 300m, 여러 영역 판정 여유는 50m다. 운영 자료로 조정한 경우 실행 인자와
+출력의 정책값을 함께 보존한다. 위 SHA는 `metropolitan-bus-v6` 파일을 확인한 값이다.
+HDFS의 `road-link-snapshot` Parquet이 실제로 생성된 뒤 실행하고, Redis 대응표는 기본 30일
+TTL이므로 만료 전에 재배포한다. 자세한 판정은
+[버스 구간→도시 영역 계약](../docs/contracts/bus-city-mapping.md)을 따른다.
+
 ## 구간 기준선·판정 실행 준비 (2026-09-10)
 
 Collector는 변경하지 않는다. 실제 구간 통과시간 정규화 입력이 있어야 아래 계산을 운영에 연결할 수 있다.

@@ -94,7 +94,8 @@ Windows sandbox의 임시 폴더 접근 문제가 있으면 프로젝트 `data/`
 - 최대 배치·동시 부하·응답시간/메모리와 Backend timeout 합의
 - 승인된 `BusPredictionPort` HTTP 어댑터 및 내부 배포 주소 확정
 
-현재 단계는 로컬 수치 확인이다. Redis 보정·기준선 적재·Spring 추천 정책을 변경하지 않는다.
+기존 v12 예측은 로컬 수치 확인 단계이며 기준선 적재·Spring 추천 정책을 변경하지 않는다.
+Redis 최신 Feature 조립은 아래의 별도 opt-in API로만 제공한다.
 HTTP 계약: `docs/contracts/ml-serving-http.md`.
 
 ## 백엔드 전달 자료
@@ -113,3 +114,23 @@ Backend 매핑 대응표, 오류 JSON, 동시 호출/timeout과 기존 포트의
 ## 별도 환경 특성 전처리·학습·예측
 
 날씨·도로·사건의 point-in-time 전처리와 별도 모델 경계는 [환경 ML 계약](../docs/contracts/environment-ml.md)에 있다. `environment:prepare`와 `environment:predict`는 같은 전처리를 사용하며 v12 모델을 교체하지 않는다. 새 모델 미등록은 503이다.
+## Redis 최신 Feature 조립
+
+`ML_REDIS_LATEST_FEATURES_ENABLED=true`인 경우 다음 요청은 버스 구간의 활성 날씨·도로·도시
+대응표를 읽고 Redis 최신값을 조립한다.
+
+```http
+POST /v1/bus/features:latest
+Content-Type: application/json
+
+{
+  "segmentId": "BUS:100100609:123456:123789",
+  "masterVersion": "metropolitan-bus-v6",
+  "asOf": "2026-09-18T16:10:00+09:00",
+  "passageAt": "2026-09-18T16:13:00+09:00"
+}
+```
+
+최신 키가 존재해도 `collectedAt`이 요청 이후이거나 `passageAt >= validUntil`이면 사용하지
+않는다. 미매핑·만료·결측은 0으로 만들지 않고 `missingFeatures`에 남긴다. 전체 TOPIS 대응표가
+승인되기 전에는 도로 Feature가 null이어도 날씨·도시·버스 Feature 조립은 계속된다.

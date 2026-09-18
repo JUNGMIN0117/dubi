@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from datetime import date, timedelta
 import sys
 
@@ -13,6 +14,8 @@ from pyspark.sql import SparkSession
 
 from common.archive_source import read_archive_events
 from streaming.city_realtime_silver import normalize_batch, write_silver
+
+LOG = logging.getLogger(__name__)
 
 
 def arguments():
@@ -47,11 +50,12 @@ def main() -> int:
             if frames.quality.first().inputCount:
                 write_silver(frames, int(current.strftime("%Y%m%d")), target, namespace)
             current += timedelta(days=1)
-        print("city realtime backfill complete: " + target + "/" + namespace)
+        LOG.info("city realtime backfill complete: %s/%s", target, namespace)
     finally:
         spark.stop()
     return 0
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     sys.exit(main())

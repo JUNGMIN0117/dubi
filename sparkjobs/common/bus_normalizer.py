@@ -5,6 +5,7 @@ Times are ISO strings in KST; source codes remain strings, not invented meanings
 """
 import json
 import math
+import re
 from datetime import datetime, timedelta, timezone
 
 VERSION = "bus-silver-v1"
@@ -52,12 +53,31 @@ def text(value, identifier=False):
     return value
 
 
+# 초의 소수점 자리. 앞이 ":SS" 일 때만 잡아 시간대(+09:00)의 콜론과 섞이지 않게 한다.
+_SECOND_FRACTION = re.compile(r"(?<=:\d\d)\.(\d{1,9})")
+
+
+def _pad_fraction(value):
+    """초의 소수점 자릿수를 6자리로 맞춘다. 값 자체는 바꾸지 않는다.
+
+    파이썬 3.11 미만의 ``datetime.fromisoformat`` 은 소수점이 정확히 3자리나 6자리일 때만
+    읽는다. 서울시 버스 도착 원문의 ``mkTm`` 은 ``2026-09-18 10:02:03.0`` 처럼 한 자리로 온다.
+    Spark 컨테이너가 파이썬 3.8 이라 이 값이 통째로 버려졌고, 그 결과 Redis 의 버스 도착값에
+    ``observedAt`` 이 비어 백엔드가 버스 실시간을 100% 버리고 있었다(2026-09-18 확인).
+
+    개발 기기의 파이썬은 3.11 이상이라 로컬에서는 멀쩡히 읽혔다. 그래서 오래 드러나지 않았다.
+    컨테이너 파이썬을 올리는 것이 근본 해법이지만, 그 쪽은 Spark 판올림이 얽혀 있어
+    읽는 쪽에서 먼저 막는다.
+    """
+    return _SECOND_FRACTION.sub(lambda m: "." + (m.group(1) + "000000")[:6], value, count=1)
+
+
 def timestamp(value, allow_naive=False):
     value = text(value)
     if value is None:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(_pad_fraction(value.replace("Z", "+00:00")))
         if parsed.tzinfo is None:
             if not allow_naive:
                 return None

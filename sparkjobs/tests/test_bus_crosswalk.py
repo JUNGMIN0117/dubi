@@ -21,7 +21,7 @@ def fixture(tmp_path):
     for ns in ['SEOUL_BUS','GBIS']:
         prefix='' if ns=='SEOUL_BUS' else ns+'.'
         rows.append(dict(namespace=ns,routeId='1',fromStopId='10',toStopId='11',fromOrder=1,toOrder=2,
-                         segmentId='BUS:'+':'.join(prefix+v for v in ['1','10','11'])))
+                         direction='UP',segmentId='BUS:'+':'.join(prefix+v for v in ['1','10','11'])))
     data=dict(schemaVersion=1,idPolicy='canonical-adjacent-v2',masterVersion='TEST',masterSha256='a'*64,edgeCount=2,edges=rows)
     raw=gzip.compress(json.dumps(data).encode(),mtime=0);path=tmp_path/'cw.gz';path.write_bytes(raw)
     return path,hashlib.sha256(raw).hexdigest()
@@ -81,7 +81,11 @@ def test_seoul_position_pair_survives_spark_revalidation(spark, tmp_path):
     segment = segment_redis_rows(prepare_live(events, transform(events, index))).collect()
     assert len(segment) == 1
     assert segment[0].redisKey == 'ml:latest:bus-segment:BUS:1:10:11'
-    assert json.loads(segment[0].redisValue)['segmentId'] == 'BUS:1:10:11'
+    segment_value = json.loads(segment[0].redisValue)
+    assert segment_value['segmentId'] == 'BUS:1:10:11'
+    assert segment_value['timestampBasis'] == 'received'
+    assert segment_value['observedAt'] is None
+    assert segment_value['occurredAt'] == segment_value['_latestOrderAt']
 
 
 def test_missing_crosswalk_or_unknown_namespace_never_accepts_claimed_bus_ids(spark):

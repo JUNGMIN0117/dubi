@@ -59,21 +59,29 @@ def redis_rows(silver):
 
 def segment_redis_rows(silver):
     """현재 위치가 정확히 매핑된 구간별 최신 차량 관측을 Feature 조립용으로 복제한다."""
+    # 수신시각만 있는 위치 이벤트는 provider 관측시각을 지어내지 않는다.
+    # Redis 최신값의 유효기간에만 수집시각을 사용하고 timestampBasis를 함께 남긴다.
+    observed_time = F.coalesce(
+        F.to_timestamp("observedAt"),
+        F.when(F.col("timestampBasis") == "received", F.to_timestamp("collectedAt")),
+    )
     accepted = silver.filter(
         "status = 'ACCEPTED' AND repeatIndex = 1 AND eventType = 'bus.position' "
-        "AND size(segmentIds) > 0 AND observedAt IS NOT NULL AND collectedAt IS NOT NULL"
+        "AND size(segmentIds) > 0 AND collectedAt IS NOT NULL"
+    ).withColumn("effectiveObservedAt", observed_time).filter(
+        F.col("effectiveObservedAt").isNotNull() & F.to_timestamp("collectedAt").isNotNull()
     ).withColumn("segmentId", F.explode("segmentIds"))
-    order_time = F.coalesce(F.to_timestamp("observedAt"), F.to_timestamp("collectedAt"))
+    order_time = F.col("effectiveObservedAt")
     order = Window.partitionBy("segmentId").orderBy(
         order_time.desc(), F.to_timestamp("collectedAt").desc(),
         F.col("kafka_partition").desc(), F.col("kafka_offset").desc())
     latest = accepted.withColumn("orderTime", order_time).withColumn(
         "rank", F.row_number().over(order)).filter("rank = 1")
-    occurred = F.date_format(F.to_timestamp("observedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    occurred = F.date_format("effectiveObservedAt", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     ordering = F.date_format("orderTime", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     valid_until = F.date_format(
-        (F.to_timestamp("observedAt").cast("long") + 120).cast("timestamp"),
+        (F.col("effectiveObservedAt").cast("long") + 120).cast("timestamp"),
         "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     observation = F.struct(*[F.col(name).alias(name) for name in dict(POSITION, **ARRIVAL)])
     return latest.select(

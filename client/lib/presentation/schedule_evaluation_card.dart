@@ -489,12 +489,20 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
         icon: Icons.hourglass_bottom_rounded,
       );
     }
-    if (value.state == EvaluationState.stale ||
-        value.isExpiredAt(DateTime.now())) {
+    if (value.state == EvaluationState.stale) {
       return const StatusBadge(
         '다시 확인 필요',
         tone: DdubiColors.orange,
         icon: Icons.refresh_rounded,
+      );
+    }
+    // 유효시간(약 1분)만 지난 결과는 오류가 아니다. 언제 확인한 값인지만 조용히 표시한다.
+    if (value.isExpiredAt(DateTime.now())) {
+      final computedAt = value.computedAt;
+      return StatusBadge(
+        computedAt == null ? '마지막 확인 결과' : '마지막 확인 ${clockLabel(computedAt)}',
+        tone: const Color(0xFF6C7D96),
+        icon: Icons.update_rounded,
       );
     }
     return switch (value.state) {
@@ -609,6 +617,13 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
       ],
     );
   }
+}
+
+/// "09:38" 형식. 배지처럼 짧은 자리에 쓴다.
+String clockLabel(DateTime value) {
+  final local = value.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:'
+      '${local.minute.toString().padLeft(2, '0')}';
 }
 
 /// 이동 예측 영역 공통 글자색. 다른 화면의 본문·보조 글자색과 같은 값이다.
@@ -736,17 +751,24 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
     final now = DateTime.now();
     final usable = evaluation.canRecommendAt(now);
     final historicalEstimate = evaluation.canShowHistoricalEstimateAt(now);
-    final stale =
-        evaluation.state == EvaluationState.stale || evaluation.isExpiredAt(now);
+    // 서버가 stale 로 판정한 결과와, 유효시간(약 1분)만 지난 결과를 구분한다.
+    // 앞은 다시 확인이 필요하다고 크게 알리고, 뒤는 "마지막 확인 결과"로 조용히 보여준다(2026-09-18 B안).
+    final serverStale = evaluation.state == EvaluationState.stale;
+    final expiredOnly = !serverStale && evaluation.isExpiredAt(now);
+    final computedAt = evaluation.computedAt;
+    final usableWhenComputed =
+        computedAt != null && evaluation.canRecommendAt(computedAt);
+    final showTimes = usable || (expiredOnly && usableWhenComputed);
     final diagnostics = widget.developerDiagnostics;
     // 짧은 배지는 뜻이 전달되지 않아 문장으로 바꿨다. 판단 기준은 그대로다.
     final notes = [
       if (evaluation.quality.preview) '아직 시험 중인 예측이에요.',
-      if (stale) '결과가 오래됐어요. 다시 계산해 주세요.',
+      if (serverStale) '결과가 오래됐어요. 다시 계산해 주세요.',
       if (evaluation.hasHistoricalReference) '일부 구간은 과거 평균으로 계산했어요.',
       if (diagnostics && evaluation.isLegacy) '구버전 응답이에요.',
     ];
-    final shortfall = evaluation.state == EvaluationState.ready && !usable && !stale
+    final shortfall =
+        evaluation.state == EvaluationState.ready && !showTimes && !serverStale
         ? evaluationShortfallReason(evaluation)
         : null;
     return Column(
@@ -758,16 +780,18 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         ],
         // 상태 한 줄. 확정 추천이면 결론 문장을 굵게 올린다.
         Text(
-          stale
+          serverStale
               ? '이전 결과입니다. 최신 결과를 다시 확인해 주세요.'
+              : expiredOnly && usableWhenComputed
+              ? '마지막으로 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.'
               : evaluation.state == EvaluationState.ready && !usable
               ? '정확한 출발 추천을 아직 확정하지 못했어요.'
               : _stateMessage(evaluation.state),
           key: const Key('evaluationStateMessage'),
           style: TextStyle(
-            fontSize: usable ? 13 : 14,
-            fontWeight: usable ? FontWeight.w500 : FontWeight.w800,
-            color: usable ? kEvaluationMuted : DdubiColors.navy,
+            fontSize: showTimes ? 13 : 14,
+            fontWeight: showTimes ? FontWeight.w500 : FontWeight.w800,
+            color: showTimes ? kEvaluationMuted : DdubiColors.navy,
           ),
         ),
         if (shortfall != null) ...[
@@ -778,7 +802,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
             style: const TextStyle(fontSize: 13, color: kEvaluationMuted),
           ),
         ],
-        if (usable) ...[
+        if (showTimes) ...[
           const SizedBox(height: 4),
           Text(
             _decisionMessage(
@@ -796,11 +820,14 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         ],
         const SizedBox(height: 10),
         // 기본은 두 줄(제안 출발·예상 도착)만 남긴다. 나머지 시각은 "자세히"로 접는다.
-        if (usable && evaluation.proposedDepartAt != null)
+        if (showTimes && evaluation.proposedDepartAt != null)
           _timeRow(Icons.directions_run_rounded, '제안 출발', evaluation.proposedDepartAt),
-        if (usable)
+        if (showTimes)
           _timeRow(Icons.flag_outlined, '예상 도착', evaluation.estimatedArrivalAt),
-        if (!usable && historicalEstimate) ...[
+        // 유효시간이 지난 결과는 언제 확인한 값인지 접지 않고 바로 보여준다.
+        if (expiredOnly && computedAt != null)
+          _timeRow(Icons.update_rounded, '마지막 확인', computedAt),
+        if (!showTimes && historicalEstimate) ...[
           _timeRow(Icons.history_rounded, '과거 평균 기반 참고 출발', evaluation.proposedDepartAt),
           _timeRow(Icons.history_rounded, '과거 평균 기반 참고 도착', evaluation.estimatedArrivalAt),
           const Padding(
@@ -840,7 +867,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
             ],
             if (evaluation.targetArriveAt != null)
               _timeRow(Icons.sports_score_rounded, '평가 목표 도착', evaluation.targetArriveAt),
-            if (evaluation.computedAt != null)
+            if (evaluation.computedAt != null && !expiredOnly)
               _timeRow(Icons.update_rounded, '마지막 확인', evaluation.computedAt),
             if (!widget.compact && diagnostics && evaluation.validUntil != null)
               _timeRow(Icons.timer_outlined, '유효 시각', evaluation.validUntil),

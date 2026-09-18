@@ -170,6 +170,19 @@ class SavedRouteSegment {
       );
 }
 
+/// 저장된 후보가 서버에서 이미 정리돼 없는 경우.
+///
+/// 재계산이 끝나면 옛 후보는 서버가 지운다. 그래서 404 는 서버 장애가 아니라 "화면이 든 목록이
+/// 오래됐다"는 신호다. 화면은 이 예외를 보고 목록을 다시 읽도록 안내한다.
+class SavedRouteGoneException implements Exception {
+  const SavedRouteGoneException(this.routeId);
+
+  final String routeId;
+
+  @override
+  String toString() => '저장된 경로 $routeId 가 서버에 없습니다.';
+}
+
 class SavedRouteDetail {
   const SavedRouteDetail({
     required this.routeId,
@@ -545,7 +558,7 @@ class RecommendationApi {
   }
 
   Future<SavedRouteDetail> getSavedRouteDetail(String routeId) async {
-    final response = await getRoute(routeId);
+    final response = await _routeOrGone(() => getRoute(routeId), routeId);
     final data = response.data?['data'];
     if (response.data?['success'] != true || data is! Map) {
       throw const FormatException('경로 상세 응답 형식이 올바르지 않습니다.');
@@ -554,12 +567,27 @@ class RecommendationApi {
   }
 
   Future<SavedRouteMap> getSavedRouteMap(String routeId) async {
-    final response = await getRouteMap(routeId);
+    final response = await _routeOrGone(() => getRouteMap(routeId), routeId);
     final data = response.data?['data'];
     if (response.data?['success'] != true || data is! Map) {
       throw const FormatException('경로 지도 응답 형식이 올바르지 않습니다.');
     }
     return SavedRouteMap.fromJson(_stringKeyed(data));
+  }
+
+  /// 404 만 [SavedRouteGoneException] 으로 바꾼다. 다른 실패는 그대로 올린다.
+  Future<Response<Map<String, dynamic>>> _routeOrGone(
+    Future<Response<Map<String, dynamic>>> Function() request,
+    String routeId,
+  ) async {
+    try {
+      return await request();
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) {
+        throw SavedRouteGoneException(routeId);
+      }
+      rethrow;
+    }
   }
 
   Future<Response<Map<String, dynamic>>> getRoutes(String scheduleId) =>

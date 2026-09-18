@@ -30,10 +30,13 @@ sudo systemctl is-enabled netfilter-persistent    # enabled
 ```
 서버1 은 아카이버가 파일을 쓰는 중이 아닌 시각(매시 5분 이후)을 고른다. 서버2 는 새벽 백업(04:10)과 브리핑(09:30·17:00)을 피한다.
 
+**러너 잡 확인은 재부팅 명령과 같은 명령줄에서 한다.** 9/18 에 9분 전에 "잡 없음" 을 확인하고 재부팅했는데, 그 사이 시작된 client-test 잡이 재부팅으로 죽어 GitLab 에 실패로 남았다. 러너는 종료 신호를 받으면 잡이 끝나길 기다리지만 OS 가 먼저 꺼지므로 소용이 없다. 아래 2·3절의 명령처럼 잡이 있으면 재부팅이 실행되지 않게 한 줄로 묶는다. 잡이 있으면 끝날 때까지(길어도 10분) 기다렸다가 다시 시도한다.
+
 ## 2. 서버2 먼저
 
 ```bash
-sudo reboot
+# 러너에 도는 잡이 있으면 재부팅하지 않고 멈춘다. 잡 컨테이너 이름은 runner- 로 시작한다
+[ "$(docker ps --format '{{.Names}}' | grep -c '^runner-')" = 0 ] && sudo systemctl reboot || echo "CI 잡 진행 중 — 끝난 뒤 다시"
 ```
 1~2분 뒤 ssh 로 다시 들어가서:
 ```bash
@@ -47,9 +50,11 @@ bash ~/S15P21E202/infra/scripts/checks/server2.sh | column -t -s'|'
 
 ## 3. 서버1
 
-서버2 가 완전히 정상으로 돌아온 뒤 한다.
+서버2 가 완전히 정상으로 돌아온 뒤 한다. 러너는 서버2에 있으므로 서버1 재부팅 전에도 서버2의 러너에 잡이 없는지 본다(배포 잡이 서버1에 SSH 로 들어와 있을 수 있다).
 ```bash
-sudo reboot
+# 서버2에서: docker ps --format '{{.Names}}' | grep -c '^runner-'   → 0 이어야 한다
+# 서버1에서:
+sudo systemctl reboot
 ```
 2~3분 뒤:
 ```bash

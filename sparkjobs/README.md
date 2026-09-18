@@ -123,6 +123,28 @@ Redis를 의도적으로 생략하는 검증 실행에서만 `--skip-redis`를 �
 `segmentId`를 `HGET`해 `nx, ny`를 찾은 다음 기존 `weather:latest:{nx}:{ny}`를 읽는다.
 이 배치는 대응표 배포까지 담당하며 통합 Feature Snapshot 생성은 별도 단계다.
 
+검토 완료 도로 대응표와 승인된 OA-13310 링크 마스터가 준비되면 버스 구간→TOPIS 링크 배치를
+실행한다. 후보·감사 파일은 입력으로 사용할 수 없으며 두 artifact의 SHA·버스 버전·유효기간과
+모든 LINK_ID 존재 여부가 맞아야 실행된다. 현재 저장소에는 승인된 운영 artifact가 없으므로 아래
+경로와 SHA를 임의 값으로 채우지 않는다.
+
+```sh
+sh submit.sh batch/export_bus_road_mapping.py \
+  --crosswalk /opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz \
+  --crosswalk-sha <BUS_CROSSWALK_SHA256> \
+  --road-crosswalk /opt/ddubi/transit-master/road/<reviewed-road-crosswalk>.json \
+  --road-crosswalk-sha <ROAD_CROSSWALK_SHA256> \
+  --traffic-link-master /opt/ddubi/transit-master/road/<approved-oa13310-links>.json.gz \
+  --traffic-link-master-sha <TRAFFIC_LINK_MASTER_SHA256> \
+  --as-of 2026-09-18T12:00:00+09:00 \
+  --output hdfs://hdfs-namenode:9000/ddubi/master/bus-road-link/version=20260918-v1
+```
+
+`edges/`는 노선 순번별 링크 배열과 검증 근거, `mappings/`는 고유 segmentId별 안전한 링크
+배열을 Parquet으로 저장한다. 같은 `mappings` DataFrame을 Redis versioned Hash에도 JSON으로
+기록한다. 동일 segmentId가 서로 다른 도로 경로를 가지거나 일부 occurrence만 매핑되면 링크를
+확정하지 않고 `AMBIGUOUS` 또는 `PARTIAL`로 남긴다. HDFS 쓰기 실패는 Redis 배포를 막지 않는다.
+
 ## 구간 기준선·판정 실행 준비 (2026-09-10)
 
 Collector는 변경하지 않는다. 실제 구간 통과시간 정규화 입력이 있어야 아래 계산을 운영에 연결할 수 있다.

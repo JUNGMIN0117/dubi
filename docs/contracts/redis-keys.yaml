@@ -59,6 +59,32 @@ keys:
       활성 대응표의 행 수, 버스 마스터·crosswalk·날씨 격자 설정 SHA와 배포시각 JSON이다.
       대응표 Hash와 같은 원자적 승격 단계에서 기록하고 같은 TTL을 적용한다.
 
+  busRoadMapping:
+    pattern: "ml:mapping:bus-road:{mappingVersion}:{masterVersion}:{roadCrosswalkSha256}"
+    type: hash
+    ttlSeconds: 2592000
+    owner: spark
+    description: >-
+      field는 segmentId이고 value는 승인된 OA-13310 링크 마스터와 검토 완료 도로 대응표로 만든
+      TOPIS LINK_ID 배열 JSON이다. 순환 노선의 같은 segmentId가 서로 다른 도로 경로를 가지면
+      AMBIGUOUS로 남기고 topisLinkIds를 비운다. staging 전체 행 수를 확인한 뒤에만 활성화한다.
+    valueExample: '{"segmentId":"BUS:100100609:123456:123789","masterVersion":"metropolitan-bus-v6","mappingVersion":"bus-road-link-v1","roadCrosswalkVersion":"road-v1","trafficLinkMasterVersion":"oa-13310-v1","mappingAsOf":"2026-09-18T12:00:00+09:00","topisLinkNamespace":"SEOUL_ACCINFO_LINK","topisLinkIds":["1220003800","1220003900"],"topisLinkCount":2,"mappingStatus":"RESOLVED","mappingReason":"NONE","occurrenceCoverageRatio":1.0,"roadPathValidFrom":"2026-09-01T00:00:00+09:00","roadPathValidUntil":"2027-01-01T00:00:00+09:00"}'
+
+  busRoadMappingActive:
+    pattern: "ml:mapping:bus-road:active:{masterVersion}"
+    type: string
+    ttlSeconds: 2592000
+    owner: spark
+    description: "검증과 전체 기록을 마친 현재 busRoadMapping Hash 키를 가리킨다."
+
+  busRoadMappingMetadata:
+    pattern: "ml:mapping:bus-road:{mappingVersion}:{masterVersion}:{roadCrosswalkSha256}:meta"
+    type: string
+    ttlSeconds: 2592000
+    owner: spark
+    description: >-
+      버스·도로 대응표 및 TOPIS 링크 마스터의 버전·SHA, 기준시각, 행 수와 배포시각 JSON이다.
+
   segmentStatus:
     pattern: "segment:status:{segmentId}"
     ttlSeconds: 300

@@ -162,7 +162,7 @@ def test_http_queue_limit_and_health_while_model_runs():
             def metadata(self):
                 return {'supported_from':'2000-01-01','supported_until':'2100-01-01'}
 
-            def predict(self, request):
+            def predict(self, request, timings=None):
                 release.wait(3)
                 raise RuntimeError('not exposed')
 

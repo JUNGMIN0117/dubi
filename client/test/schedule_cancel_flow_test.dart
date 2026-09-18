@@ -131,7 +131,10 @@ void main() {
 
     expect(find.text('다른 사용자의 일정은 취소할 수 없어요.'), findsOneWidget);
     expect(find.text('일정 목록 화면'), findsNothing);
-    expect((await repository.schedules()).map((s) => s.id), contains(schedule.id));
+    expect(
+      (await repository.schedules()).map((s) => s.id),
+      contains(schedule.id),
+    );
     await _dispose(tester);
   });
 
@@ -152,7 +155,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('일정 목록 화면'), findsNothing);
-    expect((await repository.schedules()).map((s) => s.id), contains(schedule.id));
+    expect(
+      (await repository.schedules()).map((s) => s.id),
+      contains(schedule.id),
+    );
     await _dispose(tester);
   });
 

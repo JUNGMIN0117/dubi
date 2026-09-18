@@ -35,8 +35,10 @@ class DepartureHeadlineContent {
   final String? detail;
   final DepartureHeadlineTone tone;
 
-  static DepartureHeadlineContent of(ScheduleEvaluationV2? evaluation,
-      DateTime now) {
+  static DepartureHeadlineContent of(
+    ScheduleEvaluationV2? evaluation,
+    DateTime now,
+  ) {
     if (evaluation == null) {
       return const DepartureHeadlineContent(
         title: '추천 출발 시간을 계산하고 있어요.',
@@ -91,7 +93,8 @@ class DepartureHeadlineContent {
         evaluation.canRecommendAt(computedAt)) {
       return DepartureHeadlineContent(
         title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착',
-        detail: '${formatClock(computedAt)}에 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.',
+        detail:
+            '${formatClock(computedAt)}에 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.',
         tone: DepartureHeadlineTone.waiting,
       );
     }
@@ -113,7 +116,9 @@ class DepartureHeadlineContent {
     }
     // 확정 조건은 못 넘겼지만 계산이 끝난 결과: 시각을 참고값으로 보여준다(2026-09-18 결정).
     // 색(파랑)과 "참고"라는 말로 확정과 구분한다. 적용 버튼은 카드의 규칙이 그대로 잠근다.
-    if (evaluationHasReferenceTimes(evaluation) && depart != null && arrival != null) {
+    if (evaluationHasReferenceTimes(evaluation) &&
+        depart != null &&
+        arrival != null) {
       final reason = evaluationShortfallReason(evaluation);
       return DepartureHeadlineContent(
         title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착 예상',
@@ -129,8 +134,10 @@ class DepartureHeadlineContent {
   }
 
   /// 일정 시작까지 얼마나 여유가 있는지 한 줄로. 늦는 경우를 여유처럼 쓰지 않는다.
-  static String? _marginDetail(ScheduleEvaluationV2 evaluation,
-      DateTime arrival) {
+  static String? _marginDetail(
+    ScheduleEvaluationV2 evaluation,
+    DateTime arrival,
+  ) {
     final lateness = evaluation.latenessSeconds;
     if (lateness != null && lateness > 0) {
       return '일정 시작보다 ${_minutes(lateness)}분 늦게 도착할 것 같아요.';
@@ -185,7 +192,12 @@ class DepartureHeadline extends StatelessWidget {
     final content = DepartureHeadlineContent.of(evaluation, DateTime.now());
     final palette = _palette(content.tone);
     final body = Padding(
-      padding: EdgeInsets.fromLTRB(16, compact ? 13 : 16, 16, compact ? 13 : 16),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        compact ? 13 : 16,
+        16,
+        compact ? 13 : 16,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -254,29 +266,29 @@ class DepartureHeadline extends StatelessWidget {
   static _HeadlinePalette _palette(DepartureHeadlineTone tone) =>
       switch (tone) {
         DepartureHeadlineTone.ready => const _HeadlinePalette(
-            background: Color(0xFFE9F8F1),
-            border: Color(0xFFBFE6D4),
-            accent: DdubiColors.green,
-            icon: Icons.directions_run_rounded,
-          ),
+          background: Color(0xFFE9F8F1),
+          border: Color(0xFFBFE6D4),
+          accent: DdubiColors.green,
+          icon: Icons.directions_run_rounded,
+        ),
         DepartureHeadlineTone.reference => const _HeadlinePalette(
-            background: Color(0xFFF2F5FB),
-            border: Color(0xFFD5DEEE),
-            accent: Color(0xFF4D80E8),
-            icon: Icons.history_rounded,
-          ),
+          background: Color(0xFFF2F5FB),
+          border: Color(0xFFD5DEEE),
+          accent: Color(0xFF4D80E8),
+          icon: Icons.history_rounded,
+        ),
         DepartureHeadlineTone.waiting => const _HeadlinePalette(
-            background: Color(0xFFF4F6FA),
-            border: DdubiColors.border,
-            accent: Color(0xFF6C7D96),
-            icon: Icons.hourglass_bottom_rounded,
-          ),
+          background: Color(0xFFF4F6FA),
+          border: DdubiColors.border,
+          accent: Color(0xFF6C7D96),
+          icon: Icons.hourglass_bottom_rounded,
+        ),
         DepartureHeadlineTone.attention => const _HeadlinePalette(
-            background: Color(0xFFFFF6E9),
-            border: Color(0xFFF3DCBB),
-            accent: DdubiColors.orange,
-            icon: Icons.info_outline_rounded,
-          ),
+          background: Color(0xFFFFF6E9),
+          border: Color(0xFFF3DCBB),
+          accent: DdubiColors.orange,
+          icon: Icons.info_outline_rounded,
+        ),
       };
 }
 

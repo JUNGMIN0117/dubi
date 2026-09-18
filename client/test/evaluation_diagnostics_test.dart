@@ -24,34 +24,37 @@ ScheduleEvaluationV2 _evaluation(
 });
 
 void main() {
-  test('예산 부족(ML_BUDGET_EXHAUSTED)과 과거 자료 없음(EXACT_KEY_UNAVAILABLE)을 다른 진단으로 나눈다', () {
-    final diagnostics = EvaluationDiagnostics.from(
-      _evaluation([
-        'step-1:ML_BUDGET_EXHAUSTED',
-        'step-1:ML_NOT_APPLIED:ML_BUDGET_EXHAUSTED',
-        'step-1:HISTORICAL_REFERENCE_NOT_APPLIED:EXACT_KEY_UNAVAILABLE',
-        'step-1:API_FALLBACK',
-        'step-2:ML_NOT_APPLIED:ML_TIMEOUT',
-        'step-2:HISTORICAL_REFERENCE_APPLIED',
-        'step-2:HISTORICAL_REFERENCE_DATA_VERSION:bus-ref-20260917',
-      ]),
-    );
+  test(
+    '예산 부족(ML_BUDGET_EXHAUSTED)과 과거 자료 없음(EXACT_KEY_UNAVAILABLE)을 다른 진단으로 나눈다',
+    () {
+      final diagnostics = EvaluationDiagnostics.from(
+        _evaluation([
+          'step-1:ML_BUDGET_EXHAUSTED',
+          'step-1:ML_NOT_APPLIED:ML_BUDGET_EXHAUSTED',
+          'step-1:HISTORICAL_REFERENCE_NOT_APPLIED:EXACT_KEY_UNAVAILABLE',
+          'step-1:API_FALLBACK',
+          'step-2:ML_NOT_APPLIED:ML_TIMEOUT',
+          'step-2:HISTORICAL_REFERENCE_APPLIED',
+          'step-2:HISTORICAL_REFERENCE_DATA_VERSION:bus-ref-20260917',
+        ]),
+      );
 
-    expect(diagnostics.steps.map((s) => s.step), ['step-1', 'step-2']);
-    final first = diagnostics.steps.first;
-    expect(first.ml, MlApplication.notApplied);
-    expect(first.mlReasons, ['ML_BUDGET_EXHAUSTED']);
-    expect(first.historical, HistoricalApplication.notApplied);
-    expect(first.historicalReasons, ['EXACT_KEY_UNAVAILABLE']);
-    expect(first.apiFallback, isTrue);
-    final second = diagnostics.steps.last;
-    expect(second.mlReasons, ['ML_TIMEOUT']);
-    expect(second.historical, HistoricalApplication.applied);
-    expect(second.apiFallback, isFalse);
-    expect(diagnostics.dataVersion, 'bus-ref-20260917');
-    expect(diagnostics.mlSummary, MlApplication.notApplied);
-    expect(diagnostics.historicalSummary, HistoricalApplication.applied);
-  });
+      expect(diagnostics.steps.map((s) => s.step), ['step-1', 'step-2']);
+      final first = diagnostics.steps.first;
+      expect(first.ml, MlApplication.notApplied);
+      expect(first.mlReasons, ['ML_BUDGET_EXHAUSTED']);
+      expect(first.historical, HistoricalApplication.notApplied);
+      expect(first.historicalReasons, ['EXACT_KEY_UNAVAILABLE']);
+      expect(first.apiFallback, isTrue);
+      final second = diagnostics.steps.last;
+      expect(second.mlReasons, ['ML_TIMEOUT']);
+      expect(second.historical, HistoricalApplication.applied);
+      expect(second.apiFallback, isFalse);
+      expect(diagnostics.dataVersion, 'bus-ref-20260917');
+      expect(diagnostics.mlSummary, MlApplication.notApplied);
+      expect(diagnostics.historicalSummary, HistoricalApplication.applied);
+    },
+  );
 
   test('시험 적용·운영 적용·기록만 을 구분하고 모델 버전·표본·누락 특성 수를 읽는다', () {
     final testApplied = EvaluationDiagnostics.from(
@@ -104,7 +107,10 @@ void main() {
 
   testWidgets('진단 패널은 원본 코드가 많아도 화면을 덮지 않게 줄여 보여준다', (tester) async {
     // 실기기에서 부족한 정보 174건이 그대로 뿌려져 화면을 덮었다.
-    final many = [for (var i = 0; i < 174; i++) 'BUS:10010060$i:101000082:101000084:MISSING'];
+    final many = [
+      for (var i = 0; i < 174; i++)
+        'BUS:10010060$i:101000082:101000084:MISSING',
+    ];
     final evaluation = ScheduleEvaluationV2.fromJson({
       'schemaVersion': 'schedule-evaluation-v2',
       'state': 'READY',

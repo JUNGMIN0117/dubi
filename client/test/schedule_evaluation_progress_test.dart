@@ -8,15 +8,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Future<ScheduleEvaluationV2> _fixture(String name) async {
-  final raw = await File(
-    'test/fixtures/schedule_evaluation_$name.json',
-  ).readAsString();
+  final raw = await File('test/fixtures/schedule_evaluation_$name.json')
+      .readAsString();
   return ScheduleEvaluationV2.fromJson(jsonDecode(raw) as Map<String, dynamic>);
 }
 
 /// 호출 순서대로 결과·실패·미완료(Completer)를 돌려주는 저장소.
 class _SequenceRepository implements ScheduleEvaluationRepository {
-  _SequenceRepository(this.responses, {this.refreshCompleter, this.refreshFailure});
+  _SequenceRepository(
+    this.responses, {
+    this.refreshCompleter,
+    this.refreshFailure,
+  });
 
   final List<Object> responses;
   final Completer<void>? refreshCompleter;
@@ -88,7 +91,10 @@ void main() {
     await tester.pump();
 
     expect(repository.latestCalls, 2);
-    expect(find.text(ScheduleEvaluationCard.initialComputingMessage), findsNothing);
+    expect(
+      find.text(ScheduleEvaluationCard.initialComputingMessage),
+      findsNothing,
+    );
     expect(find.text('평가가 완료됐습니다.'), findsOneWidget);
 
     // 결과가 있으면 보통 간격(30초)으로 돌아간다. 3초 뒤에는 추가 호출이 없다.
@@ -144,9 +150,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('서버가 계산 중(PENDING)이면 다시 계산 버튼을 잠그고 이유를 알린다', (
-    tester,
-  ) async {
+  testWidgets('서버가 계산 중(PENDING)이면 다시 계산 버튼을 잠그고 이유를 알린다', (tester) async {
     final repository = _SequenceRepository([pending]);
     await tester.pumpWidget(_card(repository));
     await tester.pumpAndSettle();
@@ -154,7 +158,10 @@ void main() {
     // 첫 계산이 도는 동안 사용자가 다시 계산을 눌러 409 를 받는 일을 화면에서 먼저 막는다.
     expect(_refreshEnabled(tester), isFalse);
     expect(find.byKey(const Key('refreshLockedNotice')), findsOneWidget);
-    expect(find.text(ScheduleEvaluationCard.refreshLockedMessage), findsOneWidget);
+    expect(
+      find.text(ScheduleEvaluationCard.refreshLockedMessage),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -185,7 +192,10 @@ void main() {
     await tester.tap(find.text('다시 계산'));
     await tester.pumpAndSettle();
 
-    expect(find.text(ScheduleEvaluationCard.alreadyComputingMessage), findsOneWidget);
+    expect(
+      find.text(ScheduleEvaluationCard.alreadyComputingMessage),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('evaluationActionError')), findsNothing);
     // 추천이 바뀐 경우의 안내와 섞이지 않는다.
     expect(find.text('추천이 변경됐습니다. 최신 결과를 다시 확인해 주세요.'), findsNothing);
@@ -204,14 +214,20 @@ void main() {
     await tester.pump();
 
     expect(repository.refreshCalls, 1);
-    expect(find.text(ScheduleEvaluationCard.manualRefreshMessage), findsOneWidget);
+    expect(
+      find.text(ScheduleEvaluationCard.manualRefreshMessage),
+      findsOneWidget,
+    );
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(_refreshEnabled(tester), isFalse);
 
     refresh.complete();
     await tester.pumpAndSettle();
 
-    expect(find.text(ScheduleEvaluationCard.manualRefreshMessage), findsNothing);
+    expect(
+      find.text(ScheduleEvaluationCard.manualRefreshMessage),
+      findsNothing,
+    );
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(repository.latestCalls, 2);
     expect(find.text('서버 처리 결과를 다시 확인했습니다.'), findsOneWidget);
@@ -275,7 +291,10 @@ void main() {
     expect(find.textContaining('유효 시각'), findsNothing);
     // 일반 화면에서도 ML 실패와 과거 자료 부족은 서로 다른 문구다.
     expect(find.textContaining('계산 시간이 부족해 ML 예측 미적용'), findsOneWidget);
-    expect(find.textContaining('과거 자료 적용 조건이 맞지 않아 기본 경로시간 유지'), findsOneWidget);
+    expect(
+      find.textContaining('과거 자료 적용 조건이 맞지 않아 기본 경로시간 유지'),
+      findsOneWidget,
+    );
     expect(find.textContaining('검증 중인 ML 예측값을 시험 적용'), findsOneWidget);
 
     await tester.pumpWidget(
@@ -296,8 +315,14 @@ void main() {
     await tester.tap(find.byKey(const Key('evaluationTimeDetailsToggle')));
     await tester.pump();
     expect(find.textContaining('유효 시각'), findsOneWidget);
-    expect(find.textContaining('step-1: ML 미적용 (ML_BUDGET_EXHAUSTED)'), findsOneWidget);
-    expect(find.textContaining('과거 평균 미적용 (EXACT_KEY_UNAVAILABLE)'), findsOneWidget);
+    expect(
+      find.textContaining('step-1: ML 미적용 (ML_BUDGET_EXHAUSTED)'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('과거 평균 미적용 (EXACT_KEY_UNAVAILABLE)'),
+      findsOneWidget,
+    );
     expect(find.textContaining('API 원본 값 사용'), findsOneWidget);
     expect(find.textContaining('step-2: ML 시험 적용'), findsOneWidget);
     expect(find.textContaining('missingFeatures(max)=15'), findsOneWidget);
@@ -315,10 +340,16 @@ void main() {
 
     await tester.tap(find.text('다시 계산'));
     await tester.pump();
-    expect(find.text(ScheduleEvaluationCard.manualRefreshMessage), findsOneWidget);
+    expect(
+      find.text(ScheduleEvaluationCard.manualRefreshMessage),
+      findsOneWidget,
+    );
 
     await tester.pump(ScheduleEvaluationCard.manualRefreshBound);
-    expect(find.text(ScheduleEvaluationCard.manualRefreshMessage), findsNothing);
+    expect(
+      find.text(ScheduleEvaluationCard.manualRefreshMessage),
+      findsNothing,
+    );
     expect(find.text(ScheduleEvaluationCard.overdueMessage), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
 
@@ -345,7 +376,10 @@ void main() {
     }
     expect(repository.latestCalls, 11);
     expect(find.byKey(const Key('evaluationOverdueNotice')), findsOneWidget);
-    expect(find.text(ScheduleEvaluationCard.initialComputingMessage), findsOneWidget);
+    expect(
+      find.text(ScheduleEvaluationCard.initialComputingMessage),
+      findsOneWidget,
+    );
 
     await tester.pump(ScheduleEvaluationCard.computingPollInterval);
     await tester.pump();

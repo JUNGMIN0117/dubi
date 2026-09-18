@@ -72,8 +72,7 @@ class DepartureHeadlineContent {
       case EvaluationState.unknown:
         break;
     }
-    if (evaluation.state == EvaluationState.stale ||
-        evaluation.isExpiredAt(now)) {
+    if (evaluation.state == EvaluationState.stale) {
       return const DepartureHeadlineContent(
         title: '이전에 계산한 결과예요.',
         detail: '최신 결과를 다시 확인해 주세요.',
@@ -82,6 +81,20 @@ class DepartureHeadlineContent {
     }
     final depart = evaluation.proposedDepartAt;
     final arrival = evaluation.estimatedArrivalAt;
+    final computedAt = evaluation.computedAt;
+    // 유효시간(약 1분)만 지난 결과는 고장이 아니다. 계산 당시 확정 가능했던 결론이면 조용히 그대로 보여준다.
+    // 계산 당시에도 확정하지 못했던 결과는 아래 일반 규칙으로 내려가 이유를 보여준다.
+    if (evaluation.isExpiredAt(now) &&
+        computedAt != null &&
+        depart != null &&
+        arrival != null &&
+        evaluation.canRecommendAt(computedAt)) {
+      return DepartureHeadlineContent(
+        title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착',
+        detail: '${formatClock(computedAt)}에 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.',
+        tone: DepartureHeadlineTone.waiting,
+      );
+    }
     if (evaluation.canRecommendAt(now) && depart != null && arrival != null) {
       return DepartureHeadlineContent(
         title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착',

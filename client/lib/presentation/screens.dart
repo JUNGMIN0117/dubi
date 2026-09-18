@@ -38,7 +38,7 @@ import '../core/diagnostics/developer_diagnostics.dart';
 
 export 'notification_center.dart';
 
-void _open(BuildContext c, Widget page) =>
+Future<Object?> _open(BuildContext c, Widget page) =>
     Navigator.of(c).push(MaterialPageRoute(builder: (_) => page));
 const _pad = EdgeInsets.fromLTRB(16, 8, 16, 20);
 const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
@@ -3765,9 +3765,12 @@ class ScheduleDetailScreen extends StatelessWidget {
               ),
           ],
           const SizedBox(height: 16),
-          _SavedRouteList(
-            display: SavedRouteDisplay.from(savedRoutes),
+          _LiveSavedRouteList(
+            initial: savedRoutes,
             unavailable: routesUnavailable,
+            api: recommendationApi,
+            scheduleId: schedule.id,
+            headline: headline,
             onSelected: recommendationApi == null
                 ? null
                 : (savedRoute) =>
@@ -3882,7 +3885,8 @@ class ScheduleDetailScreen extends StatelessWidget {
   ///
   /// 화면 순번이나 걸러낸 배열의 위치가 아니라 서버가 준 경로 ID로 연다. 필수 ID가 없으면
   /// 앱을 끄지 않고 안내만 한다. 이미 상세로 넘어가는 중이면 두 번 열지 않는다.
-  void _openSavedRoute(
+  /// 상세 화면이 닫힐 때 넘겨준 값을 그대로 돌려준다. 정리된 경로(404)면 true 가 와서 목록을 다시 읽는다.
+  Future<Object?> _openSavedRoute(
     BuildContext c,
     Schedule schedule,
     SavedRouteSummary savedRoute,
@@ -3895,10 +3899,10 @@ class ScheduleDetailScreen extends StatelessWidget {
           content: Text('경로 상세를 불러올 수 없어요.'),
         ),
       );
-      return;
+      return Future<Object?>.value();
     }
-    if (ModalRoute.of(c)?.isCurrent != true) return;
-    _open(
+    if (ModalRoute.of(c)?.isCurrent != true) return Future<Object?>.value();
+    return _open(
       c,
       RouteMapScreen(
         repository: routeRepository,
@@ -3972,6 +3976,95 @@ class _ScheduleRecommendationData {
   final List<SavedRouteSummary> savedRoutes;
   final bool recommendationUnavailable;
   final bool routesUnavailable;
+}
+
+/// 저장된 추천 경로 목록을 최신 계산 결과에 맞춰 다시 읽는다.
+///
+/// 재계산이 끝나면 서버는 옛 후보를 정리한다(유예 10분). 화면이 재계산 전에 받은 목록을 그대로 들고
+/// 있으면 누른 경로가 이미 없어 404 가 난다(2026-09-18 실기기). 그래서 이동 예측 카드가 새 결과를
+/// 알려 줄 때마다, 그리고 상세 화면이 "정리된 경로"라고 돌아올 때 목록을 다시 읽는다.
+class _LiveSavedRouteList extends StatefulWidget {
+  const _LiveSavedRouteList({
+    required this.initial,
+    required this.unavailable,
+    required this.api,
+    required this.scheduleId,
+    required this.headline,
+    required this.onSelected,
+  });
+
+  final List<SavedRouteSummary> initial;
+  final bool unavailable;
+  final RecommendationApi? api;
+  final String scheduleId;
+  final ValueNotifier<ScheduleEvaluationV2?> headline;
+  final Future<Object?> Function(SavedRouteSummary)? onSelected;
+
+  @override
+  State<_LiveSavedRouteList> createState() => _LiveSavedRouteListState();
+}
+
+class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
+  late List<SavedRouteSummary> _routes = widget.initial;
+  late bool _unavailable = widget.unavailable;
+  final DateTime _loadedAt = DateTime.now();
+  DateTime? _seenComputedAt;
+  int _generation = 0;
+
+  /// 기기와 서버 시계가 조금 어긋나도 "화면을 연 뒤 끝난 계산"을 놓치지 않도록 두는 여유.
+  static const Duration _clockSlack = Duration(minutes: 2);
+
+  @override
+  void initState() {
+    super.initState();
+    widget.headline.addListener(_onEvaluation);
+  }
+
+  @override
+  void dispose() {
+    widget.headline.removeListener(_onEvaluation);
+    super.dispose();
+  }
+
+  void _onEvaluation() {
+    final computedAt = widget.headline.value?.computedAt;
+    if (computedAt == null) return;
+    final seen = _seenComputedAt;
+    if (seen != null && !computedAt.isAfter(seen)) return;
+    _seenComputedAt = computedAt;
+    // 처음 받은 결과가 목록을 읽기 전에 끝난 것이면 목록은 이미 최신이다. 다시 읽지 않는다.
+    if (seen == null && computedAt.isBefore(_loadedAt.subtract(_clockSlack))) return;
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final api = widget.api;
+    if (api == null) return;
+    final generation = ++_generation;
+    try {
+      final routes = await api.getSavedRoutes(widget.scheduleId);
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _routes = routes;
+        _unavailable = false;
+      });
+    } on Object {
+      // 갱신 실패는 조용히 넘긴다. 기존 목록을 유지하고 다음 결과가 오면 다시 시도한다.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _SavedRouteList(
+    display: SavedRouteDisplay.from(_routes),
+    unavailable: _unavailable,
+    onSelected: widget.onSelected == null
+        ? null
+        : (route) async {
+            final result = await widget.onSelected!(route);
+            // 상세 화면이 "이 경로는 정리됐다"고 알려 주면 새 목록으로 바꾼다.
+            if (result == true && mounted) await _reload();
+          },
+  );
 }
 
 class _SavedRouteList extends StatelessWidget {
@@ -5069,15 +5162,37 @@ class _SavedRouteApiScreenState extends State<_SavedRouteApiScreen> {
       future: _data,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
+          // 재계산 뒤 정리된 후보(404)는 오류가 아니다. 목록이 오래됐다고 알리고 돌아가게 한다.
+          final gone = snapshot.error is SavedRouteGoneException;
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const DataLoadError(message: '경로 상세를 불러오지 못했어요.'),
-                TextButton(
-                  onPressed: () => setState(() => _data = _load()),
-                  child: const Text('다시 시도'),
+                DataLoadError(
+                  message: gone
+                      ? '이 경로는 새로 계산되면서 정리됐어요.'
+                      : '경로 상세를 불러오지 못했어요.',
                 ),
+                if (gone)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+                    child: Text(
+                      '일정 상세로 돌아가면 새 후보 목록을 볼 수 있어요.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: Color(0xFF52677B)),
+                    ),
+                  ),
+                if (gone)
+                  FilledButton.tonal(
+                    key: const Key('savedRouteGoneBack'),
+                    onPressed: () => Navigator.of(context).maybePop(true),
+                    child: const Text('일정 상세로 돌아가기'),
+                  )
+                else
+                  TextButton(
+                    onPressed: () => setState(() => _data = _load()),
+                    child: const Text('다시 시도'),
+                  ),
               ],
             ),
           );

@@ -178,10 +178,26 @@ class RouteQueryApiTest extends IntegrationTestSupport {
         RouteRequest second = newRequest();
         saveCandidate(second, "path-3", 1, false);
 
-        var stale = savedRoutes.findStaleCandidates(scheduleId, second.getId());
+        // 유예 시간을 무시하도록 기준 시각을 미래로 둔다. 여기서 보려는 것은 선택·추천 참조 예외다.
+        var stale = savedRoutes.findStaleCandidates(scheduleId, second.getId(), LocalDateTime.now(KST).plusMinutes(1));
 
         // 옛 검색분 2건 중 하나는 선택됨, 하나는 지난 추천이 가리킨다. 지울 것이 없다.
         assertThat(stale).isEmpty();
+    }
+
+    @Test
+    @DisplayName("방금 전 검색분의 후보는 유예 시간 동안 정리 대상에서 빠진다")
+    void recentlyReplacedCandidatesSurviveTheGracePeriod() {
+        RouteRequest second = newRequest();
+        saveCandidate(second, "path-3", 1, false);
+        LocalDateTime now = LocalDateTime.now(KST);
+
+        // 옛 검색분의 path-2 는 선택도 아니고 추천 참조도 없지만, 방금 저장된 것이라 아직 지우지 않는다.
+        assertThat(savedRoutes.findStaleCandidates(scheduleId, second.getId(),
+                now.minus(SavedRouteRepository.STALE_CANDIDATE_GRACE))).isEmpty();
+        // 유예 시간이 지났다고 보면 그때 정리 대상이 된다.
+        assertThat(savedRoutes.findStaleCandidates(scheduleId, second.getId(), now.plusMinutes(1)))
+                .extracting(SavedRoute::getProviderPathId).containsExactly("path-2");
     }
 
     @Test

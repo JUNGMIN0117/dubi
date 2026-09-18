@@ -27,6 +27,29 @@ class BusSilverTests(unittest.TestCase):
         self.assertEqual(row["providerStopOrder"], 12)
         self.assertEqual(row["longitude"], 126.978)
 
+    def test_provider_time_with_short_fraction_is_read(self):
+        """서울 mkTm 은 초 소수점이 한 자리로 온다. 파이썬 3.11 미만의 fromisoformat 은
+        3자리나 6자리만 읽어서, Spark 컨테이너(3.8)에서 이 값이 통째로 버려졌다.
+        그 결과 Redis 버스 도착값의 observedAt 이 비어 백엔드가 버스 실시간을 100% 버렸다
+        (2026-09-18). 자릿수만 맞춰 읽도록 고쳤고, 다시 깨지지 않게 여기서 고정한다."""
+        for raw_time, expected in (
+            ("2026-09-16 08:10:00.0", "2026-09-16T08:10:00+09:00"),
+            ("2026-09-16 08:10:00.12", "2026-09-16T08:10:00.120000+09:00"),
+            ("2026-09-16 08:10:00.123456", "2026-09-16T08:10:00.123456+09:00"),
+            ("2026-09-16 08:10:00", "2026-09-16T08:10:00+09:00"),
+        ):
+            with self.subTest(raw_time):
+                row = normalize(event("bus.arrival", raw={"mkTm": raw_time}))
+                self.assertEqual(row["observedAt"], expected)
+                self.assertNotIn("SOURCE_TIME_INVALID", row["qualityFlags"])
+                self.assertNotIn("SOURCE_TIME_UNAVAILABLE", row["qualityFlags"])
+
+    def test_broken_provider_time_is_still_flagged(self):
+        """자릿수만 맞춰 줄 뿐이다. 진짜로 못 읽는 값은 예전처럼 걸러야 한다."""
+        row = normalize(event("bus.arrival", raw={"mkTm": "어제 오전"}))
+        self.assertIsNone(row["observedAt"])
+        self.assertIn("SOURCE_TIME_INVALID", row["qualityFlags"])
+
     def test_seconds_zero_and_minutes_remain_distinct(self):
         row = normalize(event("bus.arrival", raw={"exps1": "0", "traTime1": "3.5", "mkTm": "2026-09-16 08:10:00", "full1": "0"}))
         self.assertEqual(row["firstArrivalSeconds"], 0)

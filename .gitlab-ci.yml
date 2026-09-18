@@ -223,20 +223,16 @@ backend-lint:
     unprotect: true
   variables:
     MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
-  before_script:
-    # Temurin JDK 이미지에는 git이 없어 ratchet 기준 조회 전에 설치한다.
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends git >/dev/null
   script:
     - cd backend
-    - git fetch --depth=200 origin develop:refs/remotes/origin/develop
-    - bash ./mvnw -B -q spotless:check
+    - git fetch --depth=200 origin develop
+    - ./mvnw -B -q spotless:check
     # 콜론 뒤 공백이 든 문장은 YAML 이 매핑으로 읽으므로 블록으로 쓴다.
     - |
-      bash ./mvnw -B -q checkstyle:check || { echo "checkstyle 위반(경고) - 와일드카드 import 정리 커밋 뒤 필수로 바꾼다"; exit 0; }
+      ./mvnw -B -q checkstyle:check || { echo "checkstyle 위반(경고) - 와일드카드 import 정리 커밋 뒤 필수로 바꾼다"; exit 0; }
   rules:
     - changes:
         - backend/**/*
-        - .gitlab-ci.yml
 
 # 파이썬 컨벤션 (2026-09-18). 루트 pyproject.toml 의 Ruff 규칙으로 검사한다.
 # 기존 코드 전체 정리(ruff format) 커밋 전까지는 경고로 둔다.

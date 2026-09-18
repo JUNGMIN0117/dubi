@@ -371,8 +371,12 @@ deploy-server1:
   resource_group: deploy-server1        # 같은 서버에 git pull + compose up 두 개가 동시에 돌지 않게 (버튼 연타·재실행 대비)
   environment: { name: server1-data }
   script:
+    # 코드 받기 — 서버의 로컬 변경은 지우지 않고 stash 와 ~/deploy-backup 으로 옮긴다.
+    # 스크립트를 서버에 미리 둘 필요가 없도록 표준입력으로 흘려보낸다.
     - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.15.35
-      "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
+      'bash -s' -- "$CI_COMMIT_BRANCH" < infra/scripts/pre-deploy.sh
+    - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.15.35
+      "cd ~/S15P21E202
        && cd infra && docker compose -f docker-compose.yml -f docker-compose.server1.yml
        --profile core --profile collect --profile spark --profile archive --profile hdfs --profile exporters
        up -d --build
@@ -402,8 +406,11 @@ deploy-server2:
         echo "MAIL_PASSWORD=$MAIL_PASSWORD"
         echo "FIREBASE_CREDENTIALS_BASE64=$FIREBASE_CREDENTIALS_BASE64"
       } | ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220 "umask 077 && cat > ~/S15P21E202/infra/.env.backend"
+    # 코드 받기 — 서버1 과 같은 준비 스크립트를 쓴다.
     - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220
-      "cd ~/S15P21E202 && git fetch origin && git checkout $CI_COMMIT_BRANCH && git pull --ff-only origin $CI_COMMIT_BRANCH
+      'bash -s' -- "$CI_COMMIT_BRANCH" < infra/scripts/pre-deploy.sh
+    - ssh -i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new ubuntu@172.26.6.220
+      "cd ~/S15P21E202
        && cd infra && docker compose -f docker-compose.yml -f docker-compose.server2.yml
        --profile data --profile serving --profile hdfs2 --profile monitoring
        up -d --build

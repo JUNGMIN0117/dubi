@@ -200,8 +200,10 @@ void main() {
   testWidgets('null ETA와 경로가 없어도 사고 원인을 추측하지 않는다', (tester) async {
     await tester.pumpWidget(_summary(fixtures['data']!));
 
-    expect(find.textContaining('예상 도착:'), findsNothing);
+    expect(find.textContaining('예상 도착'), findsNothing);
     expect(find.text('정확한 출발 추천을 아직 확정하지 못했어요.'), findsOneWidget);
+    // 확정하지 못한 이유는 내부 코드가 아니라 한 문장으로 붙는다.
+    expect(find.byKey(const Key('evaluationShortfallReason')), findsOneWidget);
     expect(find.text('경로 구간'), findsNothing);
     expect(find.textContaining('사고'), findsNothing);
   });

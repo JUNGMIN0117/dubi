@@ -177,7 +177,10 @@ void main() {
         (await failure(error: DioExceptionType.receiveTimeout)).kind,
         ScheduleCommandFailureKind.network,
       );
-      expect((await failure(status: 500)).kind, ScheduleCommandFailureKind.unknown);
+      expect(
+        (await failure(status: 500)).kind,
+        ScheduleCommandFailureKind.unknown,
+      );
       expect((await failure(status: 403)).code, 'SCH-403');
     });
   });

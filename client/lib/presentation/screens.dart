@@ -3580,263 +3580,267 @@ class ScheduleDetailScreen extends StatelessWidget {
       title: '일정 상세',
       child: _EvaluationHeadlineScope(
         builder: (headline) => ListView(
-        key: const Key('scheduleRouteOverview'),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0xFFD5E6FA)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 58,
-                  height: 58,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE9F1FF),
-                    borderRadius: BorderRadius.circular(16),
+          key: const Key('scheduleRouteOverview'),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFD5E6FA)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE9F1FF),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(
+                      Icons.work_rounded,
+                      color: Color(0xFF3C73DD),
+                      size: 30,
+                    ),
                   ),
-                  child: const Icon(
-                    Icons.work_rounded,
-                    color: Color(0xFF3C73DD),
-                    size: 30,
-                  ),
-                ),
-                const SizedBox(width: 13),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        schedule.title,
-                        style: const TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w900,
-                          color: DdubiColors.navy,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        '${_fullDate(schedule.date)}  ${schedule.time}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF415A89),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.location_on_outlined,
-                            size: 16,
-                            color: Color(0xFF516A98),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          schedule.title,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w900,
+                            color: DdubiColors.navy,
                           ),
-                          const SizedBox(width: 3),
-                          Expanded(
-                            child: Text(
-                              schedule.place,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF516A98),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          '${_fullDate(schedule.date)}  ${schedule.time}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF415A89),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.location_on_outlined,
+                              size: 16,
+                              color: Color(0xFF516A98),
+                            ),
+                            const SizedBox(width: 3),
+                            Expanded(
+                              child: Text(
+                                schedule.place,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF516A98),
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          // 사용자가 가장 먼저 알고 싶은 "몇 시에 나가면 되는지"를 맨 위에 둔다.
-          if (repository is ScheduleEvaluationRepository) ...[
-            ValueListenableBuilder<ScheduleEvaluationV2?>(
-              valueListenable: headline,
-              builder: (_, value, _) => DepartureHeadline(evaluation: value),
+                ],
+              ),
             ),
             const SizedBox(height: 10),
-          ],
-          Container(
-            padding: const EdgeInsets.fromLTRB(8, 10, 16, 10),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFFE1FAF5), Color(0xFFF1FBE8)],
+            // 사용자가 가장 먼저 알고 싶은 "몇 시에 나가면 되는지"를 맨 위에 둔다.
+            if (repository is ScheduleEvaluationRepository) ...[
+              ValueListenableBuilder<ScheduleEvaluationV2?>(
+                valueListenable: headline,
+                builder: (_, value, _) => DepartureHeadline(evaluation: value),
               ),
-              borderRadius: BorderRadius.circular(19),
-              border: Border.all(color: const Color(0xFFC7EEDC)),
-            ),
-            child: Row(
-              children: [
-                Image.asset(
-                  'assets/images/ttubee/running.png',
-                  width: 104,
-                  height: 92,
-                  fit: BoxFit.contain,
+              const SizedBox(height: 10),
+            ],
+            Container(
+              padding: const EdgeInsets.fromLTRB(8, 10, 16, 10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFE1FAF5), Color(0xFFF1FBE8)],
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
+                borderRadius: BorderRadius.circular(19),
+                border: Border.all(color: const Color(0xFFC7EEDC)),
+              ),
+              child: Row(
+                children: [
+                  Image.asset(
+                    'assets/images/ttubee/running.png',
+                    width: 104,
+                    height: 92,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Text(
+                            '이 일정에 맞춰',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF35528A),
+                            ),
+                          ),
                         ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14),
+                        const SizedBox(height: 6),
+                        Text(
+                          route == null
+                              ? '추천 출발 시간을 확인 중이에요.'
+                              : '선택한 경로의 기본 정보를\n확인해 주세요.',
+                          style: const TextStyle(
+                            fontSize: 19,
+                            height: 1.28,
+                            fontWeight: FontWeight.w900,
+                            color: DdubiColors.navy,
+                          ),
                         ),
-                        child: const Text(
-                          '이 일정에 맞춰',
+                        const SizedBox(height: 4),
+                        const Text(
+                          '출발 판단과 실시간 반영 여부는 최신 평가에서 확인해 주세요.',
                           style: TextStyle(
                             fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF35528A),
+                            color: Color(0xFF68808B),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        route == null
-                            ? '추천 출발 시간을 확인 중이에요.'
-                            : '선택한 경로의 기본 정보를\n확인해 주세요.',
-                        style: const TextStyle(
-                          fontSize: 19,
-                          height: 1.28,
-                          fontWeight: FontWeight.w900,
-                          color: DdubiColors.navy,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        '출발 판단과 실시간 반영 여부는 최신 평가에서 확인해 주세요.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF68808B),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '현재 선택 경로',
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                      color: DdubiColors.navy,
+                    ),
                   ),
                 ),
+                if (overview?.preview == true)
+                  const StatusBadge('검증용', tone: DdubiColors.blue),
               ],
             ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              const Expanded(
+            if (recommendationUnavailable)
+              const InfoCard(child: Text('최신 추천을 불러오지 못했어요. 잠시 후 다시 확인해주세요.'))
+            else if (route == null)
+              InfoCard(
                 child: Text(
-                  '현재 선택 경로',
-                  style: TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
-                    color: DdubiColors.navy,
-                  ),
+                  overview?.state == 'PENDING'
+                      ? '추천 경로를 계산하고 있어요.'
+                      : '아직 생성된 추천 결과가 없어요. 아래에서 다시 계산해주세요.',
                 ),
-              ),
-              if (overview?.preview == true)
-                const StatusBadge('검증용', tone: DdubiColors.blue),
+              )
+            else ...[
+              _FinalRouteSummary(route: route),
+              const SizedBox(height: 10),
+              if (recommendationApi != null)
+                _RecommendationEvidenceCard(
+                  api: recommendationApi!,
+                  overview: overview,
+                ),
             ],
-          ),
-          if (recommendationUnavailable)
-            const InfoCard(child: Text('최신 추천을 불러오지 못했어요. 잠시 후 다시 확인해주세요.'))
-          else if (route == null)
-            InfoCard(
+            const SizedBox(height: 16),
+            _LiveSavedRouteList(
+              initial: savedRoutes,
+              unavailable: routesUnavailable,
+              api: recommendationApi,
+              scheduleId: schedule.id,
+              headline: headline,
+              onSelected: recommendationApi == null
+                  ? null
+                  : (savedRoute) => _openSavedRoute(
+                      c,
+                      schedule,
+                      savedRoute,
+                      routeRepository,
+                    ),
+            ),
+            const SizedBox(height: 16),
+            // 네 칸 모두 "확인 필요"만 나오던 자리다. 값이 붙기 전까지는 한 줄로만 알린다.
+            const InfoCard(
               child: Text(
-                overview?.state == 'PENDING'
-                    ? '추천 경로를 계산하고 있어요.'
-                    : '아직 생성된 추천 결과가 없어요. 아래에서 다시 계산해주세요.',
+                '오늘의 이동 변수(날씨·혼잡도·도로 통제·지하철 지연)는 아직 확인되지 않았어요.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
               ),
-            )
-          else ...[
-            _FinalRouteSummary(route: route),
-            const SizedBox(height: 10),
-            if (recommendationApi != null)
-              _RecommendationEvidenceCard(
-                api: recommendationApi!,
-                overview: overview,
+            ),
+            const SizedBox(height: 14),
+            if (repository is ScheduleEvaluationRepository)
+              // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.
+              ValueListenableBuilder<bool>(
+                valueListenable: DeveloperDiagnostics.enabled,
+                builder: (_, diagnostics, _) => ScheduleEvaluationCard(
+                  repository: repository as ScheduleEvaluationRepository,
+                  scheduleId: schedule.id,
+                  developerDiagnostics: diagnostics,
+                  headline: headline,
+                ),
+              )
+            else
+              const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
+            TransitReferencePanel(
+              repository: repository is TransitReferenceRepository
+                  ? repository as TransitReferenceRepository
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              key: const Key('editScheduleButton'),
+              onPressed: () async {
+                final changed = await c.push<bool>(
+                  '/schedules/${schedule.id}/edit',
+                );
+                if (changed == true && c.mounted) {
+                  c.go('/schedules/${schedule.id}');
+                }
+              },
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('일정 수정'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              key: const Key('completeScheduleButton'),
+              onPressed: () => _recordArrival(c, schedule),
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('도착 완료'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              key: const Key('cancelScheduleButton'),
+              onPressed: () => _confirmCancel(c, schedule),
+              icon: const Icon(Icons.delete_outline, color: DdubiColors.red),
+              label: const Text(
+                '일정 취소',
+                style: TextStyle(color: DdubiColors.red),
               ),
+            ),
           ],
-          const SizedBox(height: 16),
-          _LiveSavedRouteList(
-            initial: savedRoutes,
-            unavailable: routesUnavailable,
-            api: recommendationApi,
-            scheduleId: schedule.id,
-            headline: headline,
-            onSelected: recommendationApi == null
-                ? null
-                : (savedRoute) =>
-                      _openSavedRoute(c, schedule, savedRoute, routeRepository),
-          ),
-          const SizedBox(height: 16),
-          // 네 칸 모두 "확인 필요"만 나오던 자리다. 값이 붙기 전까지는 한 줄로만 알린다.
-          const InfoCard(
-            child: Text(
-              '오늘의 이동 변수(날씨·혼잡도·도로 통제·지하철 지연)는 아직 확인되지 않았어요.',
-              style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
-            ),
-          ),
-          const SizedBox(height: 14),
-          if (repository is ScheduleEvaluationRepository)
-            // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.
-            ValueListenableBuilder<bool>(
-              valueListenable: DeveloperDiagnostics.enabled,
-              builder: (_, diagnostics, _) => ScheduleEvaluationCard(
-                repository: repository as ScheduleEvaluationRepository,
-                scheduleId: schedule.id,
-                developerDiagnostics: diagnostics,
-                headline: headline,
-              ),
-            )
-          else
-            const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
-          TransitReferencePanel(
-            repository: repository is TransitReferenceRepository
-                ? repository as TransitReferenceRepository
-                : null,
-          ),
-          const SizedBox(height: 14),
-          OutlinedButton.icon(
-            key: const Key('editScheduleButton'),
-            onPressed: () async {
-              final changed = await c.push<bool>(
-                '/schedules/${schedule.id}/edit',
-              );
-              if (changed == true && c.mounted) {
-                c.go('/schedules/${schedule.id}');
-              }
-            },
-            icon: const Icon(Icons.edit_outlined),
-            label: const Text('일정 수정'),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            key: const Key('completeScheduleButton'),
-            onPressed: () => _recordArrival(c, schedule),
-            icon: const Icon(Icons.check_circle_outline),
-            label: const Text('도착 완료'),
-          ),
-          const SizedBox(height: 8),
-          TextButton.icon(
-            key: const Key('cancelScheduleButton'),
-            onPressed: () => _confirmCancel(c, schedule),
-            icon: const Icon(Icons.delete_outline, color: DdubiColors.red),
-            label: const Text(
-              '일정 취소',
-              style: TextStyle(color: DdubiColors.red),
-            ),
-          ),
-        ],
         ),
       ),
     );
@@ -3868,9 +3872,8 @@ class ScheduleDetailScreen extends StatelessWidget {
       if (context.mounted) context.go('/schedules');
     } on ScheduleCommandFailure catch (failure) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(cancelFailureMessage(failure))),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(cancelFailureMessage(failure))));
       // 이미 없는 일정은 더 시도할 수 없다. 목록으로 돌아가 실제 상태를 다시 읽는다.
       if (failure.kind == ScheduleCommandFailureKind.notFound) {
         context.go('/schedules');
@@ -4035,7 +4038,9 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
     if (seen != null && !computedAt.isAfter(seen)) return;
     _seenComputedAt = computedAt;
     // 처음 받은 결과가 목록을 읽기 전에 끝난 것이면 목록은 이미 최신이다. 다시 읽지 않는다.
-    if (seen == null && computedAt.isBefore(_loadedAt.subtract(_clockSlack))) return;
+    if (seen == null && computedAt.isBefore(_loadedAt.subtract(_clockSlack))) {
+      return;
+    }
     _reload();
   }
 
@@ -4064,7 +4069,9 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
         : (route) async {
             final result = await widget.onSelected!(route);
             // 상세 화면이 "이 경로는 정리됐다"고 알려 주면 새 목록으로 바꾼다.
-            if (result == true && mounted) await _reload();
+            if (result == true && mounted) {
+              await _reload();
+            }
           },
   );
 }
@@ -5171,9 +5178,7 @@ class _SavedRouteApiScreenState extends State<_SavedRouteApiScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DataLoadError(
-                  message: gone
-                      ? '이 경로는 새로 계산되면서 정리됐어요.'
-                      : '경로 상세를 불러오지 못했어요.',
+                  message: gone ? '이 경로는 새로 계산되면서 정리됐어요.' : '경로 상세를 불러오지 못했어요.',
                 ),
                 if (gone)
                   const Padding(
@@ -8214,7 +8219,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             : (_) => _verifyAccountPassword(
                                 dialogContext: dialogContext,
                                 email: user.email,
-                                isLocalPreview: AppEnvironment.allowFakeAuth && user.id == 'debug',
+                                isLocalPreview:
+                                    AppEnvironment.allowFakeAuth &&
+                                    user.id == 'debug',
                                 password: password,
                                 setDialogState: setDialogState,
                                 setLoading: (value) => loading = value,
@@ -8284,7 +8291,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : () => _verifyAccountPassword(
                                   dialogContext: dialogContext,
                                   email: user.email,
-                                  isLocalPreview: AppEnvironment.allowFakeAuth && user.id == 'debug',
+                                  isLocalPreview:
+                                      AppEnvironment.allowFakeAuth &&
+                                      user.id == 'debug',
                                   password: password,
                                   setDialogState: setDialogState,
                                   setLoading: (value) => loading = value,

@@ -9,8 +9,12 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('lib/ 안에서 debugPrint·debugPrintStack·print 직접 호출은 AppLog 하나만 허용한다', () {
     final offenders = <String>[];
-    final pattern = RegExp(r'(?<![A-Za-z_.])(debugPrint|debugPrintStack|print)\(');
-    for (final file in Directory('lib').listSync(recursive: true).whereType<File>()) {
+    final pattern = RegExp(
+      r'(?<![A-Za-z_.])(debugPrint|debugPrintStack|print)\(',
+    );
+    for (final file in Directory(
+      'lib',
+    ).listSync(recursive: true).whereType<File>()) {
       if (!file.path.endsWith('.dart')) continue;
       final normalized = file.path.replaceAll('\\', '/');
       if (normalized.endsWith('lib/core/diagnostics/app_log.dart')) continue;
@@ -18,9 +22,15 @@ void main() {
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i];
         if (line.trimLeft().startsWith('//')) continue;
-        if (pattern.hasMatch(line)) offenders.add('$normalized:${i + 1}: ${line.trim()}');
+        if (pattern.hasMatch(line)) {
+          offenders.add('$normalized:${i + 1}: ${line.trim()}');
+        }
       }
     }
-    expect(offenders, isEmpty, reason: '직접 출력 대신 AppLog.debug/AppLog.stack 을 쓰세요.');
+    expect(
+      offenders,
+      isEmpty,
+      reason: '직접 출력 대신 AppLog.debug/AppLog.stack 을 쓰세요.',
+    );
   });
 }

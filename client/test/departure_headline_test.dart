@@ -24,8 +24,14 @@ void main() {
 
   test('유효시간만 지난 확정 결과는 고장이 아니라 마지막 확인 결과로 조용히 보여준다', () async {
     final raw = await _raw('keep');
-    raw['computedAt'] = now.subtract(const Duration(minutes: 2)).toUtc().toIso8601String();
-    raw['validUntil'] = now.subtract(const Duration(minutes: 1)).toUtc().toIso8601String();
+    raw['computedAt'] = now
+        .subtract(const Duration(minutes: 2))
+        .toUtc()
+        .toIso8601String();
+    raw['validUntil'] = now
+        .subtract(const Duration(minutes: 1))
+        .toUtc()
+        .toIso8601String();
     final expired = ScheduleEvaluationV2.fromJson(raw);
     expect(expired.isExpiredAt(now), isTrue);
     expect(expired.canRecommendAt(now), isFalse, reason: '적용 가능 여부는 여전히 아니다');
@@ -41,8 +47,14 @@ void main() {
   test('검증용(preview) 결과는 시각을 참고값으로 보여주되 확정 색을 쓰지 않는다', () async {
     final raw = await _raw('keep');
     (raw['quality'] as Map<String, dynamic>)['preview'] = true;
-    raw['computedAt'] = now.subtract(const Duration(minutes: 2)).toUtc().toIso8601String();
-    raw['validUntil'] = now.subtract(const Duration(minutes: 1)).toUtc().toIso8601String();
+    raw['computedAt'] = now
+        .subtract(const Duration(minutes: 2))
+        .toUtc()
+        .toIso8601String();
+    raw['validUntil'] = now
+        .subtract(const Duration(minutes: 1))
+        .toUtc()
+        .toIso8601String();
     final preview = ScheduleEvaluationV2.fromJson(raw);
     expect(preview.canAcceptAt(now), isFalse, reason: '적용 규칙은 그대로다');
 

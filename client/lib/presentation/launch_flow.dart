@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
 import '../core/diagnostics/app_log.dart';
 
 typedef AppStartup = Future<void> Function(ValueChanged<double> reportProgress);

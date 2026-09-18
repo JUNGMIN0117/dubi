@@ -32,7 +32,6 @@ bool get _useMockData {
   return true;
 }
 
-
 final scheduleRepositoryProvider = Provider<ScheduleRepository>((ref) {
   if (_useMockData) {
     return MockDdubiRepository();

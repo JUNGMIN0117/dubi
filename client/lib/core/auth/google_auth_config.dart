@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+
 import '../diagnostics/app_log.dart';
 
 class GoogleAuthConfig {

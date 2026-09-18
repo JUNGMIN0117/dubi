@@ -21,7 +21,8 @@ abstract final class AppEnvironment {
   static const bool isDevelopment = !isProduction;
 
   /// 운영 API 주소. 운영에서는 이 값만 쓴다.
-  static const String productionApiBaseUrl = 'https://j15e202.p.ssafy.io/api/v1';
+  static const String productionApiBaseUrl =
+      'https://j15e202.p.ssafy.io/api/v1';
 
   /// 개발 API 주소. `API_BASE_URL` 로 바꿀 수 있다(예: 로컬 서버, 에뮬레이터 10.0.2.2).
   static const String developmentApiBaseUrl = String.fromEnvironment(

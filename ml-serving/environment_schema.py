@@ -1,15 +1,16 @@
 """내부 환경 전처리 입력 계약. 마스터 매핑과 원본 시각을 보존하고 요청 크기를 제한한다."""
 
 from typing import Annotated, Literal
+
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
-    AwareDatetime,
     StrictBool,
-    StrictStr,
     StrictFloat,
     StrictInt,
+    StrictStr,
 )
 
 

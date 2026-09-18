@@ -10,21 +10,20 @@ from uuid import uuid4
 
 import pydantic
 from pydantic import BaseModel, ConfigDict, Field
-
 from sources.base import KST
 
-
 if int(pydantic.VERSION.split(".", 1)[0]) >= 2:
+
     class StrictModel(BaseModel):
         model_config = ConfigDict(extra="forbid")
 else:
+
     class StrictModel(BaseModel):
         class Config:
             extra = "forbid"
 
 
 class PollStatusEvent(StrictModel):
-
     pollId: str
     source: str = Field(min_length=1)
     scopeKey: str = Field(min_length=1)

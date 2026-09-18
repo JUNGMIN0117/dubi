@@ -7,12 +7,12 @@ events.build_event 가 계약(docs/contracts/events)에 맞춰 채운다.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, List, Literal
+from typing import Any, Literal
 
 import httpx
-
 from config import Settings
 
 # python:slim 이미지에 tzdata 가 없을 수 있어 고정 오프셋으로 둔다 (한국은 DST 없음)
@@ -59,7 +59,7 @@ class PollBatch(list):
 
 # Collector 이미지는 Python 3.8도 지원하므로 런타임에 평가되는 타입 별칭은
 # PEP 585의 list[...] 대신 typing.List를 사용한다.
-FetchFn = Callable[[Settings, httpx.Client], List[Record]]
+FetchFn = Callable[[Settings, httpx.Client], list[Record]]
 
 
 @dataclass(frozen=True)

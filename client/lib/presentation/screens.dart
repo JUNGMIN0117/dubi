@@ -8113,128 +8113,146 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ],
   );
 
-  Widget _mobileAccountCard(BuildContext context, UserProfile user) =>
-      _settingsCard(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _mobileAccountCard(
+    BuildContext context,
+    UserProfile user,
+  ) => _settingsCard(
+    padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
+            Stack(
+              clipBehavior: Clip.none,
               children: [
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 70,
-                      height: 70,
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFD9F8F3),
-                        shape: BoxShape.circle,
-                      ),
-                      child: ClipOval(
-                        child: _profileImage(
-                          characterIndex: _selectedProfileCharacter,
-                          bytes: _selectedProfileBytes,
-                        ),
-                      ),
+                Container(
+                  width: 70,
+                  height: 70,
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFD9F8F3),
+                    shape: BoxShape.circle,
+                  ),
+                  child: ClipOval(
+                    child: _profileImage(
+                      characterIndex: _selectedProfileCharacter,
+                      bytes: _selectedProfileBytes,
                     ),
-                    Positioned(
-                      right: -2,
-                      bottom: -2,
-                      child: Material(
-                        color: const Color(0xFF14B8A6),
-                        shape: CircleBorder(
-                          side: BorderSide(color: Colors.white, width: 2),
-                        ),
-                        child: InkWell(
-                          key: const Key('changeProfileImageButton'),
-                          onTap: () => _showProfileImageSheet(context),
-                          customBorder: const CircleBorder(),
-                          child: const SizedBox(
-                            width: 29,
-                            height: 29,
-                            child: Icon(
-                              Icons.add_rounded,
-                              color: Colors.white,
-                              size: 19,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user.nickname,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF102454),
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
+                Positioned(
+                  right: -2,
+                  bottom: -2,
+                  child: Material(
+                    color: const Color(0xFF14B8A6),
+                    shape: CircleBorder(
+                      side: BorderSide(color: Colors.white, width: 2),
+                    ),
+                    child: InkWell(
+                      key: const Key('changeProfileImageButton'),
+                      onTap: () => _showProfileImageSheet(context),
+                      customBorder: const CircleBorder(),
+                      child: const SizedBox(
+                        width: 29,
+                        height: 29,
+                        child: Icon(
+                          Icons.add_rounded,
+                          color: Colors.white,
+                          size: 19,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        user.email ?? '연결된 소셜 계정',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF64708B),
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ],
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Divider(height: 1, color: Color(0xFFE1E9EE)),
-            ),
-            const Row(
-              children: [
-                Icon(Icons.settings_rounded, color: Color(0xFF10B8A5)),
-                SizedBox(width: 8),
-                Text(
-                  '계정 관리',
-                  style: TextStyle(
-                    color: Color(0xFF102454),
-                    fontSize: 17,
-                    fontWeight: FontWeight.w900,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.nickname,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF102454),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            const Padding(
-              padding: EdgeInsets.only(left: 32),
-              child: Text(
-                '비밀번호를 확인한 후 아래 메뉴를 이용할 수 있어요.',
-                style: TextStyle(color: Color(0xFF64708B), fontSize: 12),
-              ),
-            ),
-            const SizedBox(height: 13),
-            const Padding(
-              padding: EdgeInsets.only(left: 32),
-              child: Text(
-                '계정 연결 API 연동 후 제공될 예정이에요.',
-                key: Key('accountManagementPreparing'),
-                style: TextStyle(color: Color(0xFF64708B), fontSize: 13),
+                  const SizedBox(height: 3),
+                  Text(
+                    user.email ?? '연결된 소셜 계정',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF64708B),
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
-      );
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Divider(height: 1, color: Color(0xFFE1E9EE)),
+        ),
+        // 계정 관리로 들어가는 자리. 비밀번호를 한 번 확인한 뒤 실제 화면으로 보낸다.
+        //
+        // 예전에는 여기가 누를 수 없는 글자 두 줄이었다. "준비 중" 이라고만 적혀 있었고
+        // 화면으로 가는 길이 없어서, 비밀번호·이메일 변경과 소셜 연결을 만들어 두고도
+        // 앱에서는 닿을 수 없었다(2026-09-18).
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: const Key('accountManagementMenuButton'),
+            onTap: () => _openAccountManagement(context, user),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Row(
+                    children: [
+                      Icon(Icons.settings_rounded, color: Color(0xFF10B8A5)),
+                      SizedBox(width: 8),
+                      Text(
+                        '계정 관리',
+                        style: TextStyle(
+                          color: Color(0xFF102454),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Spacer(),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFF64708B),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 4),
+                  Padding(
+                    padding: EdgeInsets.only(left: 32),
+                    child: Text(
+                      '비밀번호를 확인한 뒤 비밀번호·이메일 변경과 소셜 연결을 할 수 있어요.',
+                      style: TextStyle(color: Color(0xFF64708B), fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
-  // ignore: unused_element
   Future<void> _openAccountManagement(
     BuildContext context,
     UserProfile user,

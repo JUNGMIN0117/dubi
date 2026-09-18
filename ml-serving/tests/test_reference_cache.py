@@ -67,3 +67,38 @@ def test_unverified_and_failed_reads_are_not_cached(tmp_path):
     assert cache.stats()['entries'] == 0
     write_table(path, {'seconds': [15]})
     assert cache.read(path).to_pydict() == {'seconds': [15]}
+
+
+def test_pandas_conversion_is_reused_and_copies_are_isolated(tmp_path, monkeypatch):
+    """두 portable 읽기 형태가 반복 변환을 피하면서 요청 간 수정을 격리한다."""
+    path = tmp_path / 'daily.parquet'
+    write_table(path, {'id': ['001', '002'], 'seconds': [0., None]})
+    cache = ReferenceCache([path], 10000)
+    module = SimpleNamespace(pd=pd, pq=pq)
+    cache.bind(module)
+    expected = pd.read_parquet(path)
+    first = module.pq.ParquetFile(path).read().to_pandas()
+    first.loc[0, 'seconds'] = 999
+    # 원본 읽기 자체가 다시 일어나면 실패시켜 캐시 재사용을 시간 측정 없이 검증한다.
+    monkeypatch.setattr(pq, 'ParquetFile', lambda *a, **k: pytest.fail('repeated conversion'))
+    pd.testing.assert_frame_equal(module.pd.read_parquet(path), expected)
+    assert cache.hits == 1
+    assert cache.bytes == int(expected.memory_usage(index=True, deep=True).sum())
+
+
+def test_pandas_and_arrow_share_budget_and_oversized_frames_are_not_retained(tmp_path):
+    path = tmp_path / 'daily.parquet'
+    write_table(path, {'id': ['001', '002'], 'seconds': [0., None]})
+    expected = pd.read_parquet(path)
+    size = int(expected.memory_usage(index=True, deep=True).sum())
+    cache = ReferenceCache([path], size)
+    cache.read(path)
+    cache.read_pandas(path)
+    assert cache.bytes == size and cache.evictions == 1
+    cache.read(path)
+    assert cache.bytes <= size and cache.evictions == 2
+    for budget in [0, size - 1]:
+        limited = ReferenceCache([path], budget)
+        limited.read_pandas(path)
+        limited.read_pandas(path)
+        assert limited.bytes == 0 and limited.hits == 0

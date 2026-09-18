@@ -238,6 +238,99 @@ class EvaluationQuality {
   );
 }
 
+/// 서버가 내린 "보여줘도 되는가 / 적용해도 되는가" 판단.
+///
+/// 앱이 조건을 따로 따지지 않는다. 같은 근거로 서버가 수락 검증도 하므로, 앱에서 다르게 판단하면
+/// 화면과 실제 동작이 어긋난다(2026-09-18 백엔드 guidance 도입).
+class EvaluationGuidance {
+  const EvaluationGuidance({
+    required this.canDisplayEstimate,
+    required this.canAccept,
+    required this.source,
+    this.reasons = const [],
+  });
+
+  /// 예상 출발·도착 시각을 화면에 보여도 되는지.
+  final bool canDisplayEstimate;
+
+  /// "이 제안 적용" 을 눌러도 되는지.
+  final bool canAccept;
+
+  /// 그 시각이 무엇으로 계산됐는지.
+  /// `PROVIDER_ESTIMATE`(기본 경로 기준) · `MIXED_ESTIMATE` · `EXPERIMENTAL_ESTIMATE`(시험 예측 포함) · `UNAVAILABLE`.
+  final String source;
+
+  /// 적용을 막은 이유 코드. 사용자 화면에는 그대로 쓰지 않는다.
+  final List<String> reasons;
+
+  /// guidance 가 없는 예전 서버 응답. 시각을 보여주지도, 적용하지도 않는다.
+  static const EvaluationGuidance absent = EvaluationGuidance(
+    canDisplayEstimate: false,
+    canAccept: false,
+    source: 'UNAVAILABLE',
+  );
+
+  /// 전부 기본 경로 소요시간으로 계산한 값인지.
+  bool get isProviderEstimate => source == 'PROVIDER_ESTIMATE';
+
+  /// 시험 중인 예측이 섞였는지.
+  bool get isExperimental => source == 'EXPERIMENTAL_ESTIMATE';
+
+  factory EvaluationGuidance.fromJson(Map<String, dynamic> json) =>
+      EvaluationGuidance(
+        canDisplayEstimate: json['canDisplayEstimate'] == true,
+        canAccept: json['canAccept'] == true,
+        source: json['source']?.toString() ?? 'UNAVAILABLE',
+        reasons: _strings(json['reasons']),
+      );
+}
+
+/// 같은 평가에서 후보 경로들을 같은 기준으로 비교한 결과.
+///
+/// `route.baseDurationMin`(경로 API 원본)과 다른 값이다. 목록의 순위·소요시간은 이 값을 쓴다.
+class EvaluationCandidateEstimate {
+  const EvaluationCandidateEstimate({
+    required this.rank,
+    this.candidateKey,
+    this.routeId,
+    this.assessment,
+    this.departAt,
+    this.estimatedArrivalAt,
+    this.durationSeconds,
+    this.selected = false,
+    this.proposed = false,
+  });
+
+  final int rank;
+  final String? candidateKey;
+
+  /// 저장된 경로 식별자. 목록 카드와 이어 붙일 때 쓴다.
+  final String? routeId;
+  final String? assessment;
+  final DateTime? departAt;
+  final DateTime? estimatedArrivalAt;
+  final int? durationSeconds;
+
+  /// 지금 저장된 선택.
+  final bool selected;
+
+  /// 이번 평가가 새로 제안한 경로. 적용 전에는 [selected] 와 다를 수 있다.
+  final bool proposed;
+
+  factory EvaluationCandidateEstimate.fromJson(Map<String, dynamic> json) =>
+      EvaluationCandidateEstimate(
+        rank: (json['rank'] as num?)?.toInt() ?? 0,
+        candidateKey: json['candidateKey']?.toString(),
+        routeId: json['routeId']?.toString(),
+        assessment: json['assessment']?.toString(),
+        departAt: _date(json['departAt']),
+        estimatedArrivalAt: _date(json['estimatedArrivalAt']),
+        durationSeconds: (json['durationSeconds'] as num?)?.toInt(),
+        selected: json['selected'] == true,
+        proposed: json['proposed'] == true,
+      );
+}
+
 class EvaluationSearch {
   const EvaluationSearch({
     this.domain,
@@ -359,6 +452,8 @@ class ScheduleEvaluationV2 {
     this.validUntil,
     this.nextEvaluationAt,
     this.versions,
+    this.guidance = EvaluationGuidance.absent,
+    this.candidateEstimates = const [],
   });
 
   final String schemaVersion;
@@ -390,6 +485,12 @@ class ScheduleEvaluationV2 {
   final String? proposedRouteId;
   final EvaluationQuality quality;
   final EvaluationSearch? search;
+
+  /// 표시·적용 판단. 서버가 없으면 [EvaluationGuidance.absent] 라 아무것도 보여주지 않는다.
+  final EvaluationGuidance guidance;
+
+  /// 후보 경로별 평가 결과. 목록 카드와 `routeId` 로 이어 붙인다.
+  final List<EvaluationCandidateEstimate> candidateEstimates;
   final DepartureDecision? bestKnownDecision;
   final String? bestKnownDecisionRaw;
   final List<EvaluationCause> causes;
@@ -432,6 +533,17 @@ class ScheduleEvaluationV2 {
         DepartureDecision.lateExpected,
       }.contains(decision);
 
+  /// 시각을 화면에 보여도 되는지. 판단은 서버(`guidance`)가 하고, 앱은 결과가 아직 유효한지만 본다.
+  ///
+  /// 앱이 품질 조건을 따로 따지지 않는다. 서버가 같은 근거로 수락 검증도 하므로 기준이 갈라지면 안 된다.
+  bool canDisplayEstimateAt(DateTime now) =>
+      !isLegacy &&
+      state == EvaluationState.ready &&
+      guidance.canDisplayEstimate &&
+      estimatedArrivalAt != null &&
+      validUntil != null &&
+      !isExpiredAt(now);
+
   bool canRecommendAt(DateTime now) =>
       !isLegacy &&
       state == EvaluationState.ready &&
@@ -456,8 +568,13 @@ class ScheduleEvaluationV2 {
                 leg.durationSource == DurationSource.unknown),
       );
 
+  /// "이 제안 적용" 을 눌러도 되는지.
+  ///
+  /// 서버 판단(`guidance.canAccept`)에 더해, 앱은 이미 출발했거나 제안이 만료된 경우만 추가로 막는다.
+  /// 최종 수락 검증은 서버가 다시 한다.
   bool canAcceptAt(DateTime now) =>
-      canRecommendAt(now) &&
+      canDisplayEstimateAt(now) &&
+      guidance.canAccept &&
       actualDepartAt == null &&
       !departureMissed &&
       proposedDepartAt != null;
@@ -470,6 +587,7 @@ class ScheduleEvaluationV2 {
     final decisionRaw = json['decision']?.toString();
     final quality = _map(json['quality']);
     final search = _map(json['search']);
+    final guidance = _map(json['guidance']);
     final versions = _map(json['versions']);
     return ScheduleEvaluationV2(
       schemaVersion: 'schedule-evaluation-v2',
@@ -503,6 +621,12 @@ class ScheduleEvaluationV2 {
           ? EvaluationQuality.unavailable
           : EvaluationQuality.fromJson(quality),
       search: search.isEmpty ? null : EvaluationSearch.fromJson(search),
+      guidance: guidance.isEmpty
+          ? EvaluationGuidance.absent
+          : EvaluationGuidance.fromJson(guidance),
+      candidateEstimates: _maps(json['candidateEstimates'])
+          .map(EvaluationCandidateEstimate.fromJson)
+          .toList(growable: false),
       bestKnownDecision: json['bestKnownDecision'] == null
           ? null
           : DepartureDecision.fromRaw(json['bestKnownDecision']?.toString()),

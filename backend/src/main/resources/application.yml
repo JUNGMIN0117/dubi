@@ -177,13 +177,14 @@ ddubi:
     # 이 시간을 넘기면 202 + jobId 비동기로 전환 (성능 목표)
     sync-timeout: 2s
   walking:
-    # 공식 카카오맵 도보 조회. 검증된 좌표 artifact와 거리 정책이 있을 때만 사용한다.
-    enabled: ${DDUBI_WALKING_ENABLED:false}
+    # 기본은 카카오 경로 승하차 끝점으로 조회한다. 공식 마스터 출입구 검증과 출처를 구분한다.
+    enabled: ${DDUBI_WALKING_ENABLED:true}
+    provider-endpoints: ${DDUBI_WALKING_PROVIDER_ENDPOINTS:true}
     base-url: https://dapi.kakao.com
     path: /v2/routing/walk
     timeout-millis: 1500
     cache-seconds: 60
-    max-calls: 4
+    max-calls: ${DDUBI_WALKING_MAX_CALLS:10}
     endpoint-max-meters: ${DDUBI_WALKING_ENDPOINT_MAX_METERS:0}
     master-coordinate-path: ${DDUBI_WALKING_MASTER_COORDINATE_PATH:}
   external:

@@ -62,6 +62,11 @@ public class JourneyEvaluationService {
         this(client,evidence,evaluator,subway,busWaiting,historical,DEFAULT_ML_BUDGET_SHARE,MlApplyMode.TEST_APPLY);
     }
     public MlApplyMode applyMode() { return applyMode; }
+    /** 보조 계산의 실패·미승인은 API 시간으로 재계산한다. 모델 승인 표시를 변경하지 않는다. */
+    public ConditionalDepartureEvaluator.Evaluation providerFallback(List<RouteCandidate> routes,RouteEvidenceAssembler.Snapshot snapshot,
+            Instant asOf,Instant planned,Instant deadline,Comparison previous,String reason) {
+        return new ProviderDepartureEvaluator(evidence,evaluator).evaluate(routes,snapshot,asOf,planned,deadline,previous,reason);
+    }
     /** 기존 순수 fixture는 명시적 역사자료 설정 없이 이전 동작을 유지한다. */
     public JourneyEvaluationService(BusPreviewClient client, RouteEvidenceAssembler evidence, RouteTimelineEvaluator evaluator,
                           SubwayTimingService subway, BusWaitingService busWaiting) {
@@ -127,7 +132,8 @@ public class JourneyEvaluationService {
         var busSession = session.bus;
         long deadline = session.deadline;
         // 모든 후보의 BUS edge를 먼저 한 배치로 조회한다. 후보 순서 때문에 뒤 후보만 예산을 잃는 문제를 막는다.
-        boolean exhausted = prefetch(routes, snapshot, asOf, departure, session);
+        prefetch(routes, snapshot, asOf, departure, session);
+        boolean exhausted = false;
         for (RouteCandidate route : routes) {
             Journey original = evidence.assemble(route, snapshot, asOf);
             var legs = new ArrayList<Leg>();
@@ -167,7 +173,7 @@ public class JourneyEvaluationService {
                                 // 선조회 뒤 앞 edge 예측으로 진입 시간대가 바뀐 edge만 개별 호출한다. 개수·시간 한도를 넘으면 예산 소진.
                                 if (session.mlIndividualCalls >= INDIVIDUAL_CALL_LIMIT || System.nanoTime() >= session.mlDeadline
                                         || !session.roomForMlCall(client.timeoutMillis())) {
-                                    exhausted = true; estimate = BusPreviewClient.Estimate.unavailable("ML_BUDGET_EXHAUSTED");
+                                    estimate = BusPreviewClient.Estimate.unavailable("ML_BUDGET_EXHAUSTED");
                                 } else {
                                     session.mlIndividualCalls++;
                                     estimate = applyMode == MlApplyMode.PRODUCTION
@@ -246,10 +252,19 @@ public class JourneyEvaluationService {
                     if (chosen == leg) reasons.add(leg.key() + ":API_FALLBACK");
                     var waitReasons = new ArrayList<>(wait.reasons());
                     if (wait.seconds() != null && !waitApplied) waitReasons.add(canUseWait ? "BUS_WAIT_MOVEMENT_UNAVAILABLE" : "BUS_WAIT_TIME_COMPONENTS_UNRESOLVED");
-                    if (busWaiting.decompositionVerified() && leg.entryUncertaintySeconds() == 0 && !waitApplied) {
-                        // 대기 제외가 확인된 경로에서 결측 WAIT를 없애면 가짜 최단 ETA가 된다. 평가기를 정보 부족으로 종료시킨다.
-                        legs.add(new Leg(leg.key()+"-wait",Kind.WAIT,List.of(),null,null,null,List.of()));
-                        waitReasons.add("BUS_WAIT_REQUIRED_NOT_APPLIED");
+                    if (chosen != leg && busWaiting.decompositionVerified() && leg.entryUncertaintySeconds() == 0 && !waitApplied) {
+                        // 대기를 알 수 없으면 ML 이동시간만 사용하는 대신 BUS step 전체를
+                        // provider 예상으로 복귀한다. 예측 수신 성공과 실제 적용을 구별한다.
+                        if("BUS_HISTORICAL_REFERENCE".equals(chosen.window().source())) historicalSteps--;
+                        else mlSteps--;
+                        chosen=leg;
+                        predictions.replaceAll(p->p.candidateKey().equals(original.key()) && p.stepKey().equals(leg.key())
+                                ?new Prediction(p.candidateKey(),p.stepKey(),p.segmentId(),p.enteredAt(),p.input(),p.estimate(),false):p);
+                        reasons.removeIf(reason->Set.of(leg.key()+":ML_TEST_APPLIED",leg.key()+":ML_APPLIED",
+                                leg.key()+":HISTORICAL_REFERENCE_APPLIED").contains(reason));
+                        reasons.add(leg.key()+":ML_NOT_APPLIED:BUS_WAIT_UNAVAILABLE");
+                        reasons.add(leg.key()+":API_FALLBACK");
+                        waitReasons.add("BUS_WAIT_REQUIRED_PROVIDER_FALLBACK");
                     }
                     waitPredictions.add(new WaitPrediction(original.key(),leg.key(),TransportMode.BUS,station,wait.seconds(),
                             wait.boardingAt(),wait.vehicleId(),wait.source(),wait.eventId(),wait.observedAt(),wait.validUntil(),waitApplied,waitReasons));
@@ -283,9 +298,12 @@ public class JourneyEvaluationService {
                         subwaySteps++;
                     } else {
                         reasons.add(leg.key() + ":" + reason);
-                        if (subway.decompositionVerified() && leg.entryUncertaintySeconds() == 0) {
+                        // 시간표/실시간 결측이면 원본 step을 그대로 보존한다. 실제 열차를 조회한 뒤
+                        // 탑승 불가로 판정된 경우만 차단하여 막차 이후 가상의 운행을 만들지 않는다.
+                        if (timing.reasons().contains("SUBWAY_NO_BOARDABLE_TRAIN")) {
                             legs.add(new Leg(leg.key()+"-wait",Kind.WAIT,List.of(),null,null,null,List.of()));
                         }
+                        reasons.add(leg.key() + ":API_FALLBACK");
                     }
                 }
                 if (segment!=null && segment.mode()==TransportMode.BUS && !snapshot.roads().isEmpty()) {
@@ -306,7 +324,7 @@ public class JourneyEvaluationService {
             if(historicalSteps>0) quality=mlSteps+subwaySteps+apiSteps+busWaitSteps>0?"MIXED_HISTORICAL_REFERENCE":"HISTORICAL_REFERENCE";
             results.add(new Candidate(result, quality, mlSteps, apiSteps, subwaySteps, busWaitSteps));
         }
-        if(session.mixedModel) {
+        if(session.mixedModel && applyMode != MlApplyMode.SHADOW) {
             results.replaceAll(c -> new Candidate(new Result(c.result().journeyKey(),departure,null,Assessment.INSUFFICIENT_DATA,
                     true,List.of(),List.of("ML_MODEL_VERSION_MISMATCH"),"cdep-v1"),"UNAVAILABLE",0,0,0,0));
             predictions.replaceAll(p -> new Prediction(p.candidateKey(),p.stepKey(),p.segmentId(),p.enteredAt(),p.input(),p.estimate(),false));
@@ -381,7 +399,17 @@ public class JourneyEvaluationService {
         inputs.removeIf(session.cache::containsKey);
         if (inputs.isEmpty()) return false;
         if (System.nanoTime() >= session.mlDeadline || !session.roomForMlCall(client.timeoutMillis())) return true;
-        var results = client.predictBatch(new ArrayList<>(inputs), contract());
+        var results = new LinkedHashMap<BusPreviewClient.Input, BusPreviewClient.Estimate>();
+        var ordered = new ArrayList<>(inputs);
+        // 실제 HTTP 청크마다 남은 예산을 검사한다. 미호출 입력도 캐시에 결측으로 넣어
+        // 후보별 반복 처리에서 동일 입력을 다시 호출하지 않고 API fallback을 유지한다.
+        int batchSize=client.maxBatchSegments()>0?client.maxBatchSegments():200;
+        for (int from=0; from<ordered.size(); from+=batchSize) {
+            var chunk=ordered.subList(from,Math.min(ordered.size(),from+batchSize));
+            if (System.nanoTime()>=session.mlDeadline || !session.roomForMlCall(client.timeoutMillis())) {
+                for (var input:chunk) results.put(input,BusPreviewClient.Estimate.unavailable("ML_BUDGET_EXHAUSTED"));
+            } else results.putAll(client.predictBatch(chunk,contract()));
+        }
         for (var entry : results.entrySet()) { trackModel(session, entry.getValue()); session.cache.put(entry.getKey(), entry.getValue()); }
         return false;
     }

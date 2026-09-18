@@ -86,7 +86,11 @@ public class RouteEvidenceAssembler {
         long sum = candidate.segments().stream().mapToLong(RouteSegment::durationSeconds).sum();
         long unassigned = candidate.totalDurationSeconds() - sum;
         if (unassigned < 0 || candidate.segments().isEmpty()) {
-            return new Journey(key(candidate), List.of(new Leg("provider-total", Kind.PROVIDER_TOTAL, List.of(),
+            // 시간 분해 실패가 이미 검증한 구간 정체성까지 지워서는 안 된다. 전체 이동
+            // 구간에서 통제와 겹치면 보수적으로 차단하며 원본 총시간으로 통제를 우회하지 않는다.
+            var ids=candidate.segments().stream().flatMap(s->edges(s).stream())
+                    .map(MappedTransitSegment::segmentId).distinct().toList();
+            return new Journey(key(candidate), List.of(new Leg("provider-total", Kind.PROVIDER_TOTAL, ids,
                     candidate.totalDurationSeconds(), null, null, List.of())));
         }
         var legs = new ArrayList<Leg>();
@@ -137,7 +141,8 @@ public class RouteEvidenceAssembler {
         String base="candidate-"+candidate.providerCandidateIndex();
         if(candidate.segments().stream().noneMatch(s -> s.mapping()!=null
                 && BusAlternativeExpansion.SELECTED.equals(s.mapping().failureReason()))) return base;
-        var ids=candidate.segments().stream().map(s -> s.sequence()+":"+pathIdentity(s)).toList().toString();
+        var ids=candidate.segments().stream().filter(s->!"EVALUATION_ENDPOINT_WALK".equals(s.providerRouteKey()))
+                .map(s -> s.sequence()+":"+pathIdentity(s)).toList().toString();
         return base+"-bus-"+UUID.nameUUIDFromBytes(ids.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

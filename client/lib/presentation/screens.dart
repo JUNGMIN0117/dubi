@@ -4124,6 +4124,7 @@ class _SavedRouteList extends StatelessWidget {
     }
     return null;
   }
+
   @override
   Widget build(BuildContext context) {
     final routes = display.visible;
@@ -4202,6 +4203,7 @@ class _SavedRouteTile extends StatelessWidget {
     if (seconds == null) return '약 ${route.baseDurationMin}분';
     return '약 ${(seconds / 60).ceil()}분';
   }
+
   @override
   Widget build(BuildContext context) => Material(
     color: route.selected ? const Color(0xFFE7FAF5) : Colors.white,

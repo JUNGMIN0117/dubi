@@ -49,10 +49,8 @@ bool evaluationHasReferenceTimes(ScheduleEvaluationV2 evaluation) =>
 /// 확정은 아니지만 시각을 보여줄 때 쓰는 상태 문장. 출처에 따라 말을 바꾼다.
 String evaluationGuidanceMessage(EvaluationGuidance guidance) =>
     switch (guidance.source) {
-      'PROVIDER_ESTIMATE' =>
-        '기본 경로 기준으로 계산한 예상이에요. 실시간 정보가 들어오면 더 정확해져요.',
-      'EXPERIMENTAL_ESTIMATE' =>
-        '아직 시험 중인 예측이 섞여 있어요. 참고용이고 일정에 자동 적용은 안 해요.',
+      'PROVIDER_ESTIMATE' => '기본 경로 기준으로 계산한 예상이에요. 실시간 정보가 들어오면 더 정확해져요.',
+      'EXPERIMENTAL_ESTIMATE' => '아직 시험 중인 예측이 섞여 있어요. 참고용이고 일정에 자동 적용은 안 해요.',
       _ => '참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.',
     };
 

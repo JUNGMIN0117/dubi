@@ -54,7 +54,10 @@ void main() {
       'reasons': ['ML_TEST_RESULT_NOT_ACCEPTABLE'],
     };
     // 만료 동작은 위 시험에서 따로 확인한다. 여기서는 유효한 결과로 둔다.
-    raw['validUntil'] = now.add(const Duration(minutes: 1)).toUtc().toIso8601String();
+    raw['validUntil'] = now
+        .add(const Duration(minutes: 1))
+        .toUtc()
+        .toIso8601String();
     final preview = ScheduleEvaluationV2.fromJson(raw);
     expect(preview.canAcceptAt(now), isFalse, reason: '시험 예측이 섞이면 수락은 막힌다');
 

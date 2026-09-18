@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../core/constants/api_paths.dart';
 import '../domain/auth.dart';
 import '../domain/models.dart';
+import '../core/config/app_environment.dart';
 
 Map<String, dynamic> _stringKeyed(Map<dynamic, dynamic> source) =>
     source.map((key, value) => MapEntry(key.toString(), value));
@@ -239,6 +240,23 @@ class NotificationApi {
     if (_sessionStore.accessToken == null) return;
     await _dio.patch<Map<String, dynamic>>(ApiPaths.notificationsReadAll);
   }
+
+  /// 고른 알림을 알림함에서 지운다.
+  ///
+  /// 서버는 발송 이력을 남기고 화면에서만 감춘다. 하나라도 없거나 남의 것이면 아무것도
+  /// 지우지 않으므로, 실패하면 목록을 그대로 두고 다시 불러오면 된다.
+  ///
+  /// 지운 뒤의 안읽음 뱃지 숫자를 돌려준다. 안읽은 알림을 지우면 뱃지가 줄어든다.
+  Future<int> deleteNotifications(List<String> ids) async {
+    if (_sessionStore.accessToken == null || ids.isEmpty) return 0;
+    final data = _successData(
+      await _dio.delete<Map<String, dynamic>>(
+        ApiPaths.notifications,
+        queryParameters: {'ids': ids},
+      ),
+    );
+    return (data['unreadCount'] as num?)?.toInt() ?? 0;
+  }
 }
 
 class UserApi {
@@ -250,6 +268,10 @@ class UserApi {
   Future<UserProfile> getMe() async {
     final session = _sessionStore.session;
     if (session == null) {
+      // 운영 빌드는 가짜 사용자로 대체하지 않는다. 화면은 오류 상태를 보여주고 로그인으로 유도한다.
+      if (!AppEnvironment.allowFakeAuth) {
+        throw StateError('로그인 세션이 없어 계정 정보를 불러올 수 없습니다.');
+      }
       return const UserProfile(
         id: 'debug',
         email: null,

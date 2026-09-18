@@ -101,9 +101,9 @@ sh submit.sh batch/export_bus_segment_mapping.py \
 ```sh
 sh submit.sh batch/export_bus_weather_mapping.py \
   --crosswalk /opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz \
-  --crosswalk-sha e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd \
+  --crosswalk-sha 8014da5e1453d426789fa396622a0f0e4069ac484db76860348af517adc1f246 \
   --bus-master /opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz \
-  --bus-master-sha e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64 \
+  --bus-master-sha 6999b0e67eb1af391de563291ce9cf4251b5ec271307e3f24de55d22d17318e2 \
   --output hdfs://hdfs-namenode:9000/ddubi/master/bus-weather-grid/version=20260918-v1
 ```
 
@@ -151,9 +151,9 @@ City Silver 도로 좌표가 HDFS에 쌓인 뒤 버스 구간→도시 영역 �
 ```sh
 sh submit.sh batch/export_bus_city_mapping.py \
   --crosswalk /opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz \
-  --crosswalk-sha e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd \
+  --crosswalk-sha 8014da5e1453d426789fa396622a0f0e4069ac484db76860348af517adc1f246 \
   --bus-master /opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz \
-  --bus-master-sha e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64 \
+  --bus-master-sha 6999b0e67eb1af391de563291ce9cf4251b5ec271307e3f24de55d22d17318e2 \
   --city-road-input 'hdfs://hdfs-namenode:9000/ddubi/silver/city/realtime-v1/live/batches/batch=*/road-link-snapshot' \
   --output hdfs://hdfs-namenode:9000/ddubi/master/bus-city-area/version=20260918-v1
 ```

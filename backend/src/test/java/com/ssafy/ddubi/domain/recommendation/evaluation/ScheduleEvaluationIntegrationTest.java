@@ -5,6 +5,8 @@ import com.ssafy.ddubi.domain.recommendation.entity.TriggerType;
 import com.ssafy.ddubi.domain.recommendation.service.*;
 import com.ssafy.ddubi.domain.route.client.PublicTransitRouteClient;
 import com.ssafy.ddubi.domain.route.model.RouteSearchResult;
+import com.ssafy.ddubi.domain.route.service.SegmentResolveRequest;
+import com.ssafy.ddubi.domain.route.service.MasterDataTransitMappingResolver;
 import com.ssafy.ddubi.domain.schedule.dto.request.*;
 import com.ssafy.ddubi.domain.schedule.service.ScheduleService;
 import com.ssafy.ddubi.domain.schedule.repository.ScheduleRepository;
@@ -32,6 +34,8 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
     @Autowired JdbcTemplate jdbc;
     @MockitoBean PublicTransitRouteClient routeClient;
     @MockitoBean BusPreviewClient mlClient;
+    /** 실제 캐시 재매핑은 거치되, 가상 노선의 마스터 판정은 최초 fixture와 같게 고정한다. */
+    @MockitoBean MasterDataTransitMappingResolver mappingResolver;
     long owner;
     long scheduleId;
     Instant now;
@@ -45,8 +49,14 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         scheduleId = scheduleService.create(owner,new ScheduleCreateRequest("테스트",location,target,
                 LocalDateTime.ofInstant(now.plusSeconds(1800),ZoneId.of("Asia/Seoul")),null,null,
                 LocalDateTime.ofInstant(now.plusSeconds(600),ZoneId.of("Asia/Seoul")))).id();
-        when(routeClient.search(any())).thenReturn(new RouteSearchResult("KAKAO",now,null,
-                List.of(RouteEvidenceAssemblerTest.candidate(0,1500,30),RouteEvidenceAssemblerTest.candidate(1,600,30))));
+        var candidates = List.of(RouteEvidenceAssemblerTest.candidate(0,1500,30),RouteEvidenceAssemblerTest.candidate(1,600,30));
+        when(routeClient.search(any())).thenReturn(new RouteSearchResult("KAKAO",now,null,candidates));
+        when(mappingResolver.resolve(any())).thenAnswer(call -> {
+            SegmentResolveRequest request = call.getArgument(0);
+            return candidates.stream().flatMap(candidate -> candidate.segments().stream())
+                    .filter(step -> step.mode() == request.mode() && step.providerRouteKey().equals(request.providerRouteKey()))
+                    .findFirst().orElseThrow().mapping();
+        });
     }
 
     /** 저장된 근거 JSON의 persistence 필드 하나를 꺼낸다. MySQL이 공백을 정규화하므로 문자열 비교는 쓰지 않는다. */
@@ -57,7 +67,7 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
 
     @Test void inputIsStoredAndPeriodicEvaluationReusesCandidates() {
         var first = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
-        assertThat(first.selected().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.LATE_ESTIMATE);
+        assertThat(first.selected().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.ON_TIME_ESTIMATE);
         assertThat(first.suggestion().proposed().journeyKey()).isEqualTo("candidate-1");
         // 비교 계약은 JPA가 반환한 버전과 JDBC 저장/조회 버전의 일치다.
         // Hibernate의 Timestamp 변환이 개입하는 원본 DB 컬럼끼리 직접 비교하지 않는다.
@@ -66,7 +76,9 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
                 (rs, rowNum) -> rs.getObject(1, LocalDateTime.class), scheduleId);
         assertThat(persistedVersion).isEqualTo(schedules.findById(scheduleId).orElseThrow().getUpdatedAt());
         assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("READY");
-        workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(30));
+        var second = workflow.evaluate(scheduleId,owner,TriggerType.REFRESH,now.plusSeconds(30));
+        assertThat(second.selectedKey()).isEqualTo(first.selectedKey());
+        assertThat(second.selected().assessment()).isEqualTo(first.selected().assessment());
         verify(routeClient,times(1)).search(any());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM route WHERE schedule_id=? AND is_selected=true",Integer.class,scheduleId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM route_segment_edge",Integer.class)).isEqualTo(2);
@@ -75,14 +87,10 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
     }
 
     /**
-     * 저장은 하되 수락·알림은 막는다(2026-09-14).
-     *
-     * <p>예전에는 PREVIEW면 추천 행 자체를 만들지 않았다. 그런데 모델이 미승인이라 <b>모든</b>
-     * 결과가 PREVIEW라, 추천이 하나도 안 생기고 프론트의 최신 추천·근거 화면이 계속 빈손이었다.
-     * 이제 기록은 남기되 <b>사용자를 실제로 움직이게 하는 두 가지</b>는 그대로 막는다 —
-     * 일정 출발시각을 바꾸는 수락과, 폰을 울리는 자동 알림이다.
+     * 기본 provider 예상의 표시·수락과 모델 운영 승인을 분리한다.
+     * 승인 플래그를 올리지 않아도 사용자는 기본 제안을 수락할 수 있다. 자동 알림 기본값은 유지한다.
      */
-    @Test void previewIsStoredWithItsMarkingButCannotBeAcceptedOrNotified() {
+    @Test void providerEstimateIsStoredAndCanBeAcceptedWithoutModelApproval() {
         var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
         assertThat(result.preview().status()).isEqualTo("PREVIEW");
 
@@ -105,14 +113,15 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         assertThat(storedReason(result.recommendationId(),"productionReady")).isEqualTo("false");
         assertThat(storedReason(result.recommendationId(),"source")).isEqualTo("API_ONLY");
 
-        // 여기부터는 막힌 채로 남는다.
+        // 소유권은 유지하고 실제 수락 전에는 일정 시각을 변경하지 않는다.
         assertThatThrownBy(() -> store.accept(scheduleId,owner+1000,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> store.accept(scheduleId,owner,result.evaluationId(),now)).isInstanceOf(BusinessException.class);
+        assertThat(store.response(result,owner).guidance().canAccept()).isTrue();
         assertThat(jdbc.queryForObject("SELECT notification_json FROM schedule_evaluation WHERE schedule_id=?",String.class,scheduleId)).isNull();
         assertThat(schedules.findById(scheduleId).orElseThrow().getPlannedDepartAt())
-                .as("수락이 막혔으니 일정 출발시각은 그대로다")
+                .as("사용자가 수락하기 전에는 일정 출발시각은 그대로다")
                 .isEqualTo(LocalDateTime.ofInstant(now.plusSeconds(600),ZoneId.of("Asia/Seoul")));
         assertThat(store.latest(scheduleId,owner).get("state")).isEqualTo("READY");
+        store.accept(scheduleId,owner,result.evaluationId(),now);
     }
 
     /**
@@ -183,25 +192,25 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         return store.complete(job,job.cache().search(),false,outcome,now.plusSeconds(600),null,null,now.plusSeconds(11));
     }
 
-    @Test void storedEvaluationUsesMlAndReturnsFastestCandidateAtUserDeparture() {
+    @Test void storedEvaluationKeepsMlDiagnosticsAndRecommendsFastestProviderCandidate() {
         when(routeClient.search(any())).thenReturn(new RouteSearchResult("KAKAO",now,null,
                 List.of(MlRoutePreviewTest.route(0,"1",10,0,1),MlRoutePreviewTest.route(1,"2",900,0,1))));
         when(mlClient.predict(any())).thenAnswer(call -> new BusPreviewClient.Estimate(
                 ((BusPreviewClient.Input)call.getArgument(0)).routeId().equals("1") ? 200.0 : 30.0,
                 "MODEL_NOT_PRODUCTION_READY","test-model",now,0,8,false));
         var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
-        assertThat(result.preview().fastest().journeyKey()).isEqualTo("candidate-1");
-        assertThat(result.preview().fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(630));
+        assertThat(result.preview().fastest().journeyKey()).isEqualTo("candidate-0");
+        assertThat(result.preview().fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(610));
         assertThat(result.preview().fastest().departureAt()).isEqualTo(now.plusSeconds(600));
         var stored = (ScheduleEvaluationWorkflow.Outcome) store.latest(scheduleId,owner).get("result");
-        assertThat(stored.preview().predictions()).hasSize(2);
+        assertThat(stored.preview().predictions()).hasSize(2).allMatch(p->!p.applied());
         assertThat(stored.preview().waitPredictions()).hasSize(2);
         assertThat(stored.preview().waitPredictions()).allMatch(w -> w.seconds() == null && !w.applied());
-        assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("ML_PREVIEW");
-        // 예측을 실제로 쓴 후보가 선택됐으면 출처도 그대로 남는다. LOW는 유지된다 — 미승인 모델이다.
+        assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("API_ONLY");
+        // 수신한 시험 모델과 실제 추천 출처를 분리한다. 기본 경로 추천이 모델 운영 승인은 아니다.
         assertThat(stored.recommendationId()).isNotNull();
-        assertThat(stored.persistence().source()).isEqualTo("ML_PREVIEW");
-        assertThat(stored.persistence().mlSteps()).isEqualTo(1);
+        assertThat(stored.persistence().source()).isEqualTo("API_ONLY");
+        assertThat(stored.persistence().mlSteps()).isZero();
         assertThat(stored.persistence().productionReady()).isFalse();
         assertThat(jdbc.queryForObject("SELECT confidence FROM recommendation WHERE id=?",String.class,stored.recommendationId()))
                 .isEqualTo("LOW");

@@ -87,7 +87,7 @@ def test_corrupted_bundle_is_rejected_before_loading_pickle(tmp_path):
 
 def test_busy_model_is_503():
     class Busy:
-        def predict(self, request):
+        def predict(self, request, timings=None):
             raise BundleError('MODEL_BUSY')
     with TestClient(create_app(predictor=Busy())) as client:
         response = client.post('/v1/bus/predictions:batch', json=payload())

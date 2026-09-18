@@ -164,6 +164,29 @@ def test_future_as_of_is_rejected():
         ))
 
 
+def test_updated_crosswalk_rejects_old_mapping_and_bus_observation():
+    sha = "a" * 64
+    client = configured()
+    assembler = OnlineFeatureAssembler(client, now=lambda: NOW, expected_crosswalk_sha=sha)
+    result = assembler.assemble(request())
+    assert result["features"]["temperatureC"] is None
+    assert result["features"]["cityCongestionLevel"] is None
+    assert result["features"]["busCongestionCode"] is None
+    assert result["provenance"]["mappings"]["weather"]["status"] == "CROSSWALK_SHA_MISMATCH"
+
+    for kind in ("weather", "road", "city"):
+        key = client.get(f"ml:mapping:bus-{kind}:active:{MASTER}")
+        client.strings[key + ":meta"] = json.dumps({"crosswalkSha256": sha})
+    bus_key = f"ml:latest:bus-segment:{SEGMENT}"
+    bus = json.loads(client.strings[bus_key])
+    bus["canonicalMapping"] = {"crosswalkSha256": sha}
+    client.strings[bus_key] = json.dumps(bus)
+    result = assembler.assemble(request())
+    assert result["features"]["temperatureC"] == 20.5
+    assert result["features"]["cityCongestionLevel"] == "CROWDED"
+    assert result["features"]["busCongestionCode"] == 3
+
+
 def test_ml_serving_endpoint_uses_injected_assembler():
     from app import create_app
     from fastapi.testclient import TestClient

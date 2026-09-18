@@ -86,7 +86,11 @@ public class RouteEvidenceAssembler {
         long sum = candidate.segments().stream().mapToLong(RouteSegment::durationSeconds).sum();
         long unassigned = candidate.totalDurationSeconds() - sum;
         if (unassigned < 0 || candidate.segments().isEmpty()) {
-            return new Journey(key(candidate), List.of(new Leg("provider-total", Kind.PROVIDER_TOTAL, List.of(),
+            // 시간 분해 실패가 이미 검증한 구간 정체성까지 지워서는 안 된다. 전체 이동
+            // 구간에서 통제와 겹치면 보수적으로 차단하며 원본 총시간으로 통제를 우회하지 않는다.
+            var ids=candidate.segments().stream().flatMap(s->edges(s).stream())
+                    .map(MappedTransitSegment::segmentId).distinct().toList();
+            return new Journey(key(candidate), List.of(new Leg("provider-total", Kind.PROVIDER_TOTAL, ids,
                     candidate.totalDurationSeconds(), null, null, List.of())));
         }
         var legs = new ArrayList<Leg>();
@@ -122,5 +126,23 @@ public class RouteEvidenceAssembler {
                 .filter(s -> !s.endsWith(":normal")).toList();
     }
 
-    public static String key(RouteCandidate candidate) { return "candidate-" + candidate.providerCandidateIndex(); }
+    /**
+     * canonical ID는 순환 노선의 같은 정류장 쌍에서 반복될 수 있으므로 공식 정류장 순번과
+     * 방향까지 포함한 occurrence 식별자를 사용한다. 실시간 ID나 관측값은 경로 정체성이 아니다.
+     * 캐시 재선택과 도보 증거 연결이 동일한 기준을 사용하도록 이 함수에서만 조합한다.
+     */
+    public static List<List<Object>> pathIdentity(RouteSegment segment) {
+        return edges(segment).stream().map(e -> Arrays.<Object>asList(e.segmentId(), e.routeId(),
+                e.fromOrder(), e.toOrder(), e.direction())).toList();
+    }
+
+    /** 원본 후보 순번을 유지하고 선택된 버스 occurrence 열로 대안 key를 분리한다. 같은 입력은 같은 key다. */
+    public static String key(RouteCandidate candidate) {
+        String base="candidate-"+candidate.providerCandidateIndex();
+        if(candidate.segments().stream().noneMatch(s -> s.mapping()!=null
+                && BusAlternativeExpansion.SELECTED.equals(s.mapping().failureReason()))) return base;
+        var ids=candidate.segments().stream().filter(s->!"EVALUATION_ENDPOINT_WALK".equals(s.providerRouteKey()))
+                .map(s -> s.sequence()+":"+pathIdentity(s)).toList().toString();
+        return base+"-bus-"+UUID.nameUUIDFromBytes(ids.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
 }

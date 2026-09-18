@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+
 enum AuthErrorCode {
   invalidCredentials,
   emailAlreadyExists,
@@ -88,14 +92,78 @@ class AuthSession {
   }
 }
 
-class AuthSessionStore {
+abstract interface class SessionStorage {
+  Future<String?> read();
+  Future<void> write(String? value);
+}
+
+class AuthSessionStore extends ChangeNotifier {
+  AuthSessionStore({SessionStorage? storage})
+    : _storage = storage; // ignore: prefer_initializing_formals
+  final SessionStorage? _storage;
+  Future<void> _writes = Future<void>.value();
+  bool keepSignedIn = true;
+  bool hasLaunched = false;
+  int _revision = 0;
+  int get revision => _revision;
   AuthSession? _session;
 
   AuthSession? get session => _session;
   String? get accessToken => _session?.accessToken;
 
-  void save(AuthSession session) => _session = session;
-  void clear() => _session = null;
+  Future<void> restore() async {
+    final revision = _revision;
+    final raw = await _storage?.read();
+    if (revision != _revision || raw == null) return;
+    try {
+      _session = AuthSession.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      if (_session!.accessToken.isEmpty ||
+          _session!.refreshToken.isEmpty ||
+          _session!.deviceId.isEmpty) {
+        throw const FormatException();
+      }
+      _revision++;
+      notifyListeners();
+    } on Object {
+      await clear();
+    }
+  }
+
+  Future<void> _persist(String? value) {
+    final next = _writes.then((_) => _storage?.write(value));
+    // Preserve operation ordering even if an earlier platform write failed.
+    _writes = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> save(AuthSession session) {
+    _session = session;
+    _revision++;
+    notifyListeners();
+    return _persist(
+      keepSignedIn
+          ? jsonEncode({
+              'accessToken': session.accessToken,
+              'refreshToken': session.refreshToken,
+              'tokenType': session.tokenType,
+              'deviceId': session.deviceId,
+              'user': {
+                'id': session.user.id,
+                'provider': session.user.provider,
+                'email': session.user.email,
+                'nickname': session.user.nickname,
+              },
+            })
+          : null,
+    );
+  }
+
+  Future<void> clear() {
+    _session = null;
+    _revision++;
+    notifyListeners();
+    return _persist(null);
+  }
 }
 
 abstract interface class AuthRepository {
@@ -118,12 +186,29 @@ abstract interface class AuthRepository {
     required String linkToken,
     required String password,
   });
+
+  /// 마이페이지 소셜 연결.
+  ///
+  /// 카카오는 [accessToken], 구글은 [idToken], 네이버는 [authorizationCode] 를 보낸다.
+  /// 네이버는 앱이 웹 창으로 로그인해 토큰이 아니라 인가 코드만 받기 때문이다.
   Future<List<String>> linkSocialAccount({
     required String provider,
     String? accessToken,
     String? idToken,
+    String? authorizationCode,
+    String? redirectUri,
+    String? state,
   });
   Future<List<String>> unlinkSocialAccount(String provider);
+
+  /// 비밀번호 변경. 성공하면 다른 기기는 로그아웃되고 이 기기 세션만 새로 발급된다.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  });
+
+  /// 이메일 변경. [requestEmailVerification] 과 [confirmEmailVerification] 을 먼저 마쳐야 한다.
+  Future<void> changeEmail({required String newEmail, String? password});
   Future<void> requestEmailVerification(String email);
   Future<void> confirmEmailVerification({
     required String email,
@@ -188,10 +273,25 @@ class MockAuthRepository implements AuthRepository {
     required String provider,
     String? accessToken,
     String? idToken,
+    String? authorizationCode,
+    String? redirectUri,
+    String? state,
   }) async => [provider];
 
   @override
   Future<List<String>> unlinkSocialAccount(String provider) async => const [];
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {}
+
+  @override
+  Future<void> changeEmail({
+    required String newEmail,
+    String? password,
+  }) async {}
 
   @override
   Future<void> requestEmailVerification(String email) async {}

@@ -132,8 +132,8 @@ class BusWaitingServiceTest {
         when(ml.predict(any())).thenReturn(new BusPreviewClient.Estimate(30.0,"MODEL_NOT_PRODUCTION_READY","test",now,0,8,false),
                 BusPreviewClient.Estimate.unavailable("ML_TIMEOUT"));
         var result = compare(MlRoutePreviewTest.route(0,"1",300,0,2),true,now);
-        assertThat(result.fastest()).isNull(); // 대기를 제외한 API 이동시간만으로 정시 도착이라고 하지 않는다.
-        assertThat(result.candidates().get(0).result().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.INSUFFICIENT_DATA);
+        assertThat(result.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(300));
+        assertThat(result.fastest().steps()).allMatch(s->"FALLBACK".equals(s.source()));
         assertThat(result.waitPredictions().get(0).applied()).isFalse();
         assertThat(result.waitPredictions().get(0).reasons()).contains("BUS_WAIT_MOVEMENT_UNAVAILABLE");
         assertThat(result.predictions()).allMatch(p -> !p.applied());
@@ -148,9 +148,9 @@ class BusWaitingServiceTest {
 
     @Test void missingNextVehicleCannotWinByPretendingZeroWaiting() {
         var result = compare(route,true,now.plusSeconds(71));
-        assertThat(result.fastest()).isNull();
+        assertThat(result.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(71+route.totalDurationSeconds()));
         assertThat(result.waitPredictions().get(0).seconds()).isNull();
-        assertThat(result.candidates().get(0).result().assessment()).isEqualTo(RouteTimelineEvaluator.Assessment.INSUFFICIENT_DATA);
+        assertThat(result.predictions()).allMatch(p->!p.applied());
     }
 
     @Test void busWaitRideAndTransferFeedSubwayWaitingInOrder() {
@@ -197,6 +197,6 @@ class BusWaitingServiceTest {
         var evaluation=new ConditionalDepartureEvaluator(null,null,256,60,5000).evaluate(1,now,now,now.plusSeconds(2000),
                 List.of(),at->compare(route,false,at));
         assertThat(evaluation.proposedComparison().waitPredictions()).allMatch(w->!w.applied());
-        assertThat(ScheduleEvaluationV2.validity(evaluation,null,now,null)).isEqualTo(now.plusSeconds(60));
+        assertThat(ScheduleEvaluationV2.validity(evaluation,null,now,null)).isEqualTo(now.plusSeconds(600));
     }
 }

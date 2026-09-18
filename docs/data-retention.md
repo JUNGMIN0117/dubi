@@ -60,6 +60,15 @@ docker exec hdfs-namenode hdfs dfs -du -s -h /ddubi/archive/transport.raw/date=$
 
 **디스크 수명(대략)**: 하루 100MB 가 HDFS 에 쌓여도(복제 2 → 두 서버에 각 100MB) 서버 디스크 293GB 여유는 8년치입니다. 프로젝트 기간 안에는 용량보다 **Kafka 1GiB 상한**과 **Redis 384MB** 가 먼저 문제가 됩니다.
 
+**HDFS 파생 데이터(Silver)와 수집 상태 토픽.** 원본 아카이브(`/ddubi/archive`) 외에 전처리 결과(Silver)와 수집 상태 토픽도 HDFS 를 씁니다. 모두 원본(Kafka·아카이브)에서 다시 만들 수 있는 파생 데이터라, 유실돼도 재생성할 수 있습니다.
+
+| 경로 | 무엇 | 쓰는 주체 | 비고 |
+|---|---|---|---|
+| `/ddubi/silver/weather/...` | 날씨 Silver | weather 스트림 | earliest 되감기로 8/31~ 채움 |
+| `/ddubi/silver/bus/realtime-v1` | 버스 Silver(실시간, 앞으로) | realtime 스트림 | 배포 이후분, 계속 쌓임 |
+| `/ddubi/silver/bus/backfill-v1` | 버스 Silver(과거 백필) | bus_silver 배치(일회용) | 9-10~9-16, 약 182M. 읽을 때 realtime-v1 과 합쳐 씀 |
+| `/ddubi/archive/source.poll-status` | 수집 사이클 상태(정상 빈 응답·실패·제한·생략) | 아카이버 | 토픽 504h·1GiB, archive:true (2026-09-17 추가) |
+
 ## 4. 용량 감시 — 무엇을 보고 언제 움직이나
 
 Grafana `DDUBI 파이프라인` 대시보드와 알림(Mattermost)으로 봅니다.

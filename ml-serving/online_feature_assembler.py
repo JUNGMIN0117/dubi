@@ -29,6 +29,7 @@ class OnlineFeatureSettings:
     password: str | None
     socket_timeout_seconds: float
     cache_ttl_seconds: int
+    crosswalk_sha: str | None = None
 
     @classmethod
     def from_env(cls, env):
@@ -37,8 +38,11 @@ class OnlineFeatureSettings:
         ttl = int(env.get("ML_ONLINE_FEATURE_TTL_SECONDS", "900"))
         if timeout <= 0 or ttl <= 0:
             raise ValueError("online feature Redis timeout and TTL must be positive")
+        crosswalk_sha = str(env.get("ML_BUS_CROSSWALK_SHA256", "")).lower().strip()
+        if enabled and not re.fullmatch(r"[0-9a-f]{64}", crosswalk_sha):
+            raise ValueError("ML_BUS_CROSSWALK_SHA256 must be set when online features are enabled")
         return cls(enabled, env.get("REDIS_HOST", "redis"), int(env.get("REDIS_PORT", "6379")),
-                   env.get("REDIS_PASSWORD") or None, timeout, ttl)
+                   env.get("REDIS_PASSWORD") or None, timeout, ttl, crosswalk_sha or None)
 
 
 def _text(value):
@@ -103,16 +107,22 @@ def _source_times(value, as_of, passage_at):
 
 
 class OnlineFeatureAssembler:
-    def __init__(self, client, cache_ttl_seconds=900, now=lambda: datetime.now(timezone.utc)):
+    def __init__(self, client, cache_ttl_seconds=900, now=lambda: datetime.now(timezone.utc),
+                 expected_crosswalk_sha=None):
         self.client = client
         self.cache_ttl_seconds = int(cache_ttl_seconds)
         self.now = now
+        self.expected_crosswalk_sha = expected_crosswalk_sha
 
     def _mapping(self, kind, master_version, segment_id, as_of, passage_at):
         active_key = "ml:mapping:bus-{}:active:{}".format(kind, master_version)
         mapping_key = _text(self.client.get(active_key))
         if not mapping_key:
             return None, {"status": "ACTIVE_MAPPING_MISSING", "activeKey": active_key}
+        if self.expected_crosswalk_sha:
+            metadata = _json(self.client.get(mapping_key + ":meta"))
+            if not metadata or metadata.get("crosswalkSha256") != self.expected_crosswalk_sha:
+                return None, {"status": "CROSSWALK_SHA_MISMATCH", "mappingKey": mapping_key}
         value = _json(self.client.hget(mapping_key, segment_id))
         if value is None:
             return None, {"status": "SEGMENT_MAPPING_MISSING", "mappingKey": mapping_key}
@@ -228,6 +238,10 @@ class OnlineFeatureAssembler:
         bus_key = source_keys["bus"][0]
         bus = decoded.get(bus_key)
         bus_times = _source_times(bus, as_of, passage_at) if bus else None
+        if bus_times and self.expected_crosswalk_sha:
+            canonical = bus.get("canonicalMapping")
+            if not isinstance(canonical, dict) or canonical.get("crosswalkSha256") != self.expected_crosswalk_sha:
+                bus_times = None
         if bus_times:
             observation = bus.get("observation") if isinstance(bus.get("observation"), dict) else {}
             features["busCongestionCode"] = _integer(observation.get("congestionCode"))

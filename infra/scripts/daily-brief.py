@@ -124,7 +124,7 @@ echo "@@kafka"; docker exec kafka du -s --block-size=1 /var/lib/kafka/data 2>/de
 echo "@@deploy"; cd ~/S15P21E202 && git log -1 --format='%h %cd' --date=format:'%m-%d %H:%M' && stat -c %y .git/FETCH_HEAD 2>/dev/null | cut -c1-16
 echo "@@nn_backup"; tail -n 1 ~/backups/hdfs-name/backup.log 2>/dev/null || echo "로그 없음"
 echo "@@spark_started"; docker inspect spark-streaming-realtime spark-streaming-weather --format '{{.Name}} {{.State.StartedAt}}' 2>/dev/null
-echo "@@sparkjobs_commit"; cd ~/S15P21E202 && git log -1 --format=%ct -- sparkjobs
+echo "@@sparkjobs_commit"; cd ~/S15P21E202 && git log -1 --format=%ct -- sparkjobs/streaming sparkjobs/common sparkjobs/batch sparkjobs/submit.sh sparkjobs/requirements.txt
 """
 
 
@@ -248,7 +248,10 @@ def _docker_ts(text):
 
 
 def _stale_spark_jobs(rem):
-    """sparkjobs 마지막 커밋보다 먼저 시작된 Spark 스트리밍 잡 이름 목록. 자료가 없거나 이상하면 빈 목록(조용히 넘어가지 않도록 호출 쪽에서 조회 실패는 따로 표시)."""
+    """Spark 실행 코드(streaming·common·batch·submit.sh·requirements.txt)의 마지막 커밋보다 먼저 시작된
+    스트리밍 잡 이름 목록. tools·tests·examples 처럼 돌고 있는 잡과 무관한 파일이 바뀐 것은 세지 않는다.
+    (9/17: tools 파일 하나가 바뀐 것을 "realtime 재시작 필요" 로 잘못 잡아 폴더 전체 비교를 실행 코드만으로 좁힘)
+    자료가 없거나 이상하면 빈 목록(조용히 넘어가지 않도록 호출 쪽에서 조회 실패는 따로 표시)."""
     try:
         commit_ts = int((rem.get("sparkjobs_commit") or [""])[0].strip())
     except (ValueError, AttributeError):
@@ -451,7 +454,7 @@ def build(env):
     # 9/15 에 dt 가 올린 Redis TTL 이 나흘 동안 적용되지 않은 채 발견됐다. 잡 시작 시각이 sparkjobs 마지막 커밋 시각보다 앞서면 알린다.
     stale_jobs = _stale_spark_jobs(rem) if rem else []
     if stale_jobs:
-        w("데이터", "Spark 잡 재시작 필요(" + ", ".join(stale_jobs) + " — sparkjobs 코드 변경 뒤 미재시작)")
+        w("데이터", "Spark 잡 재시작 필요(" + ", ".join(stale_jobs) + " — Spark 실행 코드 변경 뒤 미재시작)")
 
     def light(area):
         return "🔴" if any(k in " ".join(warns[area]) for k in ("다운", "Missing", "부족", "유입 0", "조회 실패")) else ("🟡" if warns[area] else "🟢")

@@ -79,6 +79,19 @@ Collector와 같은 버전의 파일을 함께 배포·재시작하며 불일치
 재생성·배포 방법은 [마스터 안내](../backend/transit-master/README.md), 의미·키 규칙은
 [구간 연결 계약](../docs/contracts/metropolitan-segment-integration.md)을 따른다.
 
+Feature 조립 전에 같은 대응표를 Spark 조인용 Parquet으로 변환한다. 이 작업은 ID를
+새로 만들지 않고 SHA 검증을 통과한 `segmentId`를 그대로 옮긴다. `edges/`는 원본
+순번·방향을 보존하고, `mappings/`는 제공자 노선+이전 정류장+다음 정류장과 `segmentId`의
+대응이며, `segments/`는 중복을 제거한 구간 목록이다. `complete/`가 있는 출력만 다음
+작업의 입력으로 사용한다.
+
+```sh
+sh submit.sh batch/export_bus_segment_mapping.py \
+  --crosswalk "$BUS_CROSSWALK_PATH" \
+  --crosswalk-sha "$BUS_CROSSWALK_SHA256" \
+  --output hdfs://hdfs-namenode:9000/ddubi/master/bus-segment/version=20260918-v1
+```
+
 ## 구간 기준선·판정 실행 준비 (2026-09-10)
 
 Collector는 변경하지 않는다. 실제 구간 통과시간 정규화 입력이 있어야 아래 계산을 운영에 연결할 수 있다.

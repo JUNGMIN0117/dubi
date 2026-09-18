@@ -34,7 +34,7 @@ class MlRoutePreviewTest {
         return new BusPreviewClient.Estimate(seconds,"MODEL_NOT_PRODUCTION_READY","test-model",now,0,8,false);
     }
 
-    @Test void modelSwitchDuringDepartureSearchInvalidatesEarlierBestToo() {
+    @Test void experimentalSearchReturnsUsableProviderEstimateInsteadOfBlockingRecommendation() {
         var journeys=new JourneyEvaluationService(client,evidence,new RouteTimelineEvaluator(),mock(SubwayTimingService.class),
                 new BusWaitingService(mock(StringRedisTemplate.class),new ObjectMapper(),false));
         var engine=new ConditionalDepartureEvaluator(journeys,mock(SubwayTimetable.class),256,60,5000);
@@ -43,8 +43,9 @@ class MlRoutePreviewTest {
             return new BusPreviewClient.Estimate(4000.0,"MODEL_NOT_PRODUCTION_READY",input.hour()==0?"version-a":"version-b",now,0,8,false);
         });
         var result=engine.evaluate(List.of(route(0,"1",600,0,1)),empty,now,now.plusSeconds(120),now.plusSeconds(3600));
-        assertThat(result.decision()).isEqualTo(ConditionalDeparturePolicy.Decision.DATA_INSUFFICIENT);
-        assertThat(result.original()).isNull(); assertThat(result.proposed()).isNull();
+        assertThat(result.decision()).isEqualTo(ConditionalDeparturePolicy.Decision.KEEP_DEPARTURE);
+        assertThat(result.proposed().estimatedArrivalAt()).isEqualTo(now.plusSeconds(720));
+        assertThat(EvaluationGuidance.from(result).canAccept()).isTrue();
         assertThat(result.originalComparison().predictions()).allMatch(p->!p.applied());
     }
 

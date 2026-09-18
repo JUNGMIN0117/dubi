@@ -62,6 +62,11 @@ public class JourneyEvaluationService {
         this(client,evidence,evaluator,subway,busWaiting,historical,DEFAULT_ML_BUDGET_SHARE,MlApplyMode.TEST_APPLY);
     }
     public MlApplyMode applyMode() { return applyMode; }
+    /** 보조 계산의 실패·미승인은 API 시간으로 재계산한다. 모델 승인 표시를 변경하지 않는다. */
+    public ConditionalDepartureEvaluator.Evaluation providerFallback(List<RouteCandidate> routes,RouteEvidenceAssembler.Snapshot snapshot,
+            Instant asOf,Instant planned,Instant deadline,Comparison previous,String reason) {
+        return new ProviderDepartureEvaluator(evidence,evaluator).evaluate(routes,snapshot,asOf,planned,deadline,previous,reason);
+    }
     /** 기존 순수 fixture는 명시적 역사자료 설정 없이 이전 동작을 유지한다. */
     public JourneyEvaluationService(BusPreviewClient client, RouteEvidenceAssembler evidence, RouteTimelineEvaluator evaluator,
                           SubwayTimingService subway, BusWaitingService busWaiting) {

@@ -183,6 +183,36 @@ class BusPreviewClientTest {
         }
     }
 
+    @Test void slowButWithinTimeoutResponseSucceedsAndBoundsAreEnforced() throws Exception {
+        // 운영 설정은 7초다. ml-serving 단독 응답이 약 4초라 4.5초 응답은 성공해야 한다.
+        var slow = serve((raw, request) -> envelope(request,false,List.of(preview("e0",41.0,Map.of()))), 4500);
+        try {
+            var value = client(slow,7000).predict(input);
+            assertThat(value.seconds()).isEqualTo(41.0);
+            assertThat(value.reason()).isEqualTo("MODEL_NOT_PRODUCTION_READY");
+        } finally { slow.stop(0); }
+        // 설정 상한은 10초다. 무제한은 허용하지 않는다.
+        assertThat(BusPreviewClient.MAX_TIMEOUT_MS).isEqualTo(10000);
+        assertThatCode(() -> new BusPreviewClient(json, "http://127.0.0.1:1", BusPreviewClient.MAX_TIMEOUT_MS, 200)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> new BusPreviewClient(json, "http://127.0.0.1:1", BusPreviewClient.MAX_TIMEOUT_MS + 1, 200))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new BusPreviewClient(json, "http://127.0.0.1:1", 0, 200))
+                .isInstanceOf(IllegalArgumentException.class);
+        // 설정한 제한을 평가 예산 판단에 그대로 노출한다.
+        assertThat(new BusPreviewClient(json, "http://127.0.0.1:1", 7000, 200).timeoutMillis()).isEqualTo(7000L);
+    }
+
+    @Test void responseSlowerThanTheConfiguredTimeoutIsReportedAsTimeout() throws Exception {
+        // 제한을 넘긴 응답은 수치로 쓰지 않고 시간초과로 남긴다(같은 배치의 모든 입력에 적용).
+        var tooSlow = serve((raw, request) -> envelope(request,false,List.of(preview("e0",41.0,Map.of()))), 1200);
+        try {
+            var value = client(tooSlow,600).predict(input);
+            assertThat(value.seconds()).isNull();
+            assertThat(value.reason()).isEqualTo("ML_TIMEOUT");
+            assertThat(value.applicationFailure()).isEqualTo("ML_TIMEOUT");
+        } finally { tooSlow.stop(0); }
+    }
+
     @Test void previewContractRejectsProductionReadyEnvelopeAndProductionContractIsCheckedSeparately() throws Exception {
         // PREVIEW 계약: production_ready=true는 계약 위반이다(승인된 모델을 미리보기 경로로 쓰지 않는다).
         var readyAsPreview = serve((raw, request) -> envelope(request,true,List.of(preview("e0",30,Map.of()))), 0);

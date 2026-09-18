@@ -108,12 +108,12 @@ void main() {
           ),
         ),
       );
-      expect(find.text('과거 평균 기반 추정'), findsOneWidget);
-      expect(find.textContaining('과거 평균 기반 참고 출발:'), findsOneWidget);
-      expect(find.textContaining('과거 평균 기반 참고 도착:'), findsOneWidget);
+      expect(find.text('일부 구간은 과거 평균으로 계산했어요.'), findsOneWidget);
+      expect(find.textContaining('과거 평균 기반 참고 출발'), findsOneWidget);
+      expect(find.textContaining('과거 평균 기반 참고 도착'), findsOneWidget);
       expect(find.textContaining('현재 날씨 미반영'), findsOneWidget);
       expect(find.textContaining('과거 버스 평균 기준 · 실시간 아님'), findsOneWidget);
-      expect(find.textContaining('제안 출발:'), findsNothing);
+      expect(find.textContaining('제안 출발'), findsNothing);
       expect(find.textContaining('실시간 정보 미적용'), findsOneWidget);
     },
   );

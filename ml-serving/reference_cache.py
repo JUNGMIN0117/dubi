@@ -4,6 +4,7 @@
 넘는 단일 파일은 보관하지 않는다. 상한은 각 표현의 추정 바이트 합계로 RSS/임시 변환 메모리와
 다르다. Predictor의 단일 추론 락 안에서만 사용하며 파일 실패는 캐시하지 않는다.
 """
+
 from collections import OrderedDict
 from pathlib import Path
 
@@ -15,7 +16,7 @@ class ReferenceCache:
 
     def __init__(self, allowed_paths, max_bytes):
         if max_bytes < 0:
-            raise ValueError('negative cache size')
+            raise ValueError("negative cache size")
         self.allowed = frozenset(Path(path).resolve() for path in allowed_paths)
         self.max_bytes = max_bytes
         self.entries = OrderedDict()
@@ -37,7 +38,7 @@ class ReferenceCache:
     def _read(self, path, columns, *, pandas):
         resolved = Path(path).resolve()
         if resolved not in self.allowed:
-            raise ValueError('UNVERIFIED_REFERENCE')
+            raise ValueError("UNVERIFIED_REFERENCE")
         key = (resolved, None if columns is None else tuple(columns), pandas)
         if key in self.entries:
             self.hits += 1
@@ -52,8 +53,9 @@ class ReferenceCache:
         if self.max_bytes and size <= self.max_bytes:
             while self.entries and self.bytes + size > self.max_bytes:
                 removed_key, removed = self.entries.popitem(last=False)
-                self.bytes -= (int(removed.memory_usage(index=True, deep=True).sum())
-                               if removed_key[2] else removed.nbytes)
+                self.bytes -= (
+                    int(removed.memory_usage(index=True, deep=True).sum()) if removed_key[2] else removed.nbytes
+                )
                 self.evictions += 1
             self.entries[key] = table
             self.bytes += size
@@ -61,15 +63,21 @@ class ReferenceCache:
 
     def stats(self):
         """성능 측정용 집계값. 원본 파일 경로나 사용자 요청 식별자는 노출하지 않는다."""
-        return {'hits': self.hits, 'misses': self.misses, 'evictions': self.evictions,
-                'entries': len(self.entries), 'bytes': self.bytes, 'max_bytes': self.max_bytes}
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "evictions": self.evictions,
+            "entries": len(self.entries),
+            "bytes": self.bytes,
+            "max_bytes": self.max_bytes,
+        }
 
     def bind(self, features):
         """검증된 portable 모듈의 I/O만 객체별로 치환한다. 전역 pandas/pyarrow는 수정하지 않는다.
 
-기존 묶음의 SHA와 특성 계산식을 그대로 유지한다. 현재 v12가 사용하는 두 읽기 형태만
-지원하며 모르는 옵션은 TypeError로 실패시켜 의미가 다른 읽기를 조용히 캐시하지 않는다.
-"""
+        기존 묶음의 SHA와 특성 계산식을 그대로 유지한다. 현재 v12가 사용하는 두 읽기 형태만
+        지원하며 모르는 옵션은 TypeError로 실패시켜 의미가 다른 읽기를 조용히 캐시하지 않는다.
+        """
         cache = self
 
         class PandasView:
@@ -85,6 +93,7 @@ class ReferenceCache:
             Arrow 전체 API로 가장하지 않는다. 다른 읽기 옵션은 명시적으로 실패하므로
             향후 portable 코드 변경 시 회귀 검증 없이 의미가 다른 변환을 적용하지 않는다.
             """
+
             def __init__(self, path, columns):
                 self.path, self.columns = path, columns
 

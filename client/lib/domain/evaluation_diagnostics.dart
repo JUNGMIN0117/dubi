@@ -104,7 +104,9 @@ class EvaluationDiagnostics {
       int? maxMissing;
       for (final codeParts in entry.value) {
         final code = codeParts.first;
-        final value = codeParts.length > 1 ? codeParts.sublist(1).join(':') : null;
+        final value = codeParts.length > 1
+            ? codeParts.sublist(1).join(':')
+            : null;
         switch (code) {
           case 'ML_APPLIED':
             ml = MlApplication.applied;

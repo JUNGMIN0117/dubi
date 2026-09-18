@@ -83,7 +83,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: ScheduleEvaluationSummary(evaluation: evaluation, compact: true),
+          body: ScheduleEvaluationSummary(
+            evaluation: evaluation,
+            compact: true,
+          ),
         ),
       ),
     );
@@ -93,7 +96,10 @@ void main() {
     expect(find.textContaining('참고 도착'), findsOneWidget);
     expect(find.textContaining('제안 출발'), findsNothing);
     expect(find.textContaining('예상 도착'), findsNothing);
-    expect(find.text('참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.'), findsOneWidget);
+    expect(
+      find.text('참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.'),
+      findsOneWidget,
+    );
     expect(find.textContaining('제안 시각에 출발하면'), findsNothing);
   });
 

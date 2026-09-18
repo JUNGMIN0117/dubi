@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/config/app_environment.dart';
 
 class StampMissionUiModel {
   const StampMissionUiModel({
@@ -15,7 +16,11 @@ class StampMissionUiModel {
 
 class MorePageDemoData {
   const MorePageDemoData._();
-  static const missions = [
+  /// 실제 미션은 개발 환경에서만 데모로 채운다. 운영에서는 비어 있고, 화면은 빈 상태를 그린다.
+  static const List<StampMissionUiModel> missions =
+      AppEnvironment.allowMockData ? _demoMissions : <StampMissionUiModel>[];
+
+  static const _demoMissions = [
     StampMissionUiModel(label: '걷기', description: '한 걸음 더 건강한 하루', icon: Icons.directions_walk_rounded, completed: true),
     StampMissionUiModel(label: '버스 타기', description: '대중교통으로 더 가까운 세상', icon: Icons.directions_bus_filled_rounded, completed: true),
     StampMissionUiModel(label: '지하철 타기', description: '지하철로 빠르고 편리하게', icon: Icons.train_rounded, completed: true),
@@ -43,6 +48,21 @@ class WeeklyStampBoardCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completed = missions.where((mission) => mission.completed).length;
+    if (missions.isEmpty) {
+      return Container(
+        key: const Key('weeklyStampBoardCard'),
+        padding: const EdgeInsets.fromLTRB(15, 13, 15, 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFDCE6EC)),
+        ),
+        child: const Text(
+          '이번 주 미션이 아직 준비되지 않았어요.',
+          style: TextStyle(fontSize: 13, color: Color(0xFF52677B)),
+        ),
+      );
+    }
     return Container(
       key: const Key('weeklyStampBoardCard'),
       padding: const EdgeInsets.fromLTRB(15, 13, 15, 12),

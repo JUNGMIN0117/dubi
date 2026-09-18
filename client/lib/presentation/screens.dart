@@ -36,6 +36,7 @@ import '../domain/transit_reference.dart';
 import 'transit_reference_panel.dart';
 import '../core/diagnostics/developer_diagnostics.dart';
 import '../core/diagnostics/app_log.dart';
+import '../core/config/app_environment.dart';
 
 export 'notification_center.dart';
 
@@ -1134,7 +1135,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submit(BuildContext context) async {
     setState(() => serverError = null);
-    if (kDebugMode &&
+    if (AppEnvironment.allowFakeAuth &&
         email.text == 'localadmin' &&
         password.text == 'local1234') {
       _completeLogin(context);
@@ -7856,8 +7857,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 14),
             _helpCard(context),
             const SizedBox(height: 14),
-            _developerOptionsCard(),
-            const SizedBox(height: 14),
+            // 개발자 옵션은 개발 환경에서만 보인다. 운영 빌드에서는 카드 자체가 없다.
+            if (AppEnvironment.allowDeveloperTools) ...[
+              _developerOptionsCard(),
+              const SizedBox(height: 14),
+            ],
             _logoutCard(context),
           ],
         ),
@@ -8210,7 +8214,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             : (_) => _verifyAccountPassword(
                                 dialogContext: dialogContext,
                                 email: user.email,
-                                isLocalPreview: user.id == 'debug',
+                                isLocalPreview: AppEnvironment.allowFakeAuth && user.id == 'debug',
                                 password: password,
                                 setDialogState: setDialogState,
                                 setLoading: (value) => loading = value,
@@ -8280,7 +8284,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               : () => _verifyAccountPassword(
                                   dialogContext: dialogContext,
                                   email: user.email,
-                                  isLocalPreview: user.id == 'debug',
+                                  isLocalPreview: AppEnvironment.allowFakeAuth && user.id == 'debug',
                                   password: password,
                                   setDialogState: setDialogState,
                                   setLoading: (value) => loading = value,

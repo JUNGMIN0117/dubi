@@ -111,6 +111,18 @@ sh submit.sh batch/export_bus_weather_mapping.py \
 `segmentId → nx, ny`를 저장한다. `quality/`에서 상태·경계 통과 건수를 확인하고
 `complete/`가 있는 출력만 Feature 조립기의 정적 입력으로 사용한다.
 
+같은 `mappings` DataFrame은 Redis에도 배포한다. 각 `segmentId`를 Hash field로 쓰고,
+작성 중인 Hash의 전체 행 수를 확인한 뒤에만
+`ml:mapping:bus-weather:active:{masterVersion}` 포인터를 새 버전으로 바꾼다. 따라서 일부만
+작성된 대응표가 요청 처리에 노출되지 않는다. HDFS 쓰기가 실패해도 Redis 배포는 계속하며,
+Redis를 의도적으로 생략하는 검증 실행에서만 `--skip-redis`를 준다. Redis 전용 재배포는
+`--output`을 생략하고 같은 명령을 실행한다. 기본 TTL은 30일이며
+`BUS_WEATHER_MAPPING_TTL_SECONDS`로 조정한다.
+
+요청 시점의 Feature 조립기는 active 포인터에서 현재 Hash 키를 얻고, 해당 Hash에서
+`segmentId`를 `HGET`해 `nx, ny`를 찾은 다음 기존 `weather:latest:{nx}:{ny}`를 읽는다.
+이 배치는 대응표 배포까지 담당하며 통합 Feature Snapshot 생성은 별도 단계다.
+
 ## 구간 기준선·판정 실행 준비 (2026-09-10)
 
 Collector는 변경하지 않는다. 실제 구간 통과시간 정규화 입력이 있어야 아래 계산을 운영에 연결할 수 있다.

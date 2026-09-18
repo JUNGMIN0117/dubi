@@ -29,6 +29,36 @@ keys:
       ML Serving의 Redis 직접 조회는 아직 구현·배포되지 않았으므로 이 항목은 신규 연동 계약이다.
     valueExample: '{"segmentId":"BUS:100100609:123456:123789","masterVersion":"metropolitan-bus-v6","featureVersion":"bus-segment-feature-v1","asOf":"2026-09-14T08:10:00+09:00","computedAt":"2026-09-14T08:10:03+09:00","validUntil":"2026-09-14T08:15:00+09:00","features":{"busCongestionCode":null,"busOperationStateCode":null,"recentSegmentMedianSeconds":155.0,"recentSegmentSampleCount":31,"roadSpeedKph":24.0,"roadTravelSeconds":150.0,"roadCoverageRatio":0.92,"accidentCount":0,"closureCount":0,"assemblyCount":null,"protestCount":null,"temperatureC":18.0,"humidityPercent":72.0,"precipitationMm":3.0,"snowDepthCm":0.0,"windSpeedMps":2.1,"cityCongestionLevel":"CROWDED","areaPopulationMin":12000,"areaPopulationMax":14000,"nearbyPopulation":null},"missingFeatures":["busCongestionCode","busOperationStateCode","assemblyCount","protestCount","nearbyPopulation"],"provenance":{}}'
 
+  busWeatherMapping:
+    pattern: "ml:mapping:bus-weather:{mappingVersion}:{masterVersion}:{gridConfigSha256}"
+    type: hash
+    ttlSeconds: 2592000
+    owner: spark
+    description: >-
+      field는 segmentId, value는 같은 버스→날씨 대응표 DataFrame에서 직렬화한 JSON이다.
+      Spark 배치는 staging Hash의 행 수와 segmentId 유일성을 검증한 뒤에만 이 버전 키로 승격한다.
+      RESOLVED뿐 아니라 OUT_OF_COVERAGE·UNRESOLVED 상태도 저장해 소비자가 결측 원인을 구분한다.
+      30일 TTL은 volatile-ttl 메모리 정책을 위한 보관 상한이며 배포할 때 갱신된다.
+    valueExample: '{"segmentId":"BUS:100100609:123456:123789","masterVersion":"metropolitan-bus-v6","mappingVersion":"bus-weather-grid-v1","weatherGridVersion":"kma-vilage-dfs-5km-v1","nx":60,"ny":127,"gridRelation":"SAME_GRID","mappingStatus":"RESOLVED","mappingReason":"NONE"}'
+
+  busWeatherMappingActive:
+    pattern: "ml:mapping:bus-weather:active:{masterVersion}"
+    type: string
+    ttlSeconds: 2592000
+    owner: spark
+    description: >-
+      검증 완료된 busWeatherMapping 버전 키를 가리킨다. ML 입력 조립기는 이 포인터를 먼저 읽고
+      그 Hash에서 segmentId를 HGET한 다음 weather:latest:{nx}:{ny}를 조회한다.
+
+  busWeatherMappingMetadata:
+    pattern: "ml:mapping:bus-weather:{mappingVersion}:{masterVersion}:{gridConfigSha256}:meta"
+    type: string
+    ttlSeconds: 2592000
+    owner: spark
+    description: >-
+      활성 대응표의 행 수, 버스 마스터·crosswalk·날씨 격자 설정 SHA와 배포시각 JSON이다.
+      대응표 Hash와 같은 원자적 승격 단계에서 기록하고 같은 TTL을 적용한다.
+
   segmentStatus:
     pattern: "segment:status:{segmentId}"
     ttlSeconds: 300

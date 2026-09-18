@@ -1,8 +1,11 @@
 """버스 edge 좌표가 날씨 격자 대응표로 보수적으로 변환되는지 검사한다."""
 
+import json
+
 from pyspark.sql import types as T
 
 from common.bus_weather_mapping import build_edge_weather_mapping, build_segment_weather_mapping
+from common.bus_weather_redis import redis_mapping_rows
 from test_realtime_latest import spark
 
 
@@ -56,3 +59,20 @@ def test_edge_and_segment_weather_mapping_statuses(spark):
     assert segment_rows["BUS:1:A:B"].mappingStatus == "RESOLVED"
     assert segment_rows["BUS:GBIS.2:GBIS.X:GBIS.Y"].mappingStatus == "OUT_OF_COVERAGE"
     assert segment_rows["BUS:3:M:N"].nx is None
+
+
+def test_same_segment_dataframe_is_serialized_for_redis(spark):
+    collected = spark.createDataFrame([(60, 127), (60, 126), (61, 126)],
+        T.StructType([T.StructField("collectedNx", T.IntegerType(), False),
+                      T.StructField("collectedNy", T.IntegerType(), False)]))
+    segment_mapping = build_segment_weather_mapping(
+        build_edge_weather_mapping(_edges(spark), _stops(spark), collected)
+    )
+    values = {
+        row.redisField: json.loads(row.redisValue)
+        for row in redis_mapping_rows(segment_mapping).collect()
+    }
+    assert values["BUS:1:A:B"]["nx"] == 60
+    assert values["BUS:1:A:B"]["ny"] == 127
+    assert values["BUS:3:M:N"]["nx"] is None
+    assert values["BUS:3:M:N"]["mappingStatus"] == "UNRESOLVED"

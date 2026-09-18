@@ -11,6 +11,9 @@ from pyspark.sql import functions as F, types as T
 from common.kma_grid import GRID_VERSION, latlon_to_kma_grid
 
 
+MAPPING_VERSION = "bus-weather-grid-v1"
+
+
 STOP_SCHEMA = T.StructType([
     T.StructField("providerNamespace", T.StringType(), False),
     T.StructField("providerRouteId", T.StringType(), False),
@@ -216,6 +219,7 @@ def build_segment_weather_mapping(edge_mapping):
     )
     return grouped.select(
         "segmentId", "masterVersion", "idPolicy", "crosswalkSha256", "weatherGridVersion",
+        F.lit(MAPPING_VERSION).alias("mappingVersion"),
         nx.alias("nx"), ny.alias("ny"), relation.alias("gridRelation"),
         "representativeLatitude", "representativeLongitude",
         "edgeOccurrenceCount", "candidateGridKeys", "gridRelations", "edgeMappingStatuses",

@@ -27,6 +27,29 @@ String evaluationMissingInputLabel(String value) => switch (value) {
   _ => '일부 교통정보를 확인하지 못했어요',
 };
 
+/// 출발·도착 시각이 뜻을 가지는 판단. 이 다섯 가지면 확정이 아니어도 시각을 참고값으로 보여준다.
+const Set<DepartureDecision> evaluationTimeDecisions = {
+  DepartureDecision.keepDeparture,
+  DepartureDecision.advanceDeparture,
+  DepartureDecision.departNow,
+  DepartureDecision.marginUnavailable,
+  DepartureDecision.lateExpected,
+};
+
+/// 확정 조건은 못 넘겼지만 계산이 끝나 시각이 있는 결과인지. 참고값으로 보여줄 대상이다.
+///
+/// 확정 규칙([ScheduleEvaluationV2.canRecommendAt])과 적용 규칙은 바꾸지 않는다. 숫자를 숨기던
+/// 것만 멈추고, 색과 문구로 "아직 확정 전"임을 말한다(2026-09-18 결정).
+bool evaluationHasReferenceTimes(ScheduleEvaluationV2 evaluation) =>
+    evaluation.state == EvaluationState.ready &&
+    evaluationTimeDecisions.contains(evaluation.decision) &&
+    evaluation.proposedDepartAt != null &&
+    evaluation.estimatedArrivalAt != null;
+
+/// 참고값일 때 카드에 쓰는 상태 문장.
+const String evaluationReferenceMessage =
+    '참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.';
+
 /// 확정하지 못한 결과에서 사용자에게 말할 대표 이유 한 문장.
 ///
 /// 이유가 여럿이면 가장 설명력이 큰 것 하나만 고른다. 후보 전체의 부족 목록(missingInputs)보다
@@ -40,24 +63,32 @@ String? evaluationShortfallReason(ScheduleEvaluationV2 evaluation) {
   }
   final reasons = evaluation.quality.fallbackReasons;
   bool has(String token) => reasons.any((reason) => reason.contains(token));
-  if (has('SUBWAY_TIMETABLE_NOT_CONFIGURED') || has('SUBWAY_TIMING_UNAVAILABLE')) {
+  if (has('SUBWAY_TIMETABLE_NOT_CONFIGURED') ||
+      has('SUBWAY_TIMING_UNAVAILABLE')) {
     return '지하철 시간표가 아직 연결되지 않아서예요.';
   }
-  if (has('PROVIDER_TOTAL_FALLBACK') || evaluation.quality.costCoverage != 'COMPLETE') {
+  if (has('PROVIDER_TOTAL_FALLBACK') ||
+      evaluation.quality.costCoverage != 'COMPLETE') {
     return '이동 시간 일부를 아직 확인하지 못해서예요.';
   }
-  if (has('ML_NOT_APPLIED') || has('API_FALLBACK') || has('HISTORICAL_REFERENCE')) {
+  if (has('ML_NOT_APPLIED') ||
+      has('API_FALLBACK') ||
+      has('HISTORICAL_REFERENCE')) {
     return '버스 구간의 실시간 정보가 아직 없어서예요.';
   }
   final missing = evaluation.quality.missingInputs;
-  if (missing.any((input) => input.startsWith('BUS:') || input.contains(':BUS:'))) {
+  if (missing.any(
+    (input) => input.startsWith('BUS:') || input.contains(':BUS:'),
+  )) {
     return '버스 구간의 실시간 정보가 아직 없어서예요.';
   }
-  if (missing.any((input) => input.startsWith('SUB:') || input.contains(':SUB:'))) {
+  if (missing.any(
+    (input) => input.startsWith('SUB:') || input.contains(':SUB:'),
+  )) {
     return '지하철 구간의 운행정보가 아직 없어서예요.';
   }
   if (evaluation.quality.preview || !evaluation.quality.productionEligible) {
-    return '아직 시험 중인 계산이라 확정으로 보여주지 않아요.';
+    return '아직 시험 중인 계산이라 확정으로 표시하지 않아요.';
   }
   if (missing.isNotEmpty) return '일부 교통정보를 아직 확인하지 못해서예요.';
   return null;
@@ -91,15 +122,14 @@ class ScheduleEvaluationCard extends StatefulWidget {
 
   /// 안내한 상한(첫 계산 30초·수동 10초)을 넘겨도 끝나지 않으면 이 문구로 바꾼다.
   /// 서버 응답 대기는 더 길 수 있으므로(수동 요청 HTTP 대기 30초) "최대 10초" 문구를 그대로 두지 않는다.
-  static const String overdueMessage =
-      '예상보다 오래 걸리고 있어요. 결과가 나오면 바로 보여드릴게요.';
+  static const String overdueMessage = '예상보다 오래 걸리고 있어요. 결과가 나오면 바로 보여드릴게요.';
+
   /// 서버가 이미 계산 중이라 요청을 받지 않았을 때(409 INVALID_STATE). 오류가 아니라 안내로 보여준다.
   static const String alreadyComputingMessage =
       '지금 계산 중이에요. 끝나면 결과를 바로 보여드릴게요.';
 
   /// 계산 중에는 다시 계산 버튼을 잠근다. 잠근 이유를 버튼 아래 한 줄로 알린다.
-  static const String refreshLockedMessage =
-      '지금 계산 중이라 끝난 뒤에 다시 계산할 수 있어요.';
+  static const String refreshLockedMessage = '지금 계산 중이라 끝난 뒤에 다시 계산할 수 있어요.';
   static const Duration manualRefreshBound = Duration(seconds: 10);
   static const Duration initialComputingBound = Duration(seconds: 30);
 
@@ -187,8 +217,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
     timer?.cancel();
     if (!mounted || !active || !_shouldPoll) return;
     if (!_computing) fastPolls = 0;
-    final fast =
-        _computing && fastPolls < ScheduleEvaluationCard.maxFastPolls;
+    final fast = _computing && fastPolls < ScheduleEvaluationCard.maxFastPolls;
     if (fast) fastPolls++;
     final base = fast
         ? ScheduleEvaluationCard.computingPollInterval
@@ -489,12 +518,20 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
         icon: Icons.hourglass_bottom_rounded,
       );
     }
-    if (value.state == EvaluationState.stale ||
-        value.isExpiredAt(DateTime.now())) {
+    if (value.state == EvaluationState.stale) {
       return const StatusBadge(
         '다시 확인 필요',
         tone: DdubiColors.orange,
         icon: Icons.refresh_rounded,
+      );
+    }
+    // 유효시간(약 1분)만 지난 결과는 오류가 아니다. 언제 확인한 값인지만 조용히 표시한다.
+    if (value.isExpiredAt(DateTime.now())) {
+      final computedAt = value.computedAt;
+      return StatusBadge(
+        computedAt == null ? '마지막 확인 결과' : '마지막 확인 ${clockLabel(computedAt)}',
+        tone: const Color(0xFF6C7D96),
+        icon: Icons.update_rounded,
       );
     }
     return switch (value.state) {
@@ -609,6 +646,13 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
       ],
     );
   }
+}
+
+/// "09:38" 형식. 배지처럼 짧은 자리에 쓴다.
+String clockLabel(DateTime value) {
+  final local = value.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:'
+      '${local.minute.toString().padLeft(2, '0')}';
 }
 
 /// 이동 예측 영역 공통 글자색. 다른 화면의 본문·보조 글자색과 같은 값이다.
@@ -736,17 +780,29 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
     final now = DateTime.now();
     final usable = evaluation.canRecommendAt(now);
     final historicalEstimate = evaluation.canShowHistoricalEstimateAt(now);
-    final stale =
-        evaluation.state == EvaluationState.stale || evaluation.isExpiredAt(now);
+    // 서버가 stale 로 판정한 결과와, 유효시간(약 1분)만 지난 결과를 구분한다.
+    // 앞은 다시 확인이 필요하다고 크게 알리고, 뒤는 "마지막 확인 결과"로 조용히 보여준다(2026-09-18 B안).
+    final serverStale = evaluation.state == EvaluationState.stale;
+    final expiredOnly = !serverStale && evaluation.isExpiredAt(now);
+    final computedAt = evaluation.computedAt;
+    final usableWhenComputed =
+        computedAt != null && evaluation.canRecommendAt(computedAt);
+    final showTimes = usable || (expiredOnly && usableWhenComputed);
+    // 확정은 아니지만 계산이 끝난 결과는 시각을 참고값으로 보여준다. 과거 평균 참고 표시가 있으면 그쪽을 쓴다.
+    final referenceTimes =
+        !showTimes &&
+        !historicalEstimate &&
+        evaluationHasReferenceTimes(evaluation);
     final diagnostics = widget.developerDiagnostics;
     // 짧은 배지는 뜻이 전달되지 않아 문장으로 바꿨다. 판단 기준은 그대로다.
     final notes = [
       if (evaluation.quality.preview) '아직 시험 중인 예측이에요.',
-      if (stale) '결과가 오래됐어요. 다시 계산해 주세요.',
+      if (serverStale) '결과가 오래됐어요. 다시 계산해 주세요.',
       if (evaluation.hasHistoricalReference) '일부 구간은 과거 평균으로 계산했어요.',
       if (diagnostics && evaluation.isLegacy) '구버전 응답이에요.',
     ];
-    final shortfall = evaluation.state == EvaluationState.ready && !usable && !stale
+    final shortfall =
+        evaluation.state == EvaluationState.ready && !showTimes && !serverStale
         ? evaluationShortfallReason(evaluation)
         : null;
     return Column(
@@ -758,16 +814,20 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         ],
         // 상태 한 줄. 확정 추천이면 결론 문장을 굵게 올린다.
         Text(
-          stale
+          serverStale
               ? '이전 결과입니다. 최신 결과를 다시 확인해 주세요.'
+              : expiredOnly && usableWhenComputed
+              ? '마지막으로 확인한 결과예요. 새 정보가 들어오면 자동으로 다시 계산해요.'
+              : referenceTimes
+              ? evaluationReferenceMessage
               : evaluation.state == EvaluationState.ready && !usable
               ? '정확한 출발 추천을 아직 확정하지 못했어요.'
               : _stateMessage(evaluation.state),
           key: const Key('evaluationStateMessage'),
           style: TextStyle(
-            fontSize: usable ? 13 : 14,
-            fontWeight: usable ? FontWeight.w500 : FontWeight.w800,
-            color: usable ? kEvaluationMuted : DdubiColors.navy,
+            fontSize: showTimes ? 13 : 14,
+            fontWeight: showTimes ? FontWeight.w500 : FontWeight.w800,
+            color: showTimes ? kEvaluationMuted : DdubiColors.navy,
           ),
         ),
         if (shortfall != null) ...[
@@ -778,7 +838,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
             style: const TextStyle(fontSize: 13, color: kEvaluationMuted),
           ),
         ],
-        if (usable) ...[
+        if (showTimes) ...[
           const SizedBox(height: 4),
           Text(
             _decisionMessage(
@@ -796,13 +856,37 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         ],
         const SizedBox(height: 10),
         // 기본은 두 줄(제안 출발·예상 도착)만 남긴다. 나머지 시각은 "자세히"로 접는다.
-        if (usable && evaluation.proposedDepartAt != null)
-          _timeRow(Icons.directions_run_rounded, '제안 출발', evaluation.proposedDepartAt),
-        if (usable)
+        if (showTimes && evaluation.proposedDepartAt != null)
+          _timeRow(
+            Icons.directions_run_rounded,
+            '제안 출발',
+            evaluation.proposedDepartAt,
+          ),
+        if (showTimes)
           _timeRow(Icons.flag_outlined, '예상 도착', evaluation.estimatedArrivalAt),
-        if (!usable && historicalEstimate) ...[
-          _timeRow(Icons.history_rounded, '과거 평균 기반 참고 출발', evaluation.proposedDepartAt),
-          _timeRow(Icons.history_rounded, '과거 평균 기반 참고 도착', evaluation.estimatedArrivalAt),
+        // 확정 전 결과의 시각. 라벨을 "참고"로 붙여 제안 출발과 섞이지 않게 한다.
+        if (referenceTimes) ...[
+          _timeRow(
+            Icons.directions_run_rounded,
+            '참고 출발',
+            evaluation.proposedDepartAt,
+          ),
+          _timeRow(Icons.flag_outlined, '참고 도착', evaluation.estimatedArrivalAt),
+        ],
+        // 유효시간이 지난 결과는 언제 확인한 값인지 접지 않고 바로 보여준다.
+        if (expiredOnly && computedAt != null)
+          _timeRow(Icons.update_rounded, '마지막 확인', computedAt),
+        if (!showTimes && historicalEstimate) ...[
+          _timeRow(
+            Icons.history_rounded,
+            '과거 평균 기반 참고 출발',
+            evaluation.proposedDepartAt,
+          ),
+          _timeRow(
+            Icons.history_rounded,
+            '과거 평균 기반 참고 도착',
+            evaluation.estimatedArrivalAt,
+          ),
           const Padding(
             padding: EdgeInsets.only(top: 2, bottom: 4),
             child: Text(
@@ -835,24 +919,43 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           ),
           if (_showTimeDetails) ...[
             if (!widget.compact) ...[
-              _timeRow(Icons.edit_calendar_outlined, '사용자 입력 출발', evaluation.userInputDepartAt),
-              _timeRow(Icons.event_note_outlined, '현재 계획 출발', evaluation.plannedDepartAt),
+              _timeRow(
+                Icons.edit_calendar_outlined,
+                '사용자 입력 출발',
+                evaluation.userInputDepartAt,
+              ),
+              _timeRow(
+                Icons.event_note_outlined,
+                '현재 계획 출발',
+                evaluation.plannedDepartAt,
+              ),
             ],
             if (evaluation.targetArriveAt != null)
-              _timeRow(Icons.sports_score_rounded, '평가 목표 도착', evaluation.targetArriveAt),
-            if (evaluation.computedAt != null)
+              _timeRow(
+                Icons.sports_score_rounded,
+                '평가 목표 도착',
+                evaluation.targetArriveAt,
+              ),
+            if (evaluation.computedAt != null && !expiredOnly)
               _timeRow(Icons.update_rounded, '마지막 확인', evaluation.computedAt),
             if (!widget.compact && diagnostics && evaluation.validUntil != null)
               _timeRow(Icons.timer_outlined, '유효 시각', evaluation.validUntil),
             if (!widget.compact &&
                 diagnostics &&
                 evaluation.nextEvaluationAt != null)
-              _timeRow(Icons.schedule_rounded, '다음 확인', evaluation.nextEvaluationAt),
+              _timeRow(
+                Icons.schedule_rounded,
+                '다음 확인',
+                evaluation.nextEvaluationAt,
+              ),
           ],
         ],
         const SizedBox(height: 10),
         _sectionLabel('계산 근거'),
-        _bullet(Icons.directions_walk_rounded, _qualityMessage(evaluation.quality)),
+        _bullet(
+          Icons.directions_walk_rounded,
+          _qualityMessage(evaluation.quality),
+        ),
         if (evaluation.hasHistoricalReference)
           _bullet(
             Icons.history_rounded,
@@ -872,7 +975,10 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
             '${evaluation.quality.fallbackReasons.map(_fallbackLabel).toSet().join(', ')}',
           ),
         if (evaluation.decision == DepartureDecision.searchIncomplete)
-          _bullet(Icons.hourglass_empty_rounded, '아직 최신 출발시각을 확정하지 못했어요. 확인된 후보는 참고용입니다.'),
+          _bullet(
+            Icons.hourglass_empty_rounded,
+            '아직 최신 출발시각을 확정하지 못했어요. 확인된 후보는 참고용입니다.',
+          ),
         if (!widget.compact && evaluation.causes.isNotEmpty)
           for (final cause in evaluation.causes)
             _bullet(Icons.report_problem_outlined, _causeMessage(cause)),
@@ -924,7 +1030,11 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 12, height: 1.35, color: kEvaluationMuted),
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              color: kEvaluationMuted,
+            ),
           ),
         ),
       ],
@@ -952,7 +1062,11 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               _legLabel(leg),
-              style: const TextStyle(fontSize: 12, height: 1.35, color: kEvaluationMuted),
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: kEvaluationMuted,
+              ),
             ),
           ),
         ),
@@ -1092,14 +1206,17 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
         _ when value.contains('ML_APPLIED') => 'ML 예측 소요시간 적용',
         _ when value.contains('ML_TEST_APPLIED') => '검증 중인 ML 예측값을 시험 적용',
         _ when value.contains('ML_SHADOW_RECORDED') => 'ML 예측값은 기록만 하고 미사용',
-        _ when value.contains('ML_NOT_APPLIED:ML_BUDGET_EXHAUSTED') ||
+        _
+            when value.contains('ML_NOT_APPLIED:ML_BUDGET_EXHAUSTED') ||
                 value.contains('ML_BUDGET_EXHAUSTED') =>
           '계산 시간이 부족해 ML 예측 미적용',
-        _ when value.contains('ML_NOT_APPLIED:ML_TIMEOUT') ||
+        _
+            when value.contains('ML_NOT_APPLIED:ML_TIMEOUT') ||
                 value.contains('ML_TIMEOUT') =>
           'ML 응답 지연으로 예측 미적용',
         _ when value.contains('ML_NOT_APPLIED') => 'ML 예측 미적용',
-        _ when value.contains('ML_MODEL_VERSION') ||
+        _
+            when value.contains('ML_MODEL_VERSION') ||
                 value.contains('ML_MIN_HISTORY_SAMPLES') ||
                 value.contains('ML_MAX_MISSING_FEATURES') ||
                 value.contains('ML_HISTORY_INSUFFICIENT') =>

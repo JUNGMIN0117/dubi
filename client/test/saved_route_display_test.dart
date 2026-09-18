@@ -88,8 +88,10 @@ void main() {
     final keys = display.visible.map(SavedRouteDisplay.groupKey).toList();
     expect(keys.toSet(), hasLength(keys.length));
     // 묶인 뒤에도 선택 추천과 다른 노선 구성이 함께 보인다.
-    expect(display.visible.map((r) => r.modes.join('>')).toSet().length,
-        greaterThan(1));
+    expect(
+      display.visible.map((r) => r.modes.join('>')).toSet().length,
+      greaterThan(1),
+    );
   });
 
   test('선택 추천은 중복 묶음에 속해도 반드시 남는다', () {
@@ -126,10 +128,12 @@ void main() {
     final first = SavedRouteDisplay.from(all);
     final second = SavedRouteDisplay.from(all);
 
-    expect(all.map((r) => r.routeId), before);           // 원본 순서 유지
+    expect(all.map((r) => r.routeId), before); // 원본 순서 유지
     expect(all, hasLength(33));
-    expect(first.visible.map((r) => r.routeId),
-        second.visible.map((r) => r.routeId));            // 같은 입력이면 같은 결과
+    expect(
+      first.visible.map((r) => r.routeId),
+      second.visible.map((r) => r.routeId),
+    ); // 같은 입력이면 같은 결과
   });
 
   test('진단 문구는 전체·중복 제거 후·표시 수와 서버 순위를 담는다', () {
@@ -140,6 +144,9 @@ void main() {
       '전체 후보 33 · 중복 제거 후 16 · 표시 5 · 서버 순위 $ranks',
     );
     // 화면 순번(1~5)과 서버 순위는 다를 수 있다. 진단에서 원본을 확인할 수 있어야 한다.
-    expect(display.visible.map((r) => r.rankNo).toList(), isNot([1, 2, 3, 4, 5]));
+    expect(
+      display.visible.map((r) => r.rankNo).toList(),
+      isNot([1, 2, 3, 4, 5]),
+    );
   });
 }

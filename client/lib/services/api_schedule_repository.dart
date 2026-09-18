@@ -25,6 +25,7 @@ class ApiScheduleRepository
   @override
   Future<ScheduleEvaluationV2> latestEvaluation(String id) =>
       _api.latestEvaluation(id);
+
   /// 수동 다시 계산. 서버 예산(10초)과 경로 조회 시간을 합쳐 최대 30초까지 기다린다.
   static const Duration manualRefreshTimeout = Duration(seconds: 30);
 

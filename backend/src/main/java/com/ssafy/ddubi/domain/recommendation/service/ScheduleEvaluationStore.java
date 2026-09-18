@@ -117,8 +117,9 @@ public class ScheduleEvaluationStore {
                 ids.put(RouteEvidenceAssembler.key(candidate), route.getId());
             }
             // 새 검색분을 저장했으니 더 쓰이지 않는 옛 후보는 여기서 정리한다.
-            // 지난 추천이 가리키는 경로와 선택된 경로는 남긴다(레포지토리 조건).
-            var stale = routes.findStaleCandidates(s.getId(), request.getId());
+            // 지난 추천이 가리키는 경로와 선택된 경로는 남기고, 방금 전 검색분은 유예 시간 동안 둔다(레포지토리 조건).
+            var stale = routes.findStaleCandidates(s.getId(), request.getId(),
+                    local(now).minus(SavedRouteRepository.STALE_CANDIDATE_GRACE));
             if (!stale.isEmpty()) {
                 routes.deleteAll(stale);
                 log.info("옛 후보 경로 정리 scheduleId={} 삭제={}건", s.getId(), stale.size());

@@ -7234,12 +7234,14 @@ class AccountManagementScreen extends StatefulWidget {
     required this.authRepository,
     this.kakaoLoginService,
     this.googleLoginService,
+    this.naverLoginService,
   });
 
   final UserApi userApi;
   final AuthRepository authRepository;
   final KakaoLoginService? kakaoLoginService;
   final GoogleLoginService? googleLoginService;
+  final NaverLoginService? naverLoginService;
 
   @override
   State<AccountManagementScreen> createState() =>
@@ -7285,16 +7287,14 @@ class _AccountManagementScreenState extends State<AccountManagementScreen> {
                     leading: const Icon(Icons.mail_outline_rounded),
                     title: const Text('이메일'),
                     subtitle: Text(user.email ?? '등록된 이메일이 없어요'),
-                    trailing: user.email == null
-                        ? const Text(
-                            '등록',
-                            style: TextStyle(
-                              color: Color(0xFF0AAE9D),
-                              fontWeight: FontWeight.w800,
-                            ),
-                          )
-                        : null,
-                    onTap: user.email == null ? _showEmailRegistration : null,
+                    trailing: Text(
+                      user.email == null ? '등록' : '변경',
+                      style: const TextStyle(
+                        color: Color(0xFF0AAE9D),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    onTap: _showEmailChange,
                   ),
                   const Divider(),
                   ListTile(
@@ -7411,12 +7411,11 @@ class _AccountManagementScreenState extends State<AccountManagementScreen> {
             enabled: widget.googleLoginService != null,
           ),
           const Divider(),
-          const ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.account_circle_outlined),
-            title: Text('네이버'),
-            subtitle: Text('마이페이지 연결 API와 인증 방식 협의가 필요해요.'),
-            trailing: Text('준비 중'),
+          _socialAccountTile(
+            provider: 'NAVER',
+            label: '네이버',
+            connected: providers.contains('NAVER'),
+            enabled: widget.naverLoginService != null,
           ),
           if (_socialBusy) const LinearProgressIndicator(),
         ],
@@ -7455,6 +7454,16 @@ class _AccountManagementScreenState extends State<AccountManagementScreen> {
         providers = await widget.authRepository.linkSocialAccount(
           provider: provider,
           accessToken: token,
+        );
+      } else if (provider == 'NAVER') {
+        // 네이버는 웹 창으로 로그인해서 토큰이 아니라 인가 코드가 온다.
+        // 코드를 토큰으로 바꾸는 일은 비밀키가 필요해서 서버가 맡는다.
+        final authorization = await widget.naverLoginService!.login(context);
+        providers = await widget.authRepository.linkSocialAccount(
+          provider: provider,
+          authorizationCode: authorization.authorizationCode,
+          redirectUri: authorization.redirectUri,
+          state: authorization.state,
         );
       } else {
         final token = await widget.googleLoginService!.login(context);
@@ -7530,74 +7539,125 @@ class _AccountManagementScreenState extends State<AccountManagementScreen> {
     _ => provider,
   };
 
-  Future<void> _showEmailRegistration() => _showUnavailableAccountFeature(
-    title: '이메일 등록',
-    icon: Icons.mark_email_unread_outlined,
-    description:
-        '이메일 인증 후 현재 계정에 연결할 수 있도록 화면을 준비했어요. '
-        '계정 연결 API가 제공되면 이곳에서 바로 등록할 수 있어요.',
-  );
-
-  Future<void> _showPasswordChange() => _showUnavailableAccountFeature(
-    title: '비밀번호 변경',
-    icon: Icons.lock_reset_rounded,
-    description:
-        '현재 비밀번호 확인과 새 비밀번호 입력 화면을 준비했어요. '
-        '비밀번호 변경 API가 제공되면 이곳에서 안전하게 변경할 수 있어요.',
-  );
-
-  Future<void> _showUnavailableAccountFeature({
-    required String title,
-    required IconData icon,
-    required String description,
-  }) => showModalBottomSheet<void>(
-    context: context,
-    useSafeArea: true,
-    showDragHandle: true,
-    builder: (sheetContext) => Padding(
-      padding: EdgeInsets.fromLTRB(
-        24,
-        8,
-        24,
-        24 + MediaQuery.viewInsetsOf(sheetContext).bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircleAvatar(
-            radius: 31,
-            backgroundColor: const Color(0xFFDDF8F3),
-            child: Icon(icon, color: const Color(0xFF0CB3A2), size: 32),
+  /// 비밀번호 변경.
+  ///
+  /// 지금 쓰는 비밀번호를 함께 받는다. 토큰만으로 바꾸게 하면 잠깐 자리를 비운 사이
+  /// 폰을 집어 든 사람이 주인을 계정에서 밀어낼 수 있다.
+  ///
+  /// 바꾸면 서버가 다른 기기를 전부 로그아웃시킨다. 이 기기만 새 토큰을 받아 이어서 쓴다.
+  Future<void> _showPasswordChange() async {
+    final current = TextEditingController();
+    final next = TextEditingController();
+    final again = TextEditingController();
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => _AccountFormSheet(
+        title: '비밀번호 변경',
+        icon: Icons.lock_reset_rounded,
+        description: '바꾸면 이 기기를 뺀 나머지 기기는 모두 로그아웃돼요.',
+        submitLabel: '변경하기',
+        fields: [
+          _AccountFormField(
+            controller: current,
+            label: '현재 비밀번호',
+            obscure: true,
           ),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Color(0xFF102454),
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
+          _AccountFormField(
+            controller: next,
+            label: '새 비밀번호 (8자 이상)',
+            obscure: true,
           ),
-          const SizedBox(height: 9),
-          Text(
-            description,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Color(0xFF64708B), height: 1.55),
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: () => Navigator.pop(sheetContext),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF10B8A5),
-              minimumSize: const Size.fromHeight(50),
-              shape: const StadiumBorder(),
-            ),
-            child: const Text('확인'),
+          _AccountFormField(
+            controller: again,
+            label: '새 비밀번호 확인',
+            obscure: true,
           ),
         ],
+        validate: () {
+          if (current.text.isEmpty) return '현재 비밀번호를 입력해주세요.';
+          if (next.text.length < 8) return '새 비밀번호는 8자 이상이어야 해요.';
+          if (next.text != again.text) return '새 비밀번호가 서로 달라요.';
+          if (next.text == current.text) return '지금 쓰는 비밀번호와 다른 값을 입력해주세요.';
+          return null;
+        },
+        onSubmit: () => widget.authRepository.changePassword(
+          currentPassword: current.text,
+          newPassword: next.text,
+        ),
       ),
-    ),
-  );
+    );
+    current.dispose();
+    next.dispose();
+    again.dispose();
+    if (changed == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀번호를 바꿨어요. 다른 기기는 다시 로그인해야 해요.')),
+      );
+    }
+  }
+
+  /// 이메일 등록·변경.
+  ///
+  /// 새 주소로 인증 코드를 보내고 확인한 뒤에야 바꾼다. 소유 확인 없이 바꾸게 두면
+  /// 남의 이메일을 자기 계정에 달아 선점할 수 있다.
+  Future<void> _showEmailChange() async {
+    final email = TextEditingController();
+    final code = TextEditingController();
+    final password = TextEditingController();
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => _AccountFormSheet(
+        title: '이메일 변경',
+        icon: Icons.mark_email_unread_outlined,
+        description: '새 주소로 인증 코드를 보내 확인한 뒤에 바꿔요.',
+        submitLabel: '변경하기',
+        sendCodeLabel: '인증 코드 받기',
+        onSendCode: () =>
+            widget.authRepository.requestEmailVerification(email.text.trim()),
+        canSendCode: () =>
+            email.text.trim().contains('@') ? null : '이메일 주소를 확인해주세요.',
+        fields: [
+          _AccountFormField(controller: email, label: '새 이메일'),
+          _AccountFormField(controller: code, label: '인증 코드 6자리'),
+          _AccountFormField(
+            controller: password,
+            label: '현재 비밀번호 (소셜 전용 계정은 비워두세요)',
+            obscure: true,
+          ),
+        ],
+        validate: () {
+          if (!email.text.trim().contains('@')) return '이메일 주소를 확인해주세요.';
+          if (code.text.trim().length != 6) return '인증 코드는 숫자 6자리예요.';
+          return null;
+        },
+        onSubmit: () async {
+          await widget.authRepository.confirmEmailVerification(
+            email: email.text.trim(),
+            code: code.text.trim(),
+          );
+          await widget.authRepository.changeEmail(
+            newEmail: email.text.trim(),
+            password: password.text.isEmpty ? null : password.text,
+          );
+        },
+      ),
+    );
+    email.dispose();
+    code.dispose();
+    password.dispose();
+    if (changed == true && mounted) {
+      setState(() => _profile = widget.userApi.getMe());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('이메일을 바꿨어요. 다음 로그인부터 새 주소를 써요.')),
+      );
+    }
+  }
 
   Future<void> _withdraw() async {
     final confirmed = await showDialog<bool>(
@@ -9767,4 +9827,196 @@ class _EvaluationHeadlineScopeState extends State<_EvaluationHeadlineScope> {
 
   @override
   Widget build(BuildContext context) => widget.builder(_headline);
+}
+
+/// 계정 관리 입력 칸 하나. [_AccountFormSheet] 가 순서대로 그린다.
+class _AccountFormField {
+  const _AccountFormField({
+    required this.controller,
+    required this.label,
+    this.obscure = false,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool obscure;
+}
+
+/// 비밀번호 변경·이메일 변경이 함께 쓰는 입력 시트.
+///
+/// 두 화면이 하는 일은 "몇 칸 받아서 한 번 보내고 결과를 알린다" 로 같다. 다른 것은
+/// 칸 구성과 보낼 내용뿐이라 그 둘만 밖에서 받는다.
+///
+/// 닫을 때 `true` 를 돌려주면 성공이다. 실패는 시트 안에서 문구로 보여주고 닫지 않는다 —
+/// 닫아버리면 사용자가 방금 친 값을 다시 입력해야 한다.
+class _AccountFormSheet extends StatefulWidget {
+  const _AccountFormSheet({
+    required this.title,
+    required this.icon,
+    required this.description,
+    required this.submitLabel,
+    required this.fields,
+    required this.validate,
+    required this.onSubmit,
+    this.sendCodeLabel,
+    this.onSendCode,
+    this.canSendCode,
+  });
+
+  final String title;
+  final IconData icon;
+  final String description;
+  final String submitLabel;
+  final List<_AccountFormField> fields;
+
+  /// 보내기 전에 앱에서 먼저 거르는 검사. 문제가 없으면 null.
+  final String? Function() validate;
+  final Future<void> Function() onSubmit;
+
+  /// 인증 코드 받기 버튼. 이메일 변경만 쓴다.
+  final String? sendCodeLabel;
+  final Future<void> Function()? onSendCode;
+  final String? Function()? canSendCode;
+
+  @override
+  State<_AccountFormSheet> createState() => _AccountFormSheetState();
+}
+
+class _AccountFormSheetState extends State<_AccountFormSheet> {
+  String? _error;
+  String? _notice;
+  bool _busy = false;
+
+  Future<void> _sendCode() async {
+    final problem = widget.canSendCode?.call();
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      await widget.onSendCode!();
+      if (mounted) setState(() => _notice = '인증 코드를 보냈어요. 메일함을 확인해주세요.');
+    } on AuthException catch (error) {
+      if (mounted) setState(() => _error = error.message ?? '인증 코드를 보내지 못했어요.');
+    } on Object {
+      if (mounted) setState(() => _error = '인증 코드를 보내지 못했어요.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    final problem = widget.validate();
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      await widget.onSubmit();
+      if (mounted) Navigator.pop(context, true);
+    } on AuthException catch (error) {
+      if (mounted) setState(() => _error = error.message ?? '처리하지 못했어요.');
+    } on Object {
+      if (mounted) setState(() => _error = '처리하지 못했어요. 잠시 뒤 다시 시도해주세요.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.fromLTRB(
+      24,
+      8,
+      24,
+      24 + MediaQuery.viewInsetsOf(context).bottom,
+    ),
+    child: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: CircleAvatar(
+              radius: 31,
+              backgroundColor: const Color(0xFFDDF8F3),
+              child: Icon(
+                widget.icon,
+                color: const Color(0xFF0CB3A2),
+                size: 32,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            widget.title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFF102454),
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.description,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Color(0xFF5B6B8C), height: 1.5),
+          ),
+          const SizedBox(height: 18),
+          for (final field in widget.fields) ...[
+            TextField(
+              controller: field.controller,
+              obscureText: field.obscure,
+              enabled: !_busy,
+              decoration: InputDecoration(
+                labelText: field.label,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (widget.onSendCode != null) ...[
+            OutlinedButton(
+              onPressed: _busy ? null : _sendCode,
+              child: Text(widget.sendCodeLabel ?? '인증 코드 받기'),
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (_notice != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _notice!,
+                style: const TextStyle(color: DdubiColors.green),
+              ),
+            ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _error!,
+                style: const TextStyle(color: Color(0xFFD64545)),
+              ),
+            ),
+          if (_busy) const LinearProgressIndicator(),
+          const SizedBox(height: 6),
+          FilledButton(
+            onPressed: _busy ? null : _submit,
+            child: Text(widget.submitLabel),
+          ),
+        ],
+      ),
+    ),
+  );
 }

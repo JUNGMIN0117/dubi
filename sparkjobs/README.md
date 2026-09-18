@@ -92,6 +92,25 @@ sh submit.sh batch/export_bus_segment_mapping.py \
   --output hdfs://hdfs-namenode:9000/ddubi/master/bus-segment/version=20260918-v1
 ```
 
+버스 구간을 현재 날씨 Collector의 기상청 격자와 연결하려면 같은 crosswalk와 버스
+마스터를 사용해 아래 배치를 실행한다. 출발·도착 좌표를 각각 공식 5km 격자로 변환하고,
+중간 좌표의 격자를 대표값으로 쓴다. 양 끝 격자가 다르면 `CROSSES_GRID`, 좌표가 없으면
+`UNRESOLVED`, 현재 수집하지 않는 격자는 `OUT_OF_COVERAGE`로 남긴다. 다른 서울 격자로
+억지로 바꾸지 않는다. 운영에서 `WEATHER_GRID_POINTS`를 바꿨다면 배치에도 같은 값을 준다.
+
+```sh
+sh submit.sh batch/export_bus_weather_mapping.py \
+  --crosswalk /opt/ddubi/transit-master/bus/metropolitan-bus-v6.crosswalk.json.gz \
+  --crosswalk-sha e7b8db4f3330d7275aa56b4674032d71aa6e34f99bec0c29cee9f7ce002676bd \
+  --bus-master /opt/ddubi/transit-master/bus/metropolitan-bus-v6.json.gz \
+  --bus-master-sha e5762c5166b7177ffc13d9d39267ccd3e044b848b78a4d071341616d2553ba64 \
+  --output hdfs://hdfs-namenode:9000/ddubi/master/bus-weather-grid/version=20260918-v1
+```
+
+출력 `edges/`에는 순번별 좌표와 출발·도착·대표 격자를, `mappings/`에는 고유
+`segmentId → nx, ny`를 저장한다. `quality/`에서 상태·경계 통과 건수를 확인하고
+`complete/`가 있는 출력만 Feature 조립기의 정적 입력으로 사용한다.
+
 ## 구간 기준선·판정 실행 준비 (2026-09-10)
 
 Collector는 변경하지 않는다. 실제 구간 통과시간 정규화 입력이 있어야 아래 계산을 운영에 연결할 수 있다.

@@ -53,9 +53,11 @@ def _verified_edges(path,expected_sha):
     return rows,data
 
 
-def load_crosswalk_edges(spark,path,expected_sha):
+def load_crosswalk_edges(spark,path,expected_sha,expected_master_sha=None):
     """검증된 원본 인접 edge를 순번·방향과 함께 DataFrame으로 반환한다."""
     rows,data=_verified_edges(path,expected_sha)
+    if expected_master_sha and data.get('masterSha256')!=expected_master_sha:
+        raise ValueError('crosswalk bus master SHA mismatch')
     return spark.createDataFrame(rows,EDGE_SCHEMA),data['masterVersion'],expected_sha
 
 

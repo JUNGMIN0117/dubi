@@ -923,6 +923,8 @@ services:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 버스 구간→날씨 격자 배치가 Collector와 같은 실제 수집 범위를 검사한다.
+      WEATHER_GRID_POINTS: ${WEATHER_GRID_POINTS:-}
       BASELINE_INPUT_URI: ${BASELINE_INPUT_URI}
       BASELINE_OUTPUT_URI: ${BASELINE_OUTPUT_URI}
       BASELINE_WINDOW_DAYS: ${BASELINE_WINDOW_DAYS:-28}
@@ -939,6 +941,7 @@ services:
       SPARK_CORES_MAX: ${BATCH_CORES_MAX:-2}
     volumes:
       - ./spark/conf:/opt/spark/conf:ro
+      - ../backend/transit-master:/opt/ddubi/transit-master:ro
       - ../sparkjobs:/opt/ddubi/sparkjobs
       - spark-checkpoints:/opt/ddubi/checkpoints
       - spark-events:/opt/ddubi/spark-events

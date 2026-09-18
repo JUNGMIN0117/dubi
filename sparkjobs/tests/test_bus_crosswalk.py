@@ -158,3 +158,9 @@ def test_verified_crosswalk_becomes_scalar_segment_mapping(spark, tmp_path):
 def test_segment_mapping_requires_verified_crosswalk():
     with pytest.raises(ValueError, match="verified bus crosswalk edges required"):
         build_bus_segment_edges(None)
+
+
+def test_crosswalk_edge_loader_rejects_different_bus_master_sha(spark, tmp_path):
+    path, sha = fixture(tmp_path)
+    with pytest.raises(ValueError, match="bus master SHA mismatch"):
+        load_crosswalk_edges(spark, path, sha, "b" * 64)

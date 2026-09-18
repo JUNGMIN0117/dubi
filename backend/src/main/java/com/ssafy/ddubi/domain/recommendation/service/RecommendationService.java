@@ -239,7 +239,8 @@ public class RecommendationService {
      * 가리키는 경로와 선택된 경로는 남긴다 — 무엇을 추천했는지 기록이 깨지면 안 된다.
      */
     private void cleanStaleCandidates(Long scheduleId, Long keepRequestId) {
-        List<SavedRoute> stale = savedRouteRepository.findStaleCandidates(scheduleId, keepRequestId);
+        List<SavedRoute> stale = savedRouteRepository.findStaleCandidates(scheduleId, keepRequestId,
+                LocalDateTime.now(ZONE).minus(SavedRouteRepository.STALE_CANDIDATE_GRACE));
         if (stale.isEmpty()) return;
         savedRouteRepository.deleteAll(stale);
         log.info("옛 후보 경로 정리 scheduleId={} 삭제={}건", scheduleId, stale.size());

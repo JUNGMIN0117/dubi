@@ -12,24 +12,34 @@ import 'saved_route_display_test.dart' show fixture33, route;
 
 /// 저장된 경로 목록·상세를 흉내 내고 어떤 경로 ID로 상세를 열었는지 기록한다.
 class _FakeRecommendationApi extends RecommendationApi {
-  _FakeRecommendationApi(this.routes, {this.failRouteIds = const {}})
-    : super(Dio());
+  _FakeRecommendationApi(
+    this.routes, {
+    this.failRouteIds = const {},
+    this.goneRouteIds = const {},
+  }) : super(Dio());
 
   final List<SavedRouteSummary> routes;
   final Set<String> failRouteIds;
+
+  /// 서버가 재계산 뒤 정리해 이미 없는 경로. 실제 API 층은 404 를 이 예외로 바꿔 준다.
+  final Set<String> goneRouteIds;
   final detailCalls = <String>[];
+  var listCalls = 0;
 
   @override
   Future<RecommendationOverview?> getLatestOverview(String scheduleId) async =>
       null;
 
   @override
-  Future<List<SavedRouteSummary>> getSavedRoutes(String scheduleId) async =>
-      routes;
+  Future<List<SavedRouteSummary>> getSavedRoutes(String scheduleId) async {
+    listCalls++;
+    return routes;
+  }
 
   @override
   Future<SavedRouteDetail> getSavedRouteDetail(String routeId) async {
     detailCalls.add(routeId);
+    if (goneRouteIds.contains(routeId)) throw SavedRouteGoneException(routeId);
     if (failRouteIds.contains(routeId)) {
       throw DioException(
         requestOptions: RequestOptions(path: '/routes/$routeId'),
@@ -57,6 +67,7 @@ class _FakeRecommendationApi extends RecommendationApi {
 
   @override
   Future<SavedRouteMap> getSavedRouteMap(String routeId) async {
+    if (goneRouteIds.contains(routeId)) throw SavedRouteGoneException(routeId);
     if (failRouteIds.contains(routeId)) {
       throw DioException(
         requestOptions: RequestOptions(path: '/routes/$routeId/map'),
@@ -88,6 +99,7 @@ Future<(_FakeRecommendationApi, Schedule)> _pump(
   WidgetTester tester,
   List<SavedRouteSummary> routes, {
   Set<String> failRouteIds = const {},
+  Set<String> goneRouteIds = const {},
 }) async {
   tester.view.physicalSize = const Size(390, 900);
   tester.view.devicePixelRatio = 1;
@@ -95,7 +107,11 @@ Future<(_FakeRecommendationApi, Schedule)> _pump(
   addTearDown(tester.view.resetDevicePixelRatio);
   final repository = MockDdubiRepository();
   final schedule = (await repository.schedules()).first;
-  final api = _FakeRecommendationApi(routes, failRouteIds: failRouteIds);
+  final api = _FakeRecommendationApi(
+    routes,
+    failRouteIds: failRouteIds,
+    goneRouteIds: goneRouteIds,
+  );
   await tester.pumpWidget(
     MaterialApp(
       home: ScheduleDetailScreen(
@@ -182,6 +198,31 @@ void main() {
     expect(api.detailCalls, ['sel']);
     expect(find.text('경로 상세를 불러오지 못했어요.'), findsOneWidget);
     expect(find.text('다시 시도'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('서버가 정리한 경로를 누르면 오류 대신 목록이 오래됐다고 알리고, 돌아오면 목록을 다시 읽는다', (
+    tester,
+  ) async {
+    final (api, _) = await _pump(tester, fixture33(), goneRouteIds: {'sel'});
+    final listCallsBefore = api.listCalls;
+
+    final finder = find.byKey(const Key('savedRoute-sel'));
+    await tester.scrollUntilVisible(finder, 200);
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+
+    // 재계산 뒤 정리된 후보는 서버 장애가 아니다. "다시 시도"가 아니라 돌아가서 새 목록을 보게 한다.
+    expect(find.text('이 경로는 새로 계산되면서 정리됐어요.'), findsOneWidget);
+    expect(find.text('다시 시도'), findsNothing);
+    expect(find.byKey(const Key('savedRouteGoneBack')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('savedRouteGoneBack')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('경로 상세'), findsNothing);
+    expect(api.listCalls, greaterThan(listCallsBefore));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

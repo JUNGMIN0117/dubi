@@ -16,9 +16,8 @@ class EvaluationDiagnosticsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final diagnostics = EvaluationDiagnostics.from(evaluation);
     final quality = evaluation.quality;
-    final style = Theme.of(
-      context,
-    ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace', height: 1.4);
+    final style = Theme.of(context).textTheme.bodySmall
+        ?.copyWith(fontFamily: 'monospace', height: 1.4);
     final lines = <String>[
       'schemaVersion=${evaluation.schemaVersion}',
       'evaluationId=${evaluation.evaluationId ?? '-'} scheduleId=${evaluation.scheduleId ?? '-'}',
@@ -65,9 +64,9 @@ class EvaluationDiagnosticsPanel extends StatelessWidget {
         'leg ${leg.sequence} ${leg.mode} role=${leg.roleRaw ?? '-'} source=${leg.durationSourceRaw ?? '-'} '
             'seconds=${leg.durationSeconds ?? '-'}'
             '${leg.endpointEvidence == null ? '' : ' endpoint(verified=${leg.endpointEvidence!.verified}, '
-                  'source=${leg.endpointEvidence!.source ?? '-'}, mapping=${leg.endpointEvidence!.mappingVersion ?? '-'}, '
-                  'policy=${leg.endpointEvidence!.policyVersion ?? '-'}, judgment=${leg.endpointEvidence!.judgment ?? '-'}, '
-                  'reason=${leg.endpointEvidence!.reason ?? '-'})'}',
+                      'source=${leg.endpointEvidence!.source ?? '-'}, mapping=${leg.endpointEvidence!.mappingVersion ?? '-'}, '
+                      'policy=${leg.endpointEvidence!.policyVersion ?? '-'}, judgment=${leg.endpointEvidence!.judgment ?? '-'}, '
+                      'reason=${leg.endpointEvidence!.reason ?? '-'})'}',
     ];
     final causeLines = <String>[
       for (final cause in evaluation.causes)
@@ -94,7 +93,10 @@ class EvaluationDiagnosticsPanel extends StatelessWidget {
           SelectableText(lines.join('\n'), style: style),
           if (stepLines.isNotEmpty) ...[
             const SizedBox(height: 6),
-            const Text('구간별 적용 결과', style: TextStyle(fontWeight: FontWeight.w600)),
+            const Text(
+              '구간별 적용 결과',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
             SelectableText(stepLines.join('\n'), style: style),
           ],
           if (legLines.isNotEmpty) ...[

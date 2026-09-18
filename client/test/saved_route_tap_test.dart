@@ -264,8 +264,9 @@ void main() {
     await _pump(tester, fixture33());
 
     // 중복을 묶으면 서버 순위는 건너뛰지만(1,2,6,8,10) 화면에는 1~5 로 보인다.
-    final serverRanks =
-        SavedRouteDisplay.from(fixture33()).visible.map((r) => r.rankNo).toList();
+    final serverRanks = SavedRouteDisplay.from(fixture33()).visible
+        .map((r) => r.rankNo)
+        .toList();
     expect(serverRanks, isNot([1, 2, 3, 4, 5]));
 
     expect(find.text('선택된 추천 경로'), findsOneWidget);

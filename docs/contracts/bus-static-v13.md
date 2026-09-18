@@ -2,12 +2,15 @@
 
 ## 상태와 범위
 
-2026-09-18 사용자 제공 `KakaoTalk_Longtxt_20260918_0106_07_556.txt`와 구현 선택(2번)에 따른 변경이다.
-기존 v12의 승인값/입력을 수정하는 방식 대신 새 모델을 학습하고 별도 v2 API로 연결한다.
-현재 **로컬 코드 검증 및 실제 서버 재학습·평가·번들 생성 완료** 상태다.
-로컬 실모델 설치·저장된 카카오 매핑 결과의 커버리지·Backend 실호출 검증도 완료했다.
-GPU 0 학습은 LightGBM CUDA illegal memory access로 중단되었다. 같은 서버에서 CPU
-최대 16개를 사용한 별도 실행 `20260918-v13-static-cpu`를 완료했다. 운영 배포 완료가 아니다.
+**실험 완료 / SHADOW 후보 / 운영 미적용**.
+
+이 브랜치는 최신 `origin/develop`의 `355c3ce`에서 시작하여 `112f950`의 신규 독립 모듈만 파일 단위로 분리했다. 전체 커밋을 cherry-pick하지 않았다.
+현재 서비스의 v12 배치 호출·적용 모드·결측 진단·BUS step 전체 fallback은 변경하지 않는다.
+v13은 앱에서 import/초기화하지 않으며 `/v2` 엔드포인트, Backend 연결, OpenAPI 변경, 환경변수·마운트·배포 설정이 없다.
+기존 실험 모델·평가·번들을 보존하며 `production_ready=false`를 유지한다.
+
+GPU 0 학습은 LightGBM CUDA illegal memory access로 중단되었다. 같은 서버의 CPU 최대 16개로 `20260918-v13-static-cpu` 학습·평가·번들 생성을 완료했다.
+과거 브랜치의 HTTP/Java 실험 검증은 현재 서비스 연동 완료를 의미하지 않으며 이번 분리 브랜치에는 포함하지 않는다.
 
 이 변경의 대상은 `SEOUL_BUS` 인접 정류장 사이 **시간대별 평균 이동시간(초)**다.
 버스 대기, 지하철 시간표/실시간 계산, 환승, 도보, 전체 경로의 실제 도착시간을 학습하지 않는다.
@@ -107,88 +110,37 @@ edge 커버리지·경로 합산 정확도·지연 성능 비교는 후속 실�
 GPU 0 오류 이후 CPU 최대 16개를 명시적으로 선택한 실행이며 GPU 학습 완료로 기록하지 않는다.
 기존 v12 디렉터리나 활성 모델 포인터를 교체하지 않는다.
 
-## HTTP 계약과 적용 규칙
+## 독립 실험 실행 경계
 
-정확한 스키마는 `ml-serving.openapi.json`의 `POST /v2/bus/predictions:batch`를 따른다.
-요청 형식은 v1과 같다. 배치는 최대 1,000개, 각 `segment_key`는 고유해야 한다.
+| 파일 | 역할과 호출 방식 |
+|---|---|
+| `static_bus_features.py` | 학습과 오프라인 추론의 공통 10개 특성 변환. 기존 번들의 코드 SHA 재현을 위해 그대로 보존 |
+| `static_bus_predictor.py` | 명시적으로 생성한 `StaticBusPredictor(bundle_path)`만 모델을 로딩. `predict(BatchRequest)`를 직접 호출 |
+| `static_bus_schema.py` | 실험 출력 검증용 `StaticBatchResponse`. 현재 HTTP/OpenAPI 계약에 등록하지 않음 |
+| `tools/train_static_bus.py` | 기존 정규화 자료로 별도 실험 폴더에 학습 산출물 생성 |
+| `tools/finalize_static_bus.py` | 동일 행 v12 비교, golden, SHA 목록 및 새 ZIP 생성 |
+| `tools/install_static_bundle.py` | 지정 ZIP SHA와 경로 안전성·golden 검증 후 새 폴더에만 설치. 활성 포인터 변경 없음 |
+| `tools/evaluate_static_bus.py` | 저장된 매핑 결과와 고정 마스터 버전으로 적용 가능 비율과 추론 시간 평가 |
+| `tools/audit_v13_lineage.py` | 원본 표본과 전체 정규화→학습 입력 비교. 원본과 모델은 읽기 전용 |
 
-```json
-{
-  "request_id": "example",
-  "segments": [{
-    "segment_key": "route-1-edge-1",
-    "provider_namespace": "SEOUL_BUS",
-    "provider_route_id": "100000001",
-    "provider_from_stop_id": "100000002",
-    "provider_to_stop_id": "100000003",
-    "from_stop_sequence": 1,
-    "service_date": "2026-09-18",
-    "hour_slot": 9
-  }]
-}
-```
+도구별 필수 인수는 `python tools/<파일명>.py --help`로 확인한다. 실행 환경은 기존 `ml-serving/requirements.txt`를 사용한다. 모델·데이터 경로는 사용자가 보유한 실제 경로를 명시하며 자동 다운로드·서버 등록은 하지 않는다.
+학습·계보 검사는 대용량 원본이 있는 실험 환경에서만 명시적으로 실행한다. 이번 분리는 재학습이나 원본 재처리를 실행하지 않는다.
 
-위 ID는 형식 예시이며 실제 매핑 성공을 주장하지 않는다. 정상 응답은 배치 버전과
-`computed_at`, `valid_until`, `approval`, `production_ready=false`를 포함한다.
-개별 `prediction`은 `mean_seconds`, `training_ids_verified=true`, `training_sample_count`,
-`observed_from`, `observed_until`, 결측 0을 반환한다.
+독립 예측은 기존 요청 자료형 `schemas.BatchRequest`와 안전한 경로 검사 `predictor.checked_path`를 읽기 전용으로 재사용한다. 두 기존 파일을 변경하지 않으며 v12 Predictor 인스턴스를 생성하거나 과거 reference를 조회하지 않는다.
+출력은 `approval=SHADOW`, `production_ready=false`로 고정한다. `TEST_APPLY` 인수·출력은 이 분리 모듈에서 지원하지 않는다.
+`training_sample_count`는 인접 조합의 학습 행 수이며 v12의 `history_sample_count`(조회된 과거 관측 수)와 다른 값이다.
+공식 현재 인접 조합과 학습 관측의 교집합만 성공으로 반환하며 날짜·namespace·인접 조합 검증 실패는 `UNAVAILABLE`이다.
+실험 실패값이 현재 Backend의 fallback을 직접 실행한다는 의미는 아니다. 5분 TTL은 실험 결과 재사용 제한이며 실시간 교통 반영을 뜻하지 않는다.
 
-- `training_sample_count`: 해당 노선·정류장 쌍·순번의 **학습 행 수**다.
-- v12 `history_sample_count`: 77~126일 전 같은 시간대의 **조회된 관측 수(최대 8)**다.
-  두 필드를 대체하거나 같은 의미로 기록하지 않는다. v2에는 `history_sample_count`가 없다.
-- `training_ids_verified=true`는 현재 마스터 인접 조합과 학습 관측 조합의 일치다.
-  과거 모든 날짜의 topology, 개별 차량 이동, 운영 정확도 승인까지 검증했다는 뜻이 아니다.
-- `SHADOW`는 수치를 반환하지만 Backend 시간 교체를 막는다.
-- Python과 Backend 양쪽에서 명시적으로 켠 `TEST_APPLY`만 일정 평가 PREVIEW에 사용한다.
-  검색 추천은 기존 운영 승인 경계를 유지하여 별도 preview 수치로만 제공한다.
-- `PRODUCTION` 승격은 이번 구현에 없다. v12/v13 모두 임의로 `production_ready=true`로 바꾸지 않는다.
-- 날짜/namespace/인접 조합/양수 예측 검증 실패는 해당 edge `UNAVAILABLE`이다.
-  Backend는 버스 step의 모든 edge 성공을 확인한 후만 합산하며 하나라도 실패하면 기존 카카오 step 시간을 유지한다.
-- 5분 `valid_until`은 응답 재사용 제한이며 실시간 교통 반영 여부가 아니다.
+## 후속 연동 조건
 
-## 파트별 연결 방법
+계보 PASS와 성능 개선·여정 검증 전 운영 후보 승격을 금지한다. 이후 최신 develop에 맞춰 별도 `BusStaticClient`와 `/v2` SHADOW 경로를 설계한다.
+기존 `BusPreviewClient`를 덮어쓰거나 v1/v2 전환 설정으로 교체하지 않는다. Backend TEST_APPLY, 서버 마운트·배포·활성화는 별도 작업이다.
 
-ML 담당:
+## 검증 범위
 
-1. 실제 GPU 로그·완료 상태·학습/평가 분할·성능·커버리지를 확인한다.
-2. 필수 산출물 SHA를 확인해 새 디렉터리로 설치한다. 기존 활성 묶음과 분리한다.
-3. `ML_STATIC_BUNDLE_DIR`를 새 묶음으로 설정한다. 기본 `ML_STATIC_TEST_APPLY=false`는 SHADOW다.
-4. `/v2/bus/health` 및 실제 알려진 edge로 배치 응답을 확인한다.
-   기존 `/health/ready`는 v1 준비 상태이므로 인프라 담당자가 v2 시험 인스턴스의 readiness를 따로 결정해야 한다.
-5. 요청 중 Parquet/DB/HDFS 조회가 없는지, batch 크기별 latency와 기존 v12 비교를 측정한다.
-
-Backend 담당:
-
-```properties
-ddubi.recommendation.ml-preview-api-version=v2
-ddubi.recommendation.ml-static-model-version=20260918-v13-static-cpu
-ddubi.recommendation.ml-static-master-version=METRO-BUS-20260917-SEOUL-0902
-ddubi.recommendation.ml-static-test-apply=false
-```
-
-기존 `ml-preview-base-url`은 v2 API를 제공하는 검증 인스턴스를 지정한다. 버전 미설정/불일치는
-적용을 거절한다. 시험 적용 시에만 양쪽 flag를 true로 명시한다. 다음 edge의 진입 시간대는
-앞 edge 예측에 따라 바뀌므로 Backend의 순차 평가/요청 캐시는 유지한다.
-서버 측 과거 파일 조회 제거가 HTTP 호출 횟수까지 제거하는 것은 아니다.
-
-데이터 담당:
-
-- 현재 마스터·학습 인접 조합의 미일치 목록을 검토하고 노선 개편/순번 변경을 구분한다.
-- server2 실측/시간평균·주간/월간 자료의 원천 키와 중복 범위를 별도로 증명한다.
-- 모델 입력을 늘리려면 학습·서빙 공통 변환과 고정 데이터의 시점 근거를 함께 변경한다.
-
-FE 변경은 없다. 시험 적용 이유·학습 관측 수는 Backend 진단 메타데이터로 구분된다.
-
-## 검증과 남은 작업
-
-- ML 서비스 테스트 57개 통과: 기존 v1 회귀 + v2 인접 조합/날짜/출처 거절, SHA 변조,
-  온라인 과거 파일 미조회, 두 모드의 `production_ready=false` 검증 포함.
-- 작은 합성 데이터 80행으로 학습 56행/test 24행, 묶음 생성·지표·현재 마스터 조인까지 실행했다.
-  이 합성 지표를 실제 교통 정확도로 사용하지 않는다.
-- 실제 서버 CPU 학습·평가 및 `20260918-v13-static-cpu.zip` 생성은 완료했다.
-  로컬 수신·SHA 검증을 통과했으며 서버 golden 10개와 로컬 예측 차이는 모두 0초다.
-- Backend 관련 21개 테스트 통과: HTTP v1/v2, 버전/시험 flag, 전체-step fallback,
-  시간대·날짜 경계, 후보 비교 포함. FE·인프라·CI·운영 배포는 수정하지 않았다.
+기존 v12 테스트 파일은 수정하지 않는다. 신규 테스트는 특성 순서·날짜, 인접 조합 거절, SHA 변조, 온라인 파일 미조회, SHADOW 출력, 계보 검사기의 결측/숫자 불일치를 독립 검증한다.
+과거 `112f950`의 Backend 22개/HTTP 연동 시험과 ML 63개 결과를 이 브랜치의 검증 결과로 사용하지 않는다. 현재 분리 검증 결과는 아래 별도 절에 기록한다.
 
 ## 2026-09-18 실제 학습 결과
 
@@ -212,7 +164,7 @@ FE 변경은 없다. 시험 적용 이유·학습 관측 수는 Backend 진단 �
 
 - 현재 `tools/extend_reference_bundle.py` 정규화는 OA-21217에 `> 0`, 나머지 세 원천에
   `>= 0`을 사용한다. OA-21218/21219/21220의 실제 0은 보존된다.
-- 네 원천 각각의 0·빈값·음수·양수 처리 회귀 테스트를 추가했고 관련 테스트 7개가 통과했다.
+- 과거 `112f950`에서 원천별 0 처리 테스트 총 7개가 통과했다. 이번 분리에서는 기존 `test_reference_update.py` 수정분을 가져오지 않는다. 상세 이력은 계보 문서를 따른다.
 - v13 실제 실행 소스 `training_source.py`는 OA-21217의 `target_seconds > 0`만 학습 정답으로
   채택한다. OA-21218/21219/21220 컬럼은 읽지 않아 세 원천의 0 처리에 따른 직접 영향은 없다.
 - 이 확인은 현재 정규화 코드와 v13 입력 처리에 대한 것이다. 재사용한 과거 `model_features`를
@@ -225,10 +177,9 @@ FE 변경은 없다. 시험 적용 이유·학습 관측 수는 Backend 진단 �
 
 - 설치: `artifacts/ml-serving/20260918-v13-static-cpu`.
 - ZIP SHA256: `8ea6055a116c48b3a17b5802036931a2e47696bbfebee5c645b3c251b5611abd`.
-- `BusStaticLiveModelTest` 1개 통과(실제 Java → HTTP → Python 모델 호출 10건).
-  기존 Backend 관련 21개와 별도로 실행했으며 전체 관련 검증은 22개다.
+- 보존 번들의 서버 golden 10개와 로컬 독립 추론 결과가 일치했던 기록이다. 과거 Java/HTTP 연결 코드는 이 브랜치에 없다.
 - 기존 1~20 카카오 예시의 저장된 매핑 결과에서 서울 버스 대안 273개 중 218개(79.85%)는
-  모든 edge 예측이 가능했다. 나머지 55개는 전체 버스 step에 카카오 시간을 유지한다.
+  모든 edge 예측이 가능했다. 나머지 55개는 오프라인 평가에서 전체 step 대체 불가로 판정했다. 실제 서비스에 v13을 적용한 결과가 아니다.
 - 서로 다른 서울 edge 1,008개 중 839개(83.23%)가 지원된다. 경기/인천 대안 450개 및
   매핑 미확정 대안 45개는 이번 서울 모델 평가 대상이 아니다.
 - 단일 edge warm 추론 30회: P50 30.27ms, P95 40.76ms. HTTP·이전 도보·대기·지하철을
@@ -237,3 +188,15 @@ FE 변경은 없다. 시험 적용 이유·학습 관측 수는 Backend 진단 �
 - 전체 테스트의 고정 edge×hour 평균 baseline MAE는 34.526초로 새 모델보다 작다.
   새 모델은 미관측 ID 오차가 크고 비양수 예측도 있어 서빙에서 해당 값을 거절한다.
   운영 승격 전 정확도 개선과 실제 여정 정답 기반 검증이 필요하다.
+
+## 최신 develop 기반 분리 검증 (2026-09-18)
+
+- 기준: `origin/develop` `355c3ce`, 브랜치: `feature/dt/S15P21E202-74-v13-shadow-isolated`.
+- 기존 ML 테스트: **49개 통과**. 보존된 v12 실제 번들을 `ML_TEST_BUNDLE_DIR`로 지정해 golden 대조까지 통과했다. 초기 모델 없는 체크아웃의 1개 skip을 해소했다. 기존 테스트 파일은 변경하지 않았다.
+- 신규 독립 테스트: **11개 통과**(모델·스키마 8개, 계보 2개, 앱 격리 1개). 합계 **60개 통과**.
+- 기존 Backend `BusPreviewClientTest`, `MlApplyModeTest`, `MlRoutePreviewTest`: **24개 통과**. 배치 중복 제거·결측 진단·모드별 적용·BUS step 전체 fallback을 포함한다. Backend 전체 테스트 실행 결과로 확대 해석하지 않는다.
+- 독립 도구 5개의 `--help` 기동 확인. 재학습·원천 전체 재처리는 실행하지 않았다.
+- 보존 v13 번들의 golden 10건 직접 추론: 최대 오차 **0초**, SHADOW, production_ready=false.
+- 기존 앱은 ML 환경변수 없이 기동, `/health/live` 200. 모델 미설치 시 `/health/ready` 503은 기존 동작이다. `/v2/bus/health` 404, 기존 API 경로만 유지하며 v13 모듈 자동 import도 없다.
+- develop 대비 기존 추적 파일 변경 0개. 신규 실험 파일만 추가하므로 app.py·schemas.py·OpenAPI·Backend·환경변수·배포 설정은 기준 커밋과 동일하다.
+- 기존 작업 폴더의 dt/dev 병합 충돌은 보존했다. 이 브랜치의 별도 작업 폴더는 `data/worktrees/v13-shadow-isolated`다.

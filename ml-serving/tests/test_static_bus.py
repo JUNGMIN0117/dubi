@@ -4,18 +4,17 @@ import json
 from pathlib import Path
 import shutil
 import sys
-from datetime import date
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import lightgbm as lgb
 import pandas as pd
 import pytest
-from fastapi.testclient import TestClient
-from app import create_app
 from predictor import BundleError
 from schemas import BatchRequest
 from static_bus_features import FEATURES, VERSION, matrix
 from static_bus_predictor import StaticBusPredictor
+from static_bus_schema import StaticBatchResponse
+from pydantic import ValidationError
 
 
 def payload(**changes):
@@ -28,7 +27,7 @@ def payload(**changes):
 
 @pytest.fixture
 def bundle(tmp_path):
-    """시간 60초인 작은 모델은 정확도 시험이 아니라 묶음·HTTP 경계 재현용이다."""
+    """시간 60초인 작은 모델은 정확도 시험이 아니라 묶음·독립 추론 경계 재현용이다."""
     spec = dict(feature_version=VERSION, features=FEATURES,
                 vocab=dict(provider_route_id=['001'], provider_from_stop_id=['002'], provider_to_stop_id=['003']),
                 holidays=['2026-09-18'])
@@ -93,11 +92,11 @@ def test_sha_tampering_rejected_before_model_load(bundle):
         StaticBusPredictor(bundle)
 
 
-def test_v2_http_test_mode_stays_not_production(bundle):
-    model = StaticBusPredictor(bundle, test_apply=True)
-    with TestClient(create_app(predictor=object(), static_predictor=model, today=lambda: date(2026, 9, 18))) as client:
-        assert client.get('/v2/bus/health').status_code == 200
-        response = client.post('/v2/bus/predictions:batch', json=payload())
-        assert response.status_code == 200
-        assert response.json()['approval'] == 'TEST_APPLY'
-        assert response.json()['production_ready'] is False
+def test_shadow_output_schema_never_approves_production(bundle):
+    """HTTP 앱 없이 직접 예측하며 운영 승인·시험 적용으로 해석되는 출력을 거절한다."""
+    result = StaticBusPredictor(bundle).predict(BatchRequest.model_validate(payload()))
+    parsed = StaticBatchResponse.model_validate(result)
+    assert parsed.approval == 'SHADOW' and parsed.production_ready is False
+    for changes in ({'production_ready': True}, {'approval': 'TEST_APPLY'}):
+        with pytest.raises(ValidationError):
+            StaticBatchResponse.model_validate(dict(result, **changes))

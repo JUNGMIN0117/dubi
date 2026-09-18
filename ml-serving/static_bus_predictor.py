@@ -2,8 +2,8 @@
 
 v12 날짜별 reference 조회와 독립적이다. 공식 현재 마스터와 학습 관측의 교집합에
 있는 route/from/to/sequence만 허용하며 개별 vocab 포함만으로 매핑 성공 처리하지 않는다.
-학습 승인과 HTTP 성공은 별개다. 운영 승인은 항상 false이며 명시된 시험 모드만
-TEST_APPLY를 반환한다. 실패 edge는 null로 반환해 Backend가 버스 step 전체를 fallback한다.
+독립 실험 객체이며 현재 HTTP 서비스나 Backend에는 연결하지 않는다. 운영 승인은
+항상 false, 결과는 SHADOW다. 실패 edge는 null로 남기며 서비스 적용 여부는 판단하지 않는다.
 """
 from datetime import date, datetime, timedelta, timezone
 import hashlib
@@ -21,7 +21,7 @@ from static_bus_features import FEATURES, KEY, VERSION, matrix
 
 class StaticBusPredictor:
     """SHA 검증 완료 모델·달력·공식 인접 edge를 소유하는 읽기 전용 서빙 객체다."""
-    def __init__(self, root, test_apply=False):
+    def __init__(self, root):
         root = Path(root).resolve()
         bundle = json.loads((root / 'bundle.json').read_text(encoding='utf-8'))
         required = {'model.txt', 'edges.parquet', 'input_spec.json', 'serving_manifest.json',
@@ -61,7 +61,7 @@ class StaticBusPredictor:
         self.end = date.fromisoformat(self.manifest['supported_until'])
         if self.start > self.end:
             raise BundleError('DATE_RANGE_INVALID')
-        self.mode = 'TEST_APPLY' if test_apply else 'SHADOW'
+        self.mode = 'SHADOW'
         self.lock = threading.Lock()
 
     def metadata(self):
@@ -95,7 +95,7 @@ class StaticBusPredictor:
                     if not np.isfinite(seconds) or not 0 < seconds <= 86400:
                         result['reason'] = 'INVALID_DURATION'
                         continue
-                    result.update(status='PREVIEW', reason='TEST_APPLY' if self.mode == 'TEST_APPLY' else 'SHADOW_ONLY',
+                    result.update(status='PREVIEW', reason='SHADOW_ONLY',
                                   prediction=dict(mean_seconds=float(seconds), training_ids_verified=True,
                                        training_sample_count=int(evidence['training_sample_count']),
                                        observed_from=str(evidence['observed_from'].date()),

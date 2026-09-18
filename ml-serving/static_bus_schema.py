@@ -1,4 +1,4 @@
-"""v13 응답 계약. 학습 관측 수와 모델 적용 승인을 독립된 필드로 전달한다."""
+"""v13 독립 실험 출력 스키마. 현재 HTTP API 계약에 등록하지 않는다. 학습 관측 수와 모델 적용 승인을 독립된 필드로 전달한다."""
 from datetime import date
 from typing import Annotated, Literal
 from pydantic import BaseModel, Field, AwareDatetime, model_validator
@@ -18,10 +18,10 @@ class StaticPrediction(BaseModel):
 
 
 class StaticResult(BaseModel):
-    """한 edge라도 실패하면 Backend는 부분 합산 대신 해당 버스 step을 fallback한다."""
+    """실험의 개별 edge 성공·실패를 기록한다. Backend fallback과 아직 연결하지 않는다."""
     segment_key: str
     status: Literal['PREVIEW', 'UNAVAILABLE']
-    reason: Literal['TEST_APPLY', 'SHADOW_ONLY', 'UNSUPPORTED_PROVIDER', 'DATE_UNSUPPORTED',
+    reason: Literal['SHADOW_ONLY', 'UNSUPPORTED_PROVIDER', 'DATE_UNSUPPORTED',
                     'EDGE_NOT_VERIFIED', 'INVALID_DURATION']
     prediction: StaticPrediction | None
 
@@ -29,7 +29,7 @@ class StaticResult(BaseModel):
     def consistent(self):
         """숫자가 없는 성공 또는 실패에 숫자를 끼워 넣는 계약 오류를 차단한다."""
         success = self.status == 'PREVIEW'
-        if success != (self.prediction is not None) or success != (self.reason in ('TEST_APPLY', 'SHADOW_ONLY')):
+        if success != (self.prediction is not None) or success != (self.reason == 'SHADOW_ONLY'):
             raise ValueError('STATIC_RESULT_INCONSISTENT')
         return self
 
@@ -48,5 +48,5 @@ class StaticBatchResponse(BaseModel):
     supported_until: date
     computed_at: AwareDatetime
     valid_until: AwareDatetime
-    approval: Literal['SHADOW', 'TEST_APPLY']
+    approval: Literal['SHADOW']
     results: list[StaticResult]

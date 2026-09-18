@@ -171,7 +171,19 @@ void main() {
   });
 
   testWidgets('부분 도보 API 적용과 원본 경로 fallback을 함께 표시한다', (tester) async {
-    await tester.pumpWidget(_summary(fixtures['walking_fallback']!));
+    // 대체 계산 사유는 개발자 진단에서만 보인다.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: ScheduleEvaluationSummary(
+              evaluation: fixtures['walking_fallback']!,
+              developerDiagnostics: true,
+            ),
+          ),
+        ),
+      ),
+    );
 
     expect(find.textContaining('접근 도보 경로만 반영'), findsOneWidget);
     expect(find.textContaining('이탈 도보 · 도착역 → 회사'), findsOneWidget);

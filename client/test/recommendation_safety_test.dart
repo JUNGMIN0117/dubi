@@ -128,9 +128,13 @@ void main() {
         ),
       ),
     );
+    // 일반 화면에는 건수도 항목도 내보내지 않는다. 한 문장으로만 알린다.
     expect(find.textContaining('secret-'), findsNothing);
     expect(find.textContaining('PRIVATE_NEW_CODE'), findsNothing);
-    expect(find.textContaining('일부 버스 구간의 실시간 정보가 부족해요'), findsOneWidget);
-    expect(find.textContaining('일부 지하철 구간의 운행정보가 부족해요'), findsOneWidget);
+    expect(find.textContaining('50건'), findsNothing);
+    expect(
+      find.textContaining('일부 실시간 정보가 없어 기본 경로 예상시간을 사용했어요'),
+      findsOneWidget,
+    );
   });
 }

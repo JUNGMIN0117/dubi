@@ -975,12 +975,19 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
           ),
         if (evaluation.quality.costCoverage != 'COMPLETE')
           _bullet(Icons.timelapse_rounded, '전체 이동시간의 구성요소가 완전히 확인되지 않았습니다.'),
+        // 부족한 항목의 건수와 종류는 사용자에게 뜻이 없다(후보 전체 구간을 센 숫자다).
+        // 한 문장으로만 알리고, 자세한 목록은 개발자 진단에서 본다(2026-09-18).
         if (evaluation.quality.missingInputs.isNotEmpty)
           _bullet(
             Icons.help_outline_rounded,
-            '부족한 정보: ${_groupMissing(evaluation.quality.missingInputs)}',
+            diagnostics
+                ? '부족한 정보: ${_groupMissing(evaluation.quality.missingInputs)}'
+                : '일부 실시간 정보가 없어 기본 경로 예상시간을 사용했어요.',
           ),
-        if (!widget.compact && evaluation.quality.fallbackReasons.isNotEmpty)
+        // 대체 계산 사유는 내부 코드를 옮긴 목록이라 일반 화면에서 뺀다.
+        if (!widget.compact &&
+            diagnostics &&
+            evaluation.quality.fallbackReasons.isNotEmpty)
           _bullet(
             Icons.swap_horiz_rounded,
             '대체 계산 사용: '

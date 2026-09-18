@@ -3804,10 +3804,16 @@ class ScheduleDetailScreen extends StatelessWidget {
               )
             else
               const InfoCard(child: Text('이 일정은 서버 예측에 연결되지 않았습니다.')),
-            TransitReferencePanel(
-              repository: repository is TransitReferenceRepository
-                  ? repository as TransitReferenceRepository
-                  : null,
+            // 서버 참고자료 적재 현황은 운영 확인용이다. 개발자 진단을 켠 경우에만 보여준다.
+            ValueListenableBuilder<bool>(
+              valueListenable: DeveloperDiagnostics.enabled,
+              builder: (_, diagnostics, _) => diagnostics
+                  ? TransitReferencePanel(
+                      repository: repository is TransitReferenceRepository
+                          ? repository as TransitReferenceRepository
+                          : null,
+                    )
+                  : const SizedBox.shrink(),
             ),
             const SizedBox(height: 14),
             OutlinedButton.icon(
@@ -4011,6 +4017,9 @@ class _LiveSavedRouteList extends StatefulWidget {
 
 class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
   late List<SavedRouteSummary> _routes = widget.initial;
+
+  /// 서버가 같은 기준으로 비교한 후보별 결과. 새 평가가 오면 갱신한다.
+  List<EvaluationCandidateEstimate> _estimates = const [];
   late bool _unavailable = widget.unavailable;
   final DateTime _loadedAt = DateTime.now();
   DateTime? _seenComputedAt;
@@ -4032,6 +4041,10 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
   }
 
   void _onEvaluation() {
+    final value = widget.headline.value;
+    if (value != null && mounted && !_sameEstimates(value.candidateEstimates)) {
+      setState(() => _estimates = value.candidateEstimates);
+    }
     final computedAt = widget.headline.value?.computedAt;
     if (computedAt == null) return;
     final seen = _seenComputedAt;
@@ -4042,6 +4055,18 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
       return;
     }
     _reload();
+  }
+
+  bool _sameEstimates(List<EvaluationCandidateEstimate> next) {
+    if (next.length != _estimates.length) return false;
+    for (var i = 0; i < next.length; i++) {
+      if (next[i].routeId != _estimates[i].routeId ||
+          next[i].durationSeconds != _estimates[i].durationSeconds ||
+          next[i].proposed != _estimates[i].proposed) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _reload() async {
@@ -4064,6 +4089,7 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
   Widget build(BuildContext context) => _SavedRouteList(
     display: SavedRouteDisplay.from(_routes),
     unavailable: _unavailable,
+    estimates: _estimates,
     onSelected: widget.onSelected == null
         ? null
         : (route) async {
@@ -4076,17 +4102,28 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
   );
 }
 
+/// 저장된 경로 하나에 대응하는 평가 결과를 찾는다. 없으면 null 이고 카드는 원본 값만 보여준다.
 class _SavedRouteList extends StatelessWidget {
   const _SavedRouteList({
     required this.display,
     required this.unavailable,
     required this.onSelected,
+    this.estimates = const [],
   });
 
   final SavedRouteDisplay display;
   final bool unavailable;
+
+  /// 서버가 같은 기준으로 비교한 후보별 결과. `routeId` 로 카드와 이어 붙인다.
+  final List<EvaluationCandidateEstimate> estimates;
   final ValueChanged<SavedRouteSummary>? onSelected;
 
+  EvaluationCandidateEstimate? _estimateFor(String routeId) {
+    for (final estimate in estimates) {
+      if (estimate.routeId == routeId) return estimate;
+    }
+    return null;
+  }
   @override
   Widget build(BuildContext context) {
     final routes = display.visible;
@@ -4117,6 +4154,7 @@ class _SavedRouteList extends StatelessWidget {
             _SavedRouteTile(
               route: routes[i],
               displayRank: i + 1,
+              estimate: _estimateFor(routes[i].routeId),
               onTap: onSelected,
             ),
             if (i != routes.length - 1) const SizedBox(height: 8),
@@ -4146,7 +4184,11 @@ class _SavedRouteTile extends StatelessWidget {
     required this.route,
     required this.displayRank,
     required this.onTap,
+    this.estimate,
   });
+
+  /// 서버가 이번 평가에서 계산한 값. 있으면 원본 경로시간 대신 이 값을 보여준다.
+  final EvaluationCandidateEstimate? estimate;
 
   /// 화면에 보이는 순번(1부터). 서버가 준 순위와 다를 수 있다.
   final int displayRank;
@@ -4154,6 +4196,12 @@ class _SavedRouteTile extends StatelessWidget {
   final SavedRouteSummary route;
   final ValueChanged<SavedRouteSummary>? onTap;
 
+  /// 평가된 소요시간이 있으면 그 값을, 없으면 경로 API 원본을 보여준다.
+  String _durationLabel() {
+    final seconds = estimate?.durationSeconds;
+    if (seconds == null) return '약 ${route.baseDurationMin}분';
+    return '약 ${(seconds / 60).ceil()}분';
+  }
   @override
   Widget build(BuildContext context) => Material(
     color: route.selected ? const Color(0xFFE7FAF5) : Colors.white,
@@ -4197,7 +4245,11 @@ class _SavedRouteTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          route.selected ? '선택된 추천 경로' : '$displayRank순위 경로',
+                          route.selected
+                              ? '선택된 추천 경로'
+                              : estimate?.proposed == true
+                              ? '새로 제안된 경로'
+                              : '$displayRank순위 경로',
                           style: const TextStyle(
                             fontWeight: FontWeight.w900,
                             color: DdubiColors.navy,
@@ -4205,7 +4257,13 @@ class _SavedRouteTile extends StatelessWidget {
                         ),
                       ),
                       if (route.selected)
-                        const StatusBadge('선택됨', tone: DdubiColors.green),
+                        const StatusBadge('선택됨', tone: DdubiColors.green)
+                      else if (estimate?.proposed == true)
+                        const StatusBadge(
+                          '제안',
+                          tone: DdubiColors.blue,
+                          icon: Icons.auto_awesome_outlined,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -4217,7 +4275,7 @@ class _SavedRouteTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '약 ${route.baseDurationMin}분 · ${route.segmentCount}개 구간 · '
+                    '${_durationLabel()} · ${route.segmentCount}개 구간 · '
                     '${route.modes.map(_routeModeLabel).join(' · ')}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

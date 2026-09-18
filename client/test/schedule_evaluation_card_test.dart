@@ -137,8 +137,8 @@ void main() {
       'keep': '현재 출발 계획을 유지해도 일정 전에 도착할 것으로 예상됩니다.',
       'advance': '제안 시각에 출발하면 일정 10분 전 도착이 예상됩니다.',
       'margin': '10분 여유 확보는 어렵지만 일정 전 도착 가능한 경로입니다.',
-      // 시각이 있는 결과는 확정이 아니어도 참고값으로 보여준다(2026-09-18).
-      'late': '참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.',
+      // 탐색이 끝났고 시험 예측도 안 섞였으면 서버가 수락을 허용한다. 지각 예상도 그대로 안내한다.
+      'late': '현재 확인 가능한 경로로는 일정 시작 이후 도착이 예상됩니다.',
       'data': '정확한 출발 추천을 아직 확정하지 못했어요.',
       'search': '아직 최신 출발시각을 확정하지 못했어요. 확인된 후보는 참고용입니다.',
     };
@@ -325,6 +325,12 @@ void main() {
           'state': 'READY',
           'decision': 'DEPART_NOW',
           'departureMissed': departureMissed,
+          'guidance': {
+            'canDisplayEstimate': true,
+            'canAccept': true,
+            'source': 'MIXED_ESTIMATE',
+            'reasons': <String>[],
+          },
           'estimatedArrivalAt': DateTime.now()
               .add(const Duration(hours: 1))
               .toIso8601String(),

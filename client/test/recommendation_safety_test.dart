@@ -77,6 +77,13 @@ void main() {
   testWidgets('검증용 결과는 제안 출발 대신 참고 출발로만 시각을 보여주고 적용은 막는다', (tester) async {
     final json = response();
     (json['quality'] as Map<String, dynamic>)['preview'] = true;
+    // 서버는 시험 예측이 섞이면 표시는 허용하되 수락은 막는다.
+    json['guidance'] = {
+      'canDisplayEstimate': true,
+      'canAccept': false,
+      'source': 'EXPERIMENTAL_ESTIMATE',
+      'reasons': ['ML_TEST_RESULT_NOT_ACCEPTABLE'],
+    };
     final evaluation = ScheduleEvaluationV2.fromJson(json);
     expect(evaluation.canAcceptAt(DateTime.now()), isFalse);
 
@@ -96,8 +103,9 @@ void main() {
     expect(find.textContaining('참고 도착'), findsOneWidget);
     expect(find.textContaining('제안 출발'), findsNothing);
     expect(find.textContaining('예상 도착'), findsNothing);
+    // 시험 예측이 섞였다는 것을 문구로 알린다.
     expect(
-      find.text('참고로 계산한 결과예요. 아직 확정 전이라 일정에 자동 적용은 안 해요.'),
+      find.text('아직 시험 중인 예측이 섞여 있어요. 참고용이고 일정에 자동 적용은 안 해요.'),
       findsOneWidget,
     );
     expect(find.textContaining('제안 시각에 출발하면'), findsNothing);

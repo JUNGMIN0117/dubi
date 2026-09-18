@@ -106,3 +106,48 @@ def test_pandas_and_arrow_share_budget_and_oversized_frames_are_not_retained(tmp
         limited.read_pandas(path)
         limited.read_pandas(path)
         assert limited.bytes == 0 and limited.hits == 0
+
+
+def monthly_module(tmp_path, months):
+    """월 필터 밖의 중복·공개일도 검사할 수 있는 최소 v12 읽기 모형이다."""
+    folder = tmp_path / "contexts"
+    folder.mkdir()
+    path = folder / "monthly_demand.parquet"
+    write_table(
+        path,
+        {
+            "month_key": months,
+            "provider_stop_id": ["001"] * len(months),
+            "publication_assumed": [False] * len(months),
+            "published_date": pd.to_datetime(["2026-01-01"] * len(months)),
+            "board_00": [0.0] * len(months),
+        },
+    )
+    module = SimpleNamespace(pd=pd, pq=pq)
+    module.attach_features = lambda frame, root: module.pd.read_parquet(path)
+    cache = ReferenceCache([path], 100000)
+    cache.bind(module)
+    return module, cache, path
+
+
+def test_month_scope_tracks_year_boundary_multiple_dates_and_restores_full_read(tmp_path):
+    module, cache, path = monthly_module(tmp_path, [202511, 202512, 202607])
+    request = pd.DataFrame({"service_date": ["2026-01-01", "2026-02-01"]})
+    result = module.attach_features(request, tmp_path)
+    assert result.month_key.tolist() == [202511, 202512]
+    assert result.board_00.tolist() == [0.0, 0.0]
+    pd.testing.assert_frame_equal(module.attach_features(request, tmp_path), result)
+    assert cache.hits == 1
+    assert module.attach_features(pd.DataFrame({"service_date": ["2026-09-18"]}), tmp_path).month_key.tolist() == [
+        202607
+    ]
+    assert cache.monthly_scope is None
+    assert len(module.pd.read_parquet(path)) == 3
+
+
+def test_duplicate_in_unrequested_month_is_still_rejected_and_scope_cleared(tmp_path):
+    module, cache, _ = monthly_module(tmp_path, [202511, 202511, 202607])
+    with pytest.raises(ValueError, match="DUPLICATE_MONTHLY_REFERENCE"):
+        module.attach_features(pd.DataFrame({"service_date": ["2026-09-18"]}), tmp_path)
+    assert cache.monthly_scope is None
+    assert cache.stats()["entries"] == 0

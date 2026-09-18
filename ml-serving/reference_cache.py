@@ -8,6 +8,8 @@
 from collections import OrderedDict
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.compute as compute
 import pyarrow.parquet as parquet
 
 
@@ -22,6 +24,7 @@ class ReferenceCache:
         self.entries = OrderedDict()
         self.bytes = 0
         self.hits = self.misses = self.evictions = 0
+        self.monthly_scope = None
 
     def read(self, path, columns=None):
         """검증된 파일의 요청 열을 불변 Arrow Table로 제공한다."""
@@ -39,13 +42,28 @@ class ReferenceCache:
         resolved = Path(path).resolve()
         if resolved not in self.allowed:
             raise ValueError("UNVERIFIED_REFERENCE")
-        key = (resolved, None if columns is None else tuple(columns), pandas)
+        # attach_features 호출 안에서만 요청의 두 달 전 월로 제한한다. 일반 파일 읽기는
+        # 기존처럼 전체 표를 반환하며 월 집합도 키에 포함해 요청 간 자료 혼입을 막는다.
+        months = (
+            self.monthly_scope[1]
+            if self.monthly_scope is not None and resolved == self.monthly_scope[0] and pandas
+            else None
+        )
+        key = (resolved, None if columns is None else tuple(columns), pandas, months)
         if key in self.entries:
             self.hits += 1
             self.entries.move_to_end(key)
             return self.entries[key]
         self.misses += 1
         table = parquet.ParquetFile(resolved).read(columns=columns)
+        if months is not None:
+            # 원본 함수는 공개일이 확인된 자료 전체에 many_to_one 검증을 한다.
+            # 월 필터가 다른 월의 중복을 숨기지 않도록 같은 적격 행의 키를 먼저 검사한다.
+            keys = table.select(["month_key", "provider_stop_id", "publication_assumed", "published_date"]).to_pandas()
+            eligible = keys.loc[~keys.publication_assumed & keys.published_date.notna()]
+            if eligible.duplicated(["month_key", "provider_stop_id"]).any():
+                raise ValueError("DUPLICATE_MONTHLY_REFERENCE")
+            table = table.filter(compute.is_in(table["month_key"], value_set=pa.array(months, type=pa.int64())))
         if pandas:
             table = table.to_pandas()
         # 대용량 한 파일 때문에 다른 모든 캐시를 지우지 않는다. 읽기 오류는 그대로 전파한다.
@@ -115,3 +133,24 @@ class ReferenceCache:
 
         original_pd, original_pq = features.pd, features.pq
         features.pd, features.pq = PandasView(), ParquetView()
+        if hasattr(features, "attach_features"):
+            original_attach = features.attach_features
+
+            def attach_features(frame, reference_root):
+                """v12의 두 달 지연 월자료만 읽게 범위를 설정하고 예외 발생 시에도 해제한다.
+
+                모델·portable 원본·SHA를 바꾸지 않는 I/O 최적화다. 공개일·정류장·시간대
+                선택 및 결측 처리는 기존 함수가 수행한다. Predictor의 추론 락이 범위를 보호한다.
+                """
+                previous = cache.monthly_scope
+                try:
+                    if frame.empty:
+                        return original_attach(frame, reference_root)
+                    prior = original_pd.to_datetime(frame.service_date).dt.to_period("M") - 2
+                    months = tuple(sorted(set((prior.dt.year * 100 + prior.dt.month).tolist())))
+                    cache.monthly_scope = ((Path(reference_root) / "contexts/monthly_demand.parquet").resolve(), months)
+                    return original_attach(frame, reference_root)
+                finally:
+                    cache.monthly_scope = previous
+
+            features.attach_features = attach_features

@@ -19,9 +19,14 @@ from fastapi.responses import JSONResponse
 
 from predictor import BundleError, Predictor
 from environment_features import prepare
-from environment_schema import EnvironmentPoint, EnvironmentRequest
+from environment_schema import (
+    EnvironmentPoint,
+    EnvironmentRequest,
+    OnlineFeatureBatchRequest,
+    OnlineFeatureBatchResponse,
+)
 from environment_model import EnvironmentModel
-from online_feature_assembler import OnlineFeatureAssembler, OnlineFeatureSettings
+from online_feature_assembler import OnlineFeatureAssembler, OnlineFeatureSettings, OnlineFeatureStore
 from schemas import BatchRequest, BatchResponse, InvalidRequest, ServiceUnavailable
 from serving_runtime import InferenceQueue, QueueBusy, RuntimeSettings
 
@@ -80,7 +85,8 @@ def reference_health(model, today):
                 missing_reference_file_count=len(model.bundle.get('missing_files',[])))
 
 
-def create_app(predictor=None, settings=None, today=None, online_feature_assembler=None):
+def create_app(predictor=None, settings=None, today=None, online_feature_assembler=None,
+               online_feature_store=None):
     """테스트에서는 객체를 주입하며 실서비스에서는 환경변수로 묶음 경로를 고정한다.
 
 로딩 실패를 정상값으로 숨기지 않고 readiness 503으로 노출한다. 예외 원문에는
@@ -92,6 +98,7 @@ def create_app(predictor=None, settings=None, today=None, online_feature_assembl
         application.state.inference_queue = InferenceQueue(policy)
         application.state.environment_model = None
         application.state.online_feature_assembler = online_feature_assembler
+        application.state.online_feature_store = online_feature_store
         application.state.online_feature_redis = None
         try:
             online_settings = OnlineFeatureSettings.from_env(os.environ)
@@ -106,6 +113,14 @@ def create_app(predictor=None, settings=None, today=None, online_feature_assembl
                 application.state.online_feature_assembler = OnlineFeatureAssembler(
                     application.state.online_feature_redis, online_settings.cache_ttl_seconds,
                     expected_crosswalk_sha=online_settings.crosswalk_sha
+                )
+                application.state.online_feature_store = OnlineFeatureStore(
+                    application.state.online_feature_redis
+                )
+            elif (application.state.online_feature_store is None
+                  and application.state.online_feature_assembler is not None):
+                application.state.online_feature_store = OnlineFeatureStore(
+                    application.state.online_feature_assembler.client
                 )
         except Exception as error:
             LOGGER.error('ONLINE_FEATURE_STORE_INIT_FAILED type=%s', type(error).__name__)
@@ -220,6 +235,27 @@ def create_app(predictor=None, settings=None, today=None, online_feature_assembl
             raise HTTPException(status_code=422, detail='INVALID_ENVIRONMENT_POINT') from None
         except Exception as error:
             LOGGER.error('ONLINE_FEATURE_ASSEMBLY_FAILED type=%s', type(error).__name__)
+            raise HTTPException(status_code=503, detail='FEATURE_STORE_UNAVAILABLE') from None
+
+    @application.post('/v1/bus/features:batch', response_model=OnlineFeatureBatchResponse,
+                      responses={503: {'model': ServiceUnavailable}})
+    async def batch_features(request: OnlineFeatureBatchRequest):
+        """경로의 구간별 현재 Snapshot을 Redis MGET 한 번으로 읽는다."""
+        store = application.state.online_feature_store
+        if store is None:
+            raise HTTPException(status_code=503, detail='FEATURE_STORE_NOT_READY')
+        try:
+            result = await asyncio.to_thread(
+                store.read_many,
+                request.masterVersion,
+                request.segmentIds,
+                request.asOf,
+            )
+            return {"requestId": request.requestId, **result}
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(status_code=422, detail='INVALID_ENVIRONMENT_POINT') from None
+        except Exception as error:
+            LOGGER.error('ONLINE_FEATURE_BATCH_READ_FAILED type=%s', type(error).__name__)
             raise HTTPException(status_code=503, detail='FEATURE_STORE_UNAVAILABLE') from None
 
     return application

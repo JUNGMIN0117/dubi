@@ -4,9 +4,8 @@ import json
 
 import fakeredis
 import pytest
-from redis.exceptions import ResponseError
-
 from common.bus_weather_redis import activate_staged_mapping, mapping_keys
+from redis.exceptions import ResponseError
 
 
 def test_complete_staging_is_activated_with_ttl():
@@ -15,7 +14,10 @@ def test_complete_staging_is_activated_with_ttl():
     client.hset(keys["staging"], mapping={"S1": "{}", "S2": "{}"})
 
     activated = activate_staged_mapping(
-        client, keys, expected_rows=2, ttl_seconds=3600,
+        client,
+        keys,
+        expected_rows=2,
+        ttl_seconds=3600,
         metadata={"rowCount": 2},
     )
 
@@ -35,7 +37,10 @@ def test_incomplete_staging_does_not_replace_active_mapping():
 
     with pytest.raises(ResponseError, match="row count mismatch"):
         activate_staged_mapping(
-            client, keys, expected_rows=2, ttl_seconds=3600,
+            client,
+            keys,
+            expected_rows=2,
+            ttl_seconds=3600,
             metadata={"rowCount": 2},
         )
 

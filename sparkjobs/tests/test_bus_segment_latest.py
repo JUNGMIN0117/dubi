@@ -2,11 +2,12 @@
 
 import json
 
-from pyspark.sql import functions as F
-
 from common.bus_normalizer import ALL_FIELDS
 from common.bus_stream_sink import segment_redis_rows
-from test_realtime_latest import spark
+from pyspark.sql import functions as F
+from test_realtime_latest import (
+    spark as spark,  # pytest가 이름으로 찾는 공유 fixture를 명시적으로 재노출한다.
+)
 
 
 def test_bus_position_is_written_by_segment_and_arrival_is_excluded(spark):

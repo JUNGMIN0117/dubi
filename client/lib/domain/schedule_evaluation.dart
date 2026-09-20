@@ -1,6 +1,23 @@
 /// Translate only known historical evidence codes. Never expose opaque IDs as reasons.
 String? historicalReferenceReasonLabel(String reason) {
   final parts = reason.split(':');
+  // 버스 수식 fallback 계약의 코드는 HISTORICAL_REFERENCE_ 로 시작하지 않아 따로 찾는다.
+  if (parts.contains('GTFS_FORMULA_APPLIED')) {
+    return 'GTFS 시간표 기준 구간시간 적용 · 실측 아님';
+  }
+  if (parts.contains('BUS_REFERENCE_VERSION')) {
+    return '사용한 버스 기준자료 버전 기록';
+  }
+  final kindIndex = parts.indexOf('BUS_REFERENCE_KIND');
+  if (kindIndex >= 0) {
+    final kind = kindIndex + 1 < parts.length ? parts[kindIndex + 1] : '';
+    return switch (kind) {
+      'GTFS_SCHEDULE_FORMULA' => '사용한 자료: GTFS 시간표 계산값',
+      'HOURLY_SOURCE_MEAN' => '사용한 자료: 시간대별 실측 평균',
+      'ACTUAL_TRAVERSAL_MEAN' => '사용한 자료: 실제 구간 통과 기록 평균',
+      _ => '사용한 버스 기준자료 종류 기록',
+    };
+  }
   final index = parts.indexWhere(
     (part) => part.startsWith('HISTORICAL_REFERENCE_'),
   );
@@ -95,6 +112,9 @@ enum DurationSource {
   /// 운영 계약(PRODUCTION)을 만족한 ML 예측. 현재 서버 기본 모드(SHADOW)에서는 나오지 않는다.
   mlProduction,
   busHistoricalReference,
+
+  /// 경기·인천·부산 GTFS 시간표로 미리 계산한 구간시간. 실제 운행 기록이 아니다.
+  busGtfsFormula,
   unknown;
 
   static DurationSource fromRaw(String? raw) => switch (raw) {
@@ -106,6 +126,7 @@ enum DurationSource {
     'ML_PREVIEW' => mlPreview,
     'ML_PRODUCTION' => mlProduction,
     'BUS_HISTORICAL_REFERENCE' => busHistoricalReference,
+    'BUS_GTFS_FORMULA' => busGtfsFormula,
     _ => unknown,
   };
 }
@@ -508,10 +529,14 @@ class ScheduleEvaluationV2 {
 
   bool get hasHistoricalReference =>
       legs.any(
-        (leg) => leg.durationSource == DurationSource.busHistoricalReference,
+        (leg) =>
+            leg.durationSource == DurationSource.busHistoricalReference ||
+            leg.durationSource == DurationSource.busGtfsFormula,
       ) ||
       quality.fallbackReasons.any(
-        (reason) => reason.split(':').contains('HISTORICAL_REFERENCE_APPLIED'),
+        (reason) =>
+            reason.split(':').contains('HISTORICAL_REFERENCE_APPLIED') ||
+            reason.split(':').contains('GTFS_FORMULA_APPLIED'),
       );
 
   /// A separately labelled estimate is not permission to accept a recommendation.

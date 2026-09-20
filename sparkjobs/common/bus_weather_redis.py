@@ -29,7 +29,7 @@ return actual
 def _key_part(name, value):
     value = str(value or "")
     if not value or not _SAFE_KEY_PART.fullmatch(value):
-        raise ValueError("{} contains unsafe Redis key characters: {!r}".format(name, value))
+        raise ValueError(f"{name} contains unsafe Redis key characters: {value!r}")
     return value
 
 
@@ -38,12 +38,10 @@ def mapping_keys(mapping_version, master_version, grid_config_sha, run_id=None):
     mapping_version = _key_part("mapping_version", mapping_version)
     master_version = _key_part("master_version", master_version)
     grid_config_sha = _key_part("grid_config_sha", grid_config_sha)
-    base = "ml:mapping:bus-weather:{}:{}:{}".format(
-        mapping_version, master_version, grid_config_sha
-    )
+    base = f"ml:mapping:bus-weather:{mapping_version}:{master_version}:{grid_config_sha}"
     keys = {
         "final": base,
-        "active": "ml:mapping:bus-weather:active:{}".format(master_version),
+        "active": f"ml:mapping:bus-weather:active:{master_version}",
         "metadata": base + ":meta",
     }
     if run_id is not None:
@@ -66,7 +64,7 @@ def redis_mapping_rows(segment_mapping):
     ]
     missing = [name for name in payload_columns if name not in segment_mapping.columns]
     if missing:
-        raise ValueError("segment mapping is missing Redis columns: {}".format(missing))
+        raise ValueError(f"segment mapping is missing Redis columns: {missing}")
     return segment_mapping.select(
         F.col("segmentId").alias("redisField"),
         F.to_json(
@@ -83,17 +81,19 @@ def activate_staged_mapping(client, keys, expected_rows, ttl_seconds, metadata):
     if ttl_seconds <= 0:
         raise ValueError("ttl_seconds must be positive")
     encoded_metadata = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
-    return int(client.eval(
-        _ACTIVATE_LUA,
-        4,
-        keys["staging"],
-        keys["final"],
-        keys["active"],
-        keys["metadata"],
-        expected_rows,
-        ttl_seconds,
-        encoded_metadata,
-    ))
+    return int(
+        client.eval(
+            _ACTIVATE_LUA,
+            4,
+            keys["staging"],
+            keys["final"],
+            keys["active"],
+            keys["metadata"],
+            expected_rows,
+            ttl_seconds,
+            encoded_metadata,
+        )
+    )
 
 
 def publish_segment_weather_mapping(
@@ -118,20 +118,14 @@ def publish_segment_weather_mapping(
     rows = redis_mapping_rows(segment_mapping).cache()
     expected_rows = rows.count()
     distinct_rows = rows.select("redisField").distinct().count()
-    invalid_rows = rows.filter(
-        F.col("redisField").isNull() | (F.length(F.trim("redisField")) == 0)
-    ).limit(1).count()
+    invalid_rows = rows.filter(F.col("redisField").isNull() | (F.length(F.trim("redisField")) == 0)).limit(1).count()
     if expected_rows == 0 or expected_rows != distinct_rows or invalid_rows:
         rows.unpersist()
         raise ValueError(
-            "Redis mapping requires unique non-empty segmentId rows: rows={}, distinct={}".format(
-                expected_rows, distinct_rows
-            )
+            f"Redis mapping requires unique non-empty segmentId rows: rows={expected_rows}, distinct={distinct_rows}"
         )
 
-    keys = mapping_keys(
-        mapping_version, master_version, grid_config_sha, uuid.uuid4().hex
-    )
+    keys = mapping_keys(mapping_version, master_version, grid_config_sha, uuid.uuid4().hex)
     connection = {
         "host": host,
         "port": int(port),
@@ -175,9 +169,7 @@ def publish_segment_weather_mapping(
             "rowCount": expected_rows,
             "publishedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
-        activated_rows = activate_staged_mapping(
-            driver, keys, expected_rows, ttl_seconds, metadata
-        )
+        activated_rows = activate_staged_mapping(driver, keys, expected_rows, ttl_seconds, metadata)
         return {
             "activeKey": keys["active"],
             "mappingKey": keys["final"],

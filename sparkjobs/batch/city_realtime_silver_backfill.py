@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import date, timedelta
 import sys
-
-from pyspark.sql import SparkSession
+from datetime import date, timedelta
 
 from common.archive_source import read_archive_events
+from pyspark.sql import SparkSession
 from streaming.city_realtime_silver import normalize_batch, write_silver
 
 LOG = logging.getLogger(__name__)
@@ -35,9 +34,11 @@ def main() -> int:
         raise ValueError("--start는 --end 이후일 수 없습니다")
     if "/live" in args.output_root.rstrip("/").lower():
         raise ValueError("백필 출력은 live 경로와 분리해야 합니다")
-    spark = SparkSession.builder.appName("ddubi-city-realtime-silver-backfill").config(
-        "spark.sql.session.timeZone", "Asia/Seoul"
-    ).getOrCreate()
+    spark = (
+        SparkSession.builder.appName("ddubi-city-realtime-silver-backfill")
+        .config("spark.sql.session.timeZone", "Asia/Seoul")
+        .getOrCreate()
+    )
     try:
         target = args.output_root.rstrip("/")
         namespace = f"backfill/version={args.version}"

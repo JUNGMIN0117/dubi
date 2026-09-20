@@ -3,7 +3,6 @@ import json
 import pytest
 from pyspark.sql import SparkSession
 from pyspark.sql.types import TimestampType
-
 from streaming.city_realtime_silver import normalize_batch, output_uri, redis_rows
 
 
@@ -23,21 +22,42 @@ def spark():
 
 def envelope(event_id="city-1", area="POI009", observed="2026-09-17 16:25"):
     return {
-        "eventId": event_id, "eventType": "city.realtime", "source": "seoul.citydata",
-        "occurredAt": "2026-09-17T16:30:00+09:00", "collectedAt": "2026-09-17T16:30:00+09:00",
-        "payload": {"providerAreaId": area, "contentHash": event_id, "raw": {
-            "AREA_CD": area, "AREA_NM": "광화문·덕수궁",
-            "LIVE_PPLTN_STTS": [{"PPLTN_TIME": observed, "AREA_CONGEST_LVL": "보통",
-                                  "AREA_PPLTN_MIN": "100", "AREA_PPLTN_MAX": "200",
-                                  "FCST_PPLTN": [{"FCST_TIME": "2026-09-17 17:00",
-                                                   "FCST_PPLTN_MIN": "150", "FCST_PPLTN_MAX": "250"}]}],
-            "ROAD_TRAFFIC_STTS": {"AVG_ROAD_DATA": {"ROAD_TRAFFIC_SPD": "20",
-                                                       "ROAD_TRAFFIC_TIME": observed},
-                                  "ROAD_TRAFFIC_STTS": [{"LINK_ID": "L1", "SPD": "18",
-                                                          "START_ND_XY": "126.97_37.57",
-                                                          "END_ND_XY": "126.98_37.58",
-                                                          "XYLIST": "126.97_37.57|126.98_37.58"}]},
-        }},
+        "eventId": event_id,
+        "eventType": "city.realtime",
+        "source": "seoul.citydata",
+        "occurredAt": "2026-09-17T16:30:00+09:00",
+        "collectedAt": "2026-09-17T16:30:00+09:00",
+        "payload": {
+            "providerAreaId": area,
+            "contentHash": event_id,
+            "raw": {
+                "AREA_CD": area,
+                "AREA_NM": "광화문·덕수궁",
+                "LIVE_PPLTN_STTS": [
+                    {
+                        "PPLTN_TIME": observed,
+                        "AREA_CONGEST_LVL": "보통",
+                        "AREA_PPLTN_MIN": "100",
+                        "AREA_PPLTN_MAX": "200",
+                        "FCST_PPLTN": [
+                            {"FCST_TIME": "2026-09-17 17:00", "FCST_PPLTN_MIN": "150", "FCST_PPLTN_MAX": "250"}
+                        ],
+                    }
+                ],
+                "ROAD_TRAFFIC_STTS": {
+                    "AVG_ROAD_DATA": {"ROAD_TRAFFIC_SPD": "20", "ROAD_TRAFFIC_TIME": observed},
+                    "ROAD_TRAFFIC_STTS": [
+                        {
+                            "LINK_ID": "L1",
+                            "SPD": "18",
+                            "START_ND_XY": "126.97_37.57",
+                            "END_ND_XY": "126.98_37.58",
+                            "XYLIST": "126.97_37.57|126.98_37.58",
+                        }
+                    ],
+                },
+            },
+        },
     }
 
 
@@ -46,7 +66,7 @@ def batch(spark, events):
     selects = []
     for item in events:
         raw = json.dumps(item, ensure_ascii=False).replace("'", "''")
-        selects.append("SELECT 'city.realtime' eventType, '{0}' rawEventJson".format(raw))
+        selects.append(f"SELECT 'city.realtime' eventType, '{raw}' rawEventJson")
     return spark.sql(" UNION ALL ".join(selects))
 
 
@@ -96,5 +116,7 @@ def test_empty_or_invalid_hdfs_config_disables_only_hdfs():
     assert output_uri({}) is None
     assert output_uri({"CITY_SILVER_OUTPUT_URI": ""}) is None
     assert output_uri({"CITY_SILVER_OUTPUT_URI": "not-a-uri"}) is None
-    assert output_uri({"CITY_SILVER_OUTPUT_URI": "hdfs://nn:9000/ddubi/silver/city/realtime-v1"}) \
+    assert (
+        output_uri({"CITY_SILVER_OUTPUT_URI": "hdfs://nn:9000/ddubi/silver/city/realtime-v1"})
         == "hdfs://nn:9000/ddubi/silver/city/realtime-v1"
+    )

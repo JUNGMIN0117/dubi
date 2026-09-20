@@ -387,7 +387,8 @@
                   "ML_PREVIEW",
                   "TIMETABLE",
                   "ML_PRODUCTION",
-                  "BUS_HISTORICAL_REFERENCE"
+                  "BUS_HISTORICAL_REFERENCE",
+                  "BUS_GTFS_FORMULA"
                 ]
               },
               "endpointEvidence": {

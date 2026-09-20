@@ -407,6 +407,13 @@ ML Serving은 활성 `segmentId→날씨 격자`, `segmentId→TOPIS 링크`, `s
 바꾸지 않고 `null`과 `missingFeatures`로 반환한다. 현재 시점 요청만 결과를 최대 900초 캐시하며,
 실제 `validUntil`이 더 빠르면 그 시각까지만 저장한다. 과거 시점 재현 요청은 캐시하지 않는다.
 
+현재 Snapshot을 경로 단위로 읽을 때는 `POST /v1/bus/features:batch`에 `requestId`,
+`masterVersion`, 현재 `asOf`, 고유 `segmentIds` 1~1,000개를 보낸다. 이 API는 표준 Key를 만들어
+Redis `MGET`을 정확히 한 번 실행하며 입력 순서를 보존한다. 각 결과는 `AVAILABLE`, `MISSING`,
+`STALE`, `INVALID` 중 하나다. `AVAILABLE`만 Snapshot을 반환하고 나머지는 `snapshot=null`이다.
+미래 통과시각별 결과는 CURRENT Key를 덮어쓰지 않는다. 세부 계약은
+[버스 구간 Snapshot](bus-segment-feature-snapshot.md)을 따른다.
+
 - 대응표 또는 일부 최신값 부재: HTTP 200, 해당 Feature는 `null`
 - Redis Feature 기능이 꺼짐: HTTP 503 `FEATURE_STORE_NOT_READY`
 - Redis 연결/조회 실패: HTTP 503 `FEATURE_STORE_UNAVAILABLE`

@@ -1,4 +1,5 @@
 """Keep required incident Redis query alive when optional HDFS Silver fails."""
+
 import logging
 
 log = logging.getLogger(__name__)
@@ -16,7 +17,9 @@ def supervise(start_redis, start_silver=None):
         while True:
             if redis_query.awaitTermination(30):
                 error = redis_query.exception()
-                raise RuntimeError("required traffic incident Redis stream stopped" + (": " + str(error) if error else ""))
+                raise RuntimeError(
+                    "required traffic incident Redis stream stopped" + (": " + str(error) if error else "")
+                )
             if silver_query is not None:
                 try:
                     if not silver_query.isActive:

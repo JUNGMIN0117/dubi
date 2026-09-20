@@ -12,8 +12,14 @@ from common.topis_redis import build_reconciliation_plans, reconcile_topis_lates
 
 
 def row(event_id, collected, status="VALID", event_status="ACTIVE", valid_until="2026-09-20T00:00:00+09:00"):
-    return {"noticeId": "6155", "eventId": event_id, "collectedAt": collected,
-            "processingStatus": status, "eventStatus": event_status, "validUntil": valid_until}
+    return {
+        "noticeId": "6155",
+        "eventId": event_id,
+        "collectedAt": collected,
+        "processingStatus": status,
+        "eventStatus": event_status,
+        "validUntil": valid_until,
+    }
 
 
 class FakeRedis:
@@ -43,21 +49,25 @@ class FakeRedis:
 
 class TopisRedisTests(unittest.TestCase):
     def test_latest_notice_version_controls_active_event_ids(self):
-        rows = [row("6155-1", "2026-09-17T09:00:00+09:00"),
-                row("6155-2", "2026-09-17T09:00:00+09:00"),
-                row("6155-1", "2026-09-17T10:00:00+09:00"),
-                row("6155-2", "2026-09-17T10:00:00+09:00", event_status="ENDED")]
+        rows = [
+            row("6155-1", "2026-09-17T09:00:00+09:00"),
+            row("6155-2", "2026-09-17T09:00:00+09:00"),
+            row("6155-1", "2026-09-17T10:00:00+09:00"),
+            row("6155-2", "2026-09-17T10:00:00+09:00", event_status="ENDED"),
+        ]
         plans = build_reconciliation_plans(rows, datetime(2026, 9, 17, tzinfo=timezone.utc))
         self.assertEqual(plans[0]["activeEventIds"], ["6155-1"])
 
     def test_invalid_ai_result_never_deletes_existing_keys(self):
         plans = build_reconciliation_plans(
-            [row("6155-error", "2026-09-17T10:00:00+09:00", status="INVALID_AI_RESPONSE")])
+            [row("6155-error", "2026-09-17T10:00:00+09:00", status="INVALID_AI_RESPONSE")]
+        )
         self.assertEqual(plans, [])
 
     def test_reconcile_deletes_removed_old_key_but_not_newer_or_other_notice(self):
         def value(notice, event, collected):
             return json.dumps({"noticeId": notice, "eventId": event, "collectedAt": collected})
+
         state = {
             "traffic:latest:topis-event:6155-1": value("6155", "6155-1", "2026-09-17T10:00:00+09:00"),
             "traffic:latest:topis-event:6155-2": value("6155", "6155-2", "2026-09-17T09:00:00+09:00"),

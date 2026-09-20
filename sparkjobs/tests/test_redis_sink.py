@@ -11,7 +11,6 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
 from common.redis_sink import (
     COLLECTED_TIME_COL,
     EVENT_TIME_COL,
@@ -39,7 +38,10 @@ class _FakePipeline:
         for key, value, ttl, occurred_at, collected_at in self.pending:
             current = json.loads(self.state[key][0]) if key in self.state else None
             should_write = current is None or (
-                (current.get("occurredAt", current.get("computedAt", "")), current.get("collectedAt", current.get("computedAt", "")))
+                (
+                    current.get("occurredAt", current.get("computedAt", "")),
+                    current.get("collectedAt", current.get("computedAt", "")),
+                )
                 <= (occurred_at, collected_at)
             )
             if should_write:

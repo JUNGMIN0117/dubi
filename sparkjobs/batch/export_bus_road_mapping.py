@@ -4,56 +4,61 @@ import argparse
 import logging
 import os
 
-from pyspark.sql import SparkSession
-
 from common.bus_crosswalk import load_crosswalk_edges
 from common.bus_road_mapping import (
-    MAPPING_VERSION,
     build_edge_road_mapping,
     build_segment_road_mapping,
     load_verified_road_paths,
 )
 from common.bus_road_redis import DEFAULT_TTL_SECONDS, publish_segment_road_mapping
 from common.bus_segment_mapping import build_bus_segment_edges
-
+from pyspark.sql import SparkSession
 
 LOG = logging.getLogger(__name__)
 
 
 def _write_hdfs(spark, root, edge_mapping, segment_mapping, metadata):
     spark.createDataFrame(
-        [(
-            metadata["mappingVersion"], metadata["masterVersion"],
-            metadata["busCrosswalkSha256"], metadata["roadCrosswalkVersion"],
-            metadata["roadCrosswalkSha256"], metadata["trafficLinkMasterVersion"],
-            metadata["trafficLinkMasterSha256"], metadata["asOf"],
-        )],
+        [
+            (
+                metadata["mappingVersion"],
+                metadata["masterVersion"],
+                metadata["busCrosswalkSha256"],
+                metadata["roadCrosswalkVersion"],
+                metadata["roadCrosswalkSha256"],
+                metadata["trafficLinkMasterVersion"],
+                metadata["trafficLinkMasterSha256"],
+                metadata["asOf"],
+            )
+        ],
         "mappingVersion string, masterVersion string, busCrosswalkSha256 string, "
         "roadCrosswalkVersion string, roadCrosswalkSha256 string, "
         "trafficLinkMasterVersion string, trafficLinkMasterSha256 string, asOf string",
     ).write.mode("errorifexists").json(root + "/_run")
-    edge_mapping.write.mode("errorifexists").partitionBy(
-        "providerNamespace"
-    ).parquet(root + "/edges")
+    edge_mapping.write.mode("errorifexists").partitionBy("providerNamespace").parquet(root + "/edges")
     segment_mapping.write.mode("errorifexists").parquet(root + "/mappings")
-    edge_mapping.groupBy("mappingStatus", "mappingReason").count().write.mode(
-        "errorifexists"
-    ).json(root + "/quality/edges")
-    segment_mapping.groupBy("mappingStatus", "mappingReason").count().write.mode(
-        "errorifexists"
-    ).json(root + "/quality/segments")
+    edge_mapping.groupBy("mappingStatus", "mappingReason").count().write.mode("errorifexists").json(
+        root + "/quality/edges"
+    )
+    segment_mapping.groupBy("mappingStatus", "mappingReason").count().write.mode("errorifexists").json(
+        root + "/quality/segments"
+    )
 
     edge_count = edge_mapping.count()
     segment_count = segment_mapping.count()
     resolved_count = segment_mapping.filter("mappingStatus = 'RESOLVED'").count()
     unresolved_count = segment_count - resolved_count
     spark.createDataFrame(
-        [(
-            metadata["masterVersion"], edge_count, segment_count,
-            resolved_count, unresolved_count,
-        )],
-        "masterVersion string, edgeRows long, segmentRows long, "
-        "resolvedRows long, unresolvedRows long",
+        [
+            (
+                metadata["masterVersion"],
+                edge_count,
+                segment_count,
+                resolved_count,
+                unresolved_count,
+            )
+        ],
+        "masterVersion string, edgeRows long, segmentRows long, resolvedRows long, unresolvedRows long",
     ).write.mode("errorifexists").json(root + "/complete")
 
 
@@ -69,7 +74,8 @@ def main(argv=None):
     parser.add_argument("--output", help="새 HDFS 또는 file 출력 경로. 비우면 Redis만 배포")
     parser.add_argument("--skip-redis", action="store_true")
     parser.add_argument(
-        "--redis-ttl-seconds", type=int,
+        "--redis-ttl-seconds",
+        type=int,
         default=int(os.environ.get("BUS_ROAD_MAPPING_TTL_SECONDS", DEFAULT_TTL_SECONDS)),
     )
     args = parser.parse_args(argv)

@@ -6,27 +6,31 @@ import io
 import json
 import math
 
-from pyspark.sql import functions as F, types as T
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
 
 from common.kma_grid import GRID_VERSION, latlon_to_kma_grid
-
 
 MAPPING_VERSION = "bus-weather-grid-v1"
 
 
-STOP_SCHEMA = T.StructType([
-    T.StructField("providerNamespace", T.StringType(), False),
-    T.StructField("providerRouteId", T.StringType(), False),
-    T.StructField("providerStopOrder", T.LongType(), False),
-    T.StructField("providerStopId", T.StringType(), False),
-    T.StructField("longitude", T.DoubleType(), True),
-    T.StructField("latitude", T.DoubleType(), True),
-    T.StructField("coordinateStatus", T.StringType(), True),
-])
-GRID_SCHEMA = T.StructType([
-    T.StructField("nx", T.IntegerType(), True),
-    T.StructField("ny", T.IntegerType(), True),
-])
+STOP_SCHEMA = T.StructType(
+    [
+        T.StructField("providerNamespace", T.StringType(), False),
+        T.StructField("providerRouteId", T.StringType(), False),
+        T.StructField("providerStopOrder", T.LongType(), False),
+        T.StructField("providerStopId", T.StringType(), False),
+        T.StructField("longitude", T.DoubleType(), True),
+        T.StructField("latitude", T.DoubleType(), True),
+        T.StructField("coordinateStatus", T.StringType(), True),
+    ]
+)
+GRID_SCHEMA = T.StructType(
+    [
+        T.StructField("nx", T.IntegerType(), True),
+        T.StructField("ny", T.IntegerType(), True),
+    ]
+)
 
 
 def load_bus_stops(spark, path, expected_sha, expected_version):
@@ -72,15 +76,17 @@ def load_bus_stops(spark, path, expected_sha, expected_version):
                     or not -90 <= latitude <= 90
                 ):
                     longitude = latitude = None
-            rows.append((
-                namespace,
-                route_id,
-                order,
-                str(stop_id),
-                float(longitude) if longitude is not None else None,
-                float(latitude) if latitude is not None else None,
-                stop.get("coordinateStatus"),
-            ))
+            rows.append(
+                (
+                    namespace,
+                    route_id,
+                    order,
+                    str(stop_id),
+                    float(longitude) if longitude is not None else None,
+                    float(latitude) if latitude is not None else None,
+                    stop.get("coordinateStatus"),
+                )
+            )
     return spark.createDataFrame(rows, STOP_SCHEMA)
 
 
@@ -97,7 +103,8 @@ def _to_grid(latitude, longitude):
 def build_edge_weather_mapping(edges, stops, collected_grids):
     """순번이 있는 버스 edge마다 출발·도착·중간 날씨 격자와 상태를 계산한다."""
     from_stops = stops.select(
-        "providerNamespace", "providerRouteId",
+        "providerNamespace",
+        "providerRouteId",
         F.col("providerStopOrder").alias("providerFromStopOrder"),
         F.col("providerStopId").alias("providerFromStopId"),
         F.col("longitude").alias("fromLongitude"),
@@ -105,7 +112,8 @@ def build_edge_weather_mapping(edges, stops, collected_grids):
         F.col("coordinateStatus").alias("fromCoordinateStatus"),
     )
     to_stops = stops.select(
-        "providerNamespace", "providerRouteId",
+        "providerNamespace",
+        "providerRouteId",
         F.col("providerStopOrder").alias("providerToStopOrder"),
         F.col("providerStopId").alias("providerToStopId"),
         F.col("longitude").alias("toLongitude"),
@@ -137,8 +145,7 @@ def build_edge_weather_mapping(edges, stops, collected_grids):
             "gridRelation",
             F.when(~coordinate_ready, F.lit("UNKNOWN"))
             .when(
-                (F.col("fromGrid.nx") == F.col("toGrid.nx"))
-                & (F.col("fromGrid.ny") == F.col("toGrid.ny")),
+                (F.col("fromGrid.nx") == F.col("toGrid.nx")) & (F.col("fromGrid.ny") == F.col("toGrid.ny")),
                 F.lit("SAME_GRID"),
             )
             .otherwise(F.lit("CROSSES_GRID")),
@@ -148,8 +155,7 @@ def build_edge_weather_mapping(edges, stops, collected_grids):
     )
     available = joined.join(
         collected_grids.withColumn("weatherGridCollected", F.lit(True)),
-        (F.col("representativeNx") == F.col("collectedNx"))
-        & (F.col("representativeNy") == F.col("collectedNy")),
+        (F.col("representativeNx") == F.col("collectedNx")) & (F.col("representativeNy") == F.col("collectedNy")),
         "left",
     )
     reason = (
@@ -166,14 +172,24 @@ def build_edge_weather_mapping(edges, stops, collected_grids):
     )
     return available.select(
         edges["*"],
-        "fromLongitude", "fromLatitude", "fromCoordinateStatus",
-        "toLongitude", "toLatitude", "toCoordinateStatus",
-        "representativeLongitude", "representativeLatitude",
-        F.col("fromGrid.nx").alias("fromNx"), F.col("fromGrid.ny").alias("fromNy"),
-        F.col("toGrid.nx").alias("toNx"), F.col("toGrid.ny").alias("toNy"),
-        "representativeNx", "representativeNy", "gridRelation",
+        "fromLongitude",
+        "fromLatitude",
+        "fromCoordinateStatus",
+        "toLongitude",
+        "toLatitude",
+        "toCoordinateStatus",
+        "representativeLongitude",
+        "representativeLatitude",
+        F.col("fromGrid.nx").alias("fromNx"),
+        F.col("fromGrid.ny").alias("fromNy"),
+        F.col("toGrid.nx").alias("toNx"),
+        F.col("toGrid.ny").alias("toNy"),
+        "representativeNx",
+        "representativeNy",
+        "gridRelation",
         F.coalesce("weatherGridCollected", F.lit(False)).alias("weatherGridCollected"),
-        status.alias("mappingStatus"), reason.alias("mappingReason"),
+        status.alias("mappingStatus"),
+        reason.alias("mappingReason"),
         F.lit(GRID_VERSION).alias("weatherGridVersion"),
     )
 
@@ -218,10 +234,21 @@ def build_segment_weather_mapping(edge_mapping):
         .otherwise("UNKNOWN")
     )
     return grouped.select(
-        "segmentId", "masterVersion", "idPolicy", "crosswalkSha256", "weatherGridVersion",
+        "segmentId",
+        "masterVersion",
+        "idPolicy",
+        "crosswalkSha256",
+        "weatherGridVersion",
         F.lit(MAPPING_VERSION).alias("mappingVersion"),
-        nx.alias("nx"), ny.alias("ny"), relation.alias("gridRelation"),
-        "representativeLatitude", "representativeLongitude",
-        "edgeOccurrenceCount", "candidateGridKeys", "gridRelations", "edgeMappingStatuses",
-        status.alias("mappingStatus"), reason.alias("mappingReason"),
+        nx.alias("nx"),
+        ny.alias("ny"),
+        relation.alias("gridRelation"),
+        "representativeLatitude",
+        "representativeLongitude",
+        "edgeOccurrenceCount",
+        "candidateGridKeys",
+        "gridRelations",
+        "edgeMappingStatuses",
+        status.alias("mappingStatus"),
+        reason.alias("mappingReason"),
     )

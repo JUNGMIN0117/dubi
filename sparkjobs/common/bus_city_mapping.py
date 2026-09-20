@@ -1,7 +1,7 @@
 """버스 인접 구간을 서울 실시간 도시데이터 영역에 보수적으로 연결한다."""
 
-from pyspark.sql import Window, functions as F
-
+from pyspark.sql import Window
+from pyspark.sql import functions as F
 
 MAPPING_VERSION = "bus-city-area-v1"
 
@@ -9,12 +9,19 @@ MAPPING_VERSION = "bus-city-area-v1"
 def latest_city_road_points(city_roads):
     """영역별 도로 링크의 최신 유효 대표 좌표만 정적 매핑 근거로 사용한다."""
     required = {
-        "providerAreaId", "areaName", "linkNamespace", "linkId", "observedAt", "collectedAt",
-        "processingStatus", "representativeLongitude", "representativeLatitude",
+        "providerAreaId",
+        "areaName",
+        "linkNamespace",
+        "linkId",
+        "observedAt",
+        "collectedAt",
+        "processingStatus",
+        "representativeLongitude",
+        "representativeLatitude",
     }
     missing = sorted(required - set(city_roads.columns))
     if missing:
-        raise ValueError("city road snapshot is missing columns: {}".format(missing))
+        raise ValueError(f"city road snapshot is missing columns: {missing}")
     usable = city_roads.filter(
         F.col("providerAreaId").isNotNull()
         & (F.trim("providerAreaId") != "")
@@ -31,7 +38,10 @@ def latest_city_road_points(city_roads):
         usable.withColumn("_rank", F.row_number().over(order))
         .filter("_rank = 1")
         .select(
-            "providerAreaId", "areaName", "linkNamespace", "linkId",
+            "providerAreaId",
+            "areaName",
+            "linkNamespace",
+            "linkId",
             F.col("representativeLongitude").cast("double").alias("areaRoadLongitude"),
             F.col("representativeLatitude").cast("double").alias("areaRoadLatitude"),
         )
@@ -52,33 +62,53 @@ def build_edge_city_mapping(edges, stops, city_roads, max_distance_meters=300.0,
     if max_distance_meters <= 0 or ambiguity_meters < 0:
         raise ValueError("city mapping distance policy is invalid")
     from_stops = stops.select(
-        "providerNamespace", "providerRouteId",
+        "providerNamespace",
+        "providerRouteId",
         F.col("providerStopOrder").alias("providerFromStopOrder"),
         F.col("providerStopId").alias("providerFromStopId"),
-        F.col("longitude").alias("fromLongitude"), F.col("latitude").alias("fromLatitude"),
+        F.col("longitude").alias("fromLongitude"),
+        F.col("latitude").alias("fromLatitude"),
     )
     to_stops = stops.select(
-        "providerNamespace", "providerRouteId",
+        "providerNamespace",
+        "providerRouteId",
         F.col("providerStopOrder").alias("providerToStopOrder"),
         F.col("providerStopId").alias("providerToStopId"),
-        F.col("longitude").alias("toLongitude"), F.col("latitude").alias("toLatitude"),
+        F.col("longitude").alias("toLongitude"),
+        F.col("latitude").alias("toLatitude"),
     )
     from_keys = ["providerNamespace", "providerRouteId", "providerFromStopOrder", "providerFromStopId"]
     to_keys = ["providerNamespace", "providerRouteId", "providerToStopOrder", "providerToStopId"]
     base = (
-        edges.join(from_stops, from_keys, "left").join(to_stops, to_keys, "left")
+        edges.join(from_stops, from_keys, "left")
+        .join(to_stops, to_keys, "left")
         .withColumn("representativeLongitude", (F.col("fromLongitude") + F.col("toLongitude")) / 2.0)
         .withColumn("representativeLatitude", (F.col("fromLatitude") + F.col("toLatitude")) / 2.0)
     )
     identity = [
-        "providerNamespace", "providerRouteId", "providerFromStopId", "providerToStopId",
-        "providerFromStopOrder", "providerToStopOrder", "direction", "segmentId", "masterVersion",
-        "idPolicy", "crosswalkSha256", "fromLongitude", "fromLatitude", "toLongitude", "toLatitude",
-        "representativeLongitude", "representativeLatitude",
+        "providerNamespace",
+        "providerRouteId",
+        "providerFromStopId",
+        "providerToStopId",
+        "providerFromStopOrder",
+        "providerToStopOrder",
+        "direction",
+        "segmentId",
+        "masterVersion",
+        "idPolicy",
+        "crosswalkSha256",
+        "fromLongitude",
+        "fromLatitude",
+        "toLongitude",
+        "toLatitude",
+        "representativeLongitude",
+        "representativeLatitude",
     ]
     ready = base.filter(
-        F.col("fromLongitude").isNotNull() & F.col("fromLatitude").isNotNull()
-        & F.col("toLongitude").isNotNull() & F.col("toLatitude").isNotNull()
+        F.col("fromLongitude").isNotNull()
+        & F.col("fromLatitude").isNotNull()
+        & F.col("toLongitude").isNotNull()
+        & F.col("toLatitude").isNotNull()
     )
     points = latest_city_road_points(city_roads)
     distances = ready.crossJoin(F.broadcast(points)).withColumn(
@@ -89,9 +119,11 @@ def build_edge_city_mapping(edges, stops, city_roads, max_distance_meters=300.0,
             _haversine("toLatitude", "toLongitude", "areaRoadLatitude", "areaRoadLongitude"),
         ),
     )
-    areas = distances.groupBy(*identity, "providerAreaId", "areaName").agg(
-        F.min("distanceMeters").alias("distanceMeters")
-    ).filter(F.col("distanceMeters") <= float(max_distance_meters))
+    areas = (
+        distances.groupBy(*identity, "providerAreaId", "areaName")
+        .agg(F.min("distanceMeters").alias("distanceMeters"))
+        .filter(F.col("distanceMeters") <= float(max_distance_meters))
+    )
     candidates = areas.groupBy(*identity).agg(
         F.sort_array(F.collect_list(F.struct("distanceMeters", "providerAreaId", "areaName"))).alias("areaCandidates")
     )
@@ -116,14 +148,20 @@ def build_edge_city_mapping(edges, stops, city_roads, max_distance_meters=300.0,
         .otherwise("NONE")
     )
     return joined.select(
-        edges["*"], "fromLongitude", "fromLatitude", "toLongitude", "toLatitude",
-        "representativeLongitude", "representativeLatitude",
+        edges["*"],
+        "fromLongitude",
+        "fromLatitude",
+        "toLongitude",
+        "toLatitude",
+        "representativeLongitude",
+        "representativeLatitude",
         F.when(status == "RESOLVED", first.providerAreaId).alias("primaryProviderAreaId"),
         F.when(status == "RESOLVED", first.areaName).alias("primaryAreaName"),
         F.when(candidate_count > 0, first.distanceMeters).alias("nearestAreaDistanceMeters"),
         F.transform("areaCandidates", lambda item: item.providerAreaId).alias("candidateProviderAreaIds"),
         F.transform("areaCandidates", lambda item: item.areaName).alias("candidateAreaNames"),
-        status.alias("mappingStatus"), reason.alias("mappingReason"),
+        status.alias("mappingStatus"),
+        reason.alias("mappingReason"),
         F.lit(float(max_distance_meters)).alias("maxDistanceMeters"),
         F.lit(float(ambiguity_meters)).alias("ambiguityMeters"),
         F.lit(MAPPING_VERSION).alias("mappingVersion"),
@@ -133,13 +171,20 @@ def build_edge_city_mapping(edges, stops, city_roads, max_distance_meters=300.0,
 def build_segment_city_mapping(edge_mapping):
     """같은 segmentId의 모든 occurrence가 같은 영역을 가리킬 때만 확정한다."""
     grouped = edge_mapping.groupBy(
-        "segmentId", "masterVersion", "idPolicy", "crosswalkSha256", "mappingVersion",
-        "maxDistanceMeters", "ambiguityMeters",
+        "segmentId",
+        "masterVersion",
+        "idPolicy",
+        "crosswalkSha256",
+        "mappingVersion",
+        "maxDistanceMeters",
+        "ambiguityMeters",
     ).agg(
         F.count(F.lit(1)).alias("edgeOccurrenceCount"),
         F.sort_array(F.collect_set("primaryProviderAreaId")).alias("resolvedProviderAreaIds"),
         F.sort_array(F.collect_set("mappingStatus")).alias("edgeMappingStatuses"),
-        F.sort_array(F.array_distinct(F.flatten(F.collect_list("candidateProviderAreaIds")))).alias("candidateProviderAreaIds"),
+        F.sort_array(F.array_distinct(F.flatten(F.collect_list("candidateProviderAreaIds")))).alias(
+            "candidateProviderAreaIds"
+        ),
         F.avg("nearestAreaDistanceMeters").alias("averageNearestAreaDistanceMeters"),
     )
     resolved_count = F.size("resolvedProviderAreaIds")
@@ -162,9 +207,19 @@ def build_segment_city_mapping(edge_mapping):
         .otherwise("NONE")
     )
     return grouped.select(
-        "segmentId", "masterVersion", "idPolicy", "crosswalkSha256", "mappingVersion",
+        "segmentId",
+        "masterVersion",
+        "idPolicy",
+        "crosswalkSha256",
+        "mappingVersion",
         F.when(status == "RESOLVED", F.element_at("resolvedProviderAreaIds", 1)).alias("primaryProviderAreaId"),
-        "resolvedProviderAreaIds", "candidateProviderAreaIds", "averageNearestAreaDistanceMeters",
-        "edgeOccurrenceCount", "edgeMappingStatuses", "maxDistanceMeters", "ambiguityMeters",
-        status.alias("mappingStatus"), reason.alias("mappingReason"),
+        "resolvedProviderAreaIds",
+        "candidateProviderAreaIds",
+        "averageNearestAreaDistanceMeters",
+        "edgeOccurrenceCount",
+        "edgeMappingStatuses",
+        "maxDistanceMeters",
+        "ambiguityMeters",
+        status.alias("mappingStatus"),
+        reason.alias("mappingReason"),
     )

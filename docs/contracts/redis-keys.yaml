@@ -6,7 +6,7 @@
 # owner: 그 키를 쓰는(=포맷을 정하는) 주체
 #   - spark    : 분산 담당 소유. 백엔드는 읽기만 한다.
 #   - backend  : 서비스 백엔드 소유.
-#   - ml-serving: 요청 시점 통합 Feature 조립·짧은 캐시 소유.
+#   - ml-serving: 검증된 현재 통합 Feature Snapshot 조립·짧은 캐시 소유.
 #
 # 메모리 정책 (infra/docker-compose.yml redis): maxmemory 384mb, maxmemory-policy volatile-ttl
 #   - 상한에 닿으면 TTL 이 있는 키 중 만료가 가까운 것부터 지운다 → 캐시성 키(짧은 TTL)가 먼저,
@@ -32,11 +32,12 @@ keys:
     owner: ml-serving
     schema: bus-segment-online-feature.schema.json
     description: >-
-      실시간 버스 인접 구간 이동시간 예측용 통합 Feature Snapshot. ML Serving이 요청 시 기존
-      bus·traffic·weather·city 최신값을 검증된 segmentId 대응표로 결합해 JSON으로 짧게 저장한다. hourSlot·요일·휴일은
-      이 Snapshot에 저장하지 않고 실제 모델 입력 단계에서 요청 시각으로 계산한다. TTL 900초는 보관 상한이며
-      validUntil이 지났으면 TTL이 남아 있어도 사용하지 않는다. 과거 요청 결과로 최신값을 덮어쓰지 않는다.
-    valueExample: '{"segmentId":"BUS:100100609:123456:123789","masterVersion":"metropolitan-bus-v6","featureVersion":"bus-segment-feature-v1","asOf":"2026-09-14T08:10:00+09:00","computedAt":"2026-09-14T08:10:03+09:00","validUntil":"2026-09-14T08:15:00+09:00","features":{"busCongestionCode":null,"busOperationStateCode":null,"recentSegmentMedianSeconds":155.0,"recentSegmentSampleCount":31,"roadSpeedKph":24.0,"roadTravelSeconds":150.0,"roadCoverageRatio":0.92,"accidentCount":0,"closureCount":0,"assemblyCount":null,"protestCount":null,"temperatureC":18.0,"humidityPercent":72.0,"precipitationMm":3.0,"snowDepthCm":0.0,"windSpeedMps":2.1,"cityCongestionLevel":"CROWDED","areaPopulationMin":12000,"areaPopulationMax":14000,"nearbyPopulation":null},"missingFeatures":["busCongestionCode","busOperationStateCode","assemblyCount","protestCount","nearbyPopulation"],"provenance":{}}'
+      실시간 버스 인접 구간 이동시간 예측용 CURRENT Feature Snapshot. 현재시각 조립 결과만 저장하고
+      ML은 경로 구간 Key들을 MGET 한 번으로 읽는다. hourSlot·요일·휴일은 Snapshot에 저장하지 않고
+      실제 모델 입력 단계에서 요청 시각으로 계산한다. TTL 900초는 보관 상한이며 validUntil이 지났으면
+      TTL이 남아 있어도 사용하지 않는다. 과거 Replay·미래 passageAt 결과로 현재값을 덮어쓰지 않는다.
+      세부 읽기 상태와 단위는 bus-segment-feature-snapshot.md를 따른다.
+    valueExample: '{"segmentId":"BUS:100100609:123456:123789","masterVersion":"metropolitan-bus-v6","featureVersion":"bus-segment-feature-v1","snapshotKind":"CURRENT","asOf":"2026-09-14T08:10:00+09:00","computedAt":"2026-09-14T08:10:03+09:00","validUntil":"2026-09-14T08:15:00+09:00","features":{"busCongestionCode":null,"busOperationStateCode":null,"recentSegmentMedianSeconds":155.0,"recentSegmentSampleCount":31,"roadSpeedKph":24.0,"roadTravelSeconds":150.0,"roadCoverageRatio":0.92,"accidentCount":null,"closureCount":null,"assemblyCount":null,"protestCount":null,"temperatureC":18.0,"humidityPercent":72.0,"precipitationMm":3.0,"snowDepthCm":null,"windSpeedMps":2.1,"cityCongestionLevel":"CROWDED","areaPopulationMin":12000,"areaPopulationMax":14000,"nearbyPopulation":null},"missingFeatures":["accidentCount","assemblyCount","busCongestionCode","busOperationStateCode","closureCount","nearbyPopulation","protestCount","snowDepthCm"],"provenance":{}}'
 
   busWeatherMapping:
     pattern: "ml:mapping:bus-weather:{mappingVersion}:{masterVersion}:{gridConfigSha256}"

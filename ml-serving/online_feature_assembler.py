@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 
 FEATURE_VERSION = "bus-segment-feature-v1"
+SNAPSHOT_KIND = "CURRENT"
 FEATURE_NAMES = (
     "busCongestionCode", "busOperationStateCode", "recentSegmentMedianSeconds",
     "recentSegmentSampleCount", "roadSpeedKph", "roadTravelSeconds", "roadCoverageRatio",
@@ -19,6 +20,77 @@ FEATURE_NAMES = (
 )
 SEGMENT_PATTERN = re.compile(r"^BUS:[A-Za-z0-9._-]{1,50}(?::[A-Za-z0-9._-]{1,50}){2}$")
 SAFE_VERSION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def snapshot_key(master_version, segment_id):
+    """현재 Feature Snapshot의 유일한 Redis Key 규칙을 적용한다."""
+    if not isinstance(master_version, str) or not SAFE_VERSION.fullmatch(master_version):
+        raise ValueError("safe master version required")
+    if not isinstance(segment_id, str) or not SEGMENT_PATTERN.fullmatch(segment_id):
+        raise ValueError("canonical bus segment required")
+    return "ml:feature:bus-segment:{}:{}:{}".format(FEATURE_VERSION, master_version, segment_id)
+
+
+class OnlineFeatureStore:
+    """미리 조립된 구간 Snapshot을 Redis MGET 한 번으로 읽고 검증한다."""
+
+    def __init__(self, client):
+        self.client = client
+
+    @staticmethod
+    def _read_status(value, master_version, segment_id, as_of):
+        if value is None:
+            return "MISSING", None
+        if (value.get("snapshotKind") != SNAPSHOT_KIND
+                or value.get("featureVersion") != FEATURE_VERSION
+                or value.get("masterVersion") != master_version
+                or value.get("segmentId") != segment_id):
+            return "INVALID", None
+        try:
+            snapshot_as_of = _instant(value["asOf"])
+            computed_at = _instant(value["computedAt"])
+            valid_until = _instant(value["validUntil"])
+        except (KeyError, TypeError, ValueError):
+            return "INVALID", None
+        features = value.get("features")
+        missing = value.get("missingFeatures")
+        if (not isinstance(features, dict) or set(features) != set(FEATURE_NAMES)
+                or not isinstance(missing, list)
+                or set(missing) != {name for name in FEATURE_NAMES if features.get(name) is None}
+                or computed_at < snapshot_as_of - timedelta(seconds=30)
+                or computed_at > as_of + timedelta(seconds=30)
+                or snapshot_as_of > as_of + timedelta(seconds=30)
+                or valid_until <= computed_at):
+            return "INVALID", None
+        if as_of >= valid_until:
+            return "STALE", None
+        return "AVAILABLE", value
+
+    def read_many(self, master_version, segment_ids, as_of):
+        """입력 순서를 보존하며 Redis 호출은 MGET 정확히 한 번만 수행한다."""
+        if not isinstance(master_version, str) or not SAFE_VERSION.fullmatch(master_version):
+            raise ValueError("safe master version required")
+        as_of = _instant(as_of)
+        segments = list(segment_ids)
+        if not segments or len(segments) > 1000 or len(set(segments)) != len(segments):
+            raise ValueError("1..1000 unique segments required")
+        keys = [snapshot_key(master_version, segment_id) for segment_id in segments]
+        raw_values = self.client.mget(keys)
+        decoded = [(raw is not None, _json(raw)) for raw in raw_values]
+        results = []
+        for segment_id, (exists, value) in zip(segments, decoded):
+            status, snapshot = (
+                ("INVALID", None)
+                if exists and value is None
+                else self._read_status(value, master_version, segment_id, as_of)
+            )
+            results.append({"segmentId": segment_id, "status": status, "snapshot": snapshot})
+        return {
+            "featureVersion": FEATURE_VERSION,
+            "masterVersion": master_version,
+            "asOf": as_of.isoformat(),
+            "results": results,
+        }
 
 
 @dataclass(frozen=True)
@@ -260,13 +332,16 @@ class OnlineFeatureAssembler:
             valid_until = computed + timedelta(seconds=60)
         result = {
             "segmentId": segment_id, "masterVersion": master_version, "featureVersion": FEATURE_VERSION,
+            "snapshotKind": SNAPSHOT_KIND,
             "asOf": as_of.isoformat(), "computedAt": computed.isoformat(), "validUntil": valid_until.isoformat(),
             "features": features, "missingFeatures": sorted(name for name, value in features.items() if value is None),
             "provenance": provenance,
         }
-        # 과거 시점 재현 요청으로 현재 캐시를 되돌리지 않는다. 실제 현재 요청만 짧게 캐시한다.
-        if abs((computed - as_of).total_seconds()) <= 30:
+        # 이 Key는 현재 상태 전용이다. 과거 재현이나 미래 통과시각용 결과가 현재 Snapshot을
+        # 덮어쓰면 MGET 소비자가 다른 시각의 값을 받으므로 두 시각이 모두 현재일 때만 저장한다.
+        if (abs((computed - as_of).total_seconds()) <= 30
+                and abs((passage_at - as_of).total_seconds()) <= 30):
             ttl = max(1, min(self.cache_ttl_seconds, int((valid_until - computed).total_seconds())))
-            key = "ml:feature:bus-segment:{}:{}:{}".format(FEATURE_VERSION, master_version, segment_id)
+            key = snapshot_key(master_version, segment_id)
             self.client.setex(key, ttl, json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return result

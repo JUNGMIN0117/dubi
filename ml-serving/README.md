@@ -132,6 +132,12 @@ Backend 매핑 대응표, 오류 JSON, 동시 호출/timeout과 기존 포트의
 대응표를 읽고 Redis 최신값을 조립한다. `ML_BUS_CROSSWALK_SHA256`과 대응표 메타데이터가
 다르면 예전 버스 마스터에 맞춘 값을 사용하지 않는다.
 
+현재시각 조립 결과는 표준 Key
+`ml:feature:bus-segment:{featureVersion}:{masterVersion}:{segmentId}`에 저장한다. 경로의 여러
+구간은 `POST /v1/bus/features:batch`로 요청하면 Redis `MGET` 한 번으로 읽는다. 과거 Replay나
+미래 `passageAt` 결과는 CURRENT Snapshot Key에 저장하지 않는다. 전체 계약과 상태 의미는
+[버스 구간 Snapshot 계약](../docs/contracts/bus-segment-feature-snapshot.md)을 따른다.
+
 ```http
 POST /v1/bus/features:latest
 Content-Type: application/json

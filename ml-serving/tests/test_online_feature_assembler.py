@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from online_feature_assembler import OnlineFeatureAssembler
+from online_feature_assembler import OnlineFeatureAssembler, OnlineFeatureStore, snapshot_key
 
 
 class FakeRedis:
     def __init__(self):
         self.strings = {}
         self.hashes = {}
+        self.mget_calls = []
 
     def get(self, key):
         return self.strings.get(key)
@@ -19,6 +20,7 @@ class FakeRedis:
         return self.hashes.get(key, {}).get(field)
 
     def mget(self, keys):
+        self.mget_calls.append(list(keys))
         return [self.strings.get(key) for key in keys]
 
     def setex(self, key, ttl, value):
@@ -94,7 +96,62 @@ def test_latest_values_are_joined_and_expired_values_are_missing():
     assert result["features"]["busCongestionCode"] == 3
     assert result["features"]["accidentCount"] is None
     assert "accidentCount" in result["missingFeatures"]
-    assert client.get(f"ml:feature:bus-segment:bus-segment-feature-v1:{MASTER}:{SEGMENT}")
+    # passageAt이 현재보다 10분 뒤인 요청 결과는 CURRENT Snapshot Key를 오염시키지 않는다.
+    assert client.get(snapshot_key(MASTER, SEGMENT)) is None
+
+
+def test_current_snapshot_is_written_and_route_is_read_with_one_mget():
+    client = configured()
+    assembler = OnlineFeatureAssembler(client, now=lambda: NOW)
+    current = assembler.assemble(request(passageAt="2026-09-18T10:00:00+09:00"))
+    assert current["snapshotKind"] == "CURRENT"
+    assert client.get(snapshot_key(MASTER, SEGMENT))
+
+    before = len(client.mget_calls)
+    result = OnlineFeatureStore(client).read_many(
+        MASTER,
+        [SEGMENT, "BUS:1:B:C"],
+        "2026-09-18T10:00:10+09:00",
+    )
+    assert len(client.mget_calls) == before + 1
+    assert client.mget_calls[-1] == [
+        snapshot_key(MASTER, SEGMENT),
+        snapshot_key(MASTER, "BUS:1:B:C"),
+    ]
+    assert result["results"][0]["status"] == "AVAILABLE"
+    assert result["results"][0]["snapshot"]["segmentId"] == SEGMENT
+    assert result["results"][1] == {
+        "segmentId": "BUS:1:B:C",
+        "status": "MISSING",
+        "snapshot": None,
+    }
+
+
+def test_snapshot_reader_rejects_stale_or_wrong_identity_without_returning_payload():
+    client = configured()
+    snapshot = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(
+        request(passageAt="2026-09-18T10:00:00+09:00")
+    )
+    key = snapshot_key(MASTER, SEGMENT)
+
+    stale = dict(snapshot, validUntil="2026-09-18T10:00:05+09:00")
+    client.strings[key] = json.dumps(stale)
+    result = OnlineFeatureStore(client).read_many(
+        MASTER, [SEGMENT], "2026-09-18T10:00:10+09:00"
+    )
+    assert result["results"][0] == {"segmentId": SEGMENT, "status": "STALE", "snapshot": None}
+
+    client.strings[key] = json.dumps(dict(snapshot, masterVersion="wrong-master"))
+    result = OnlineFeatureStore(client).read_many(
+        MASTER, [SEGMENT], "2026-09-18T10:00:10+09:00"
+    )
+    assert result["results"][0] == {"segmentId": SEGMENT, "status": "INVALID", "snapshot": None}
+
+    client.strings[key] = "not-json"
+    result = OnlineFeatureStore(client).read_many(
+        MASTER, [SEGMENT], "2026-09-18T10:00:10+09:00"
+    )
+    assert result["results"][0] == {"segmentId": SEGMENT, "status": "INVALID", "snapshot": None}
 
 
 def test_future_collection_and_unresolved_mapping_do_not_enter_features():
@@ -188,25 +245,63 @@ def test_updated_crosswalk_rejects_old_mapping_and_bus_observation():
 
 
 def test_ml_serving_endpoint_uses_injected_assembler():
+    import asyncio
+
+    import httpx
+
     from app import create_app
-    from fastapi.testclient import TestClient
 
     assembler = OnlineFeatureAssembler(configured(), now=lambda: NOW)
-    with TestClient(create_app(predictor=object(), online_feature_assembler=assembler)) as client:
-        response = client.post("/v1/bus/features:latest", json=request())
-        assert response.status_code == 200
-        assert response.json()["segmentId"] == SEGMENT
-        invalid = client.post("/v1/bus/features:latest", json=request(
-            asOf="2026-09-18T10:01:00+09:00"))
-        assert invalid.status_code == 422
+    application = create_app(predictor=object(), online_feature_assembler=assembler)
+
+    async def exercise():
+        transport = httpx.ASGITransport(app=application)
+        async with application.router.lifespan_context(application):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post("/v1/bus/features:latest", json=request())
+                assert response.status_code == 200
+                assert response.json()["segmentId"] == SEGMENT
+                invalid = await client.post("/v1/bus/features:latest", json=request(
+                    asOf="2026-09-18T10:01:00+09:00"))
+                assert invalid.status_code == 422
+
+                assembler.assemble(request(passageAt="2026-09-18T10:00:00+09:00"))
+                batch = await client.post("/v1/bus/features:batch", json={
+                    "requestId": "route-1",
+                    "masterVersion": MASTER,
+                    "asOf": "2026-09-18T10:00:10+09:00",
+                    "segmentIds": [SEGMENT, "BUS:1:B:C"],
+                })
+                assert batch.status_code == 200
+                assert [row["status"] for row in batch.json()["results"]] == ["AVAILABLE", "MISSING"]
+
+    asyncio.run(exercise())
 
 
 def test_ml_serving_feature_endpoint_is_unavailable_when_disabled(monkeypatch):
+    import asyncio
+
+    import httpx
+
     from app import create_app
-    from fastapi.testclient import TestClient
 
     monkeypatch.setenv("ML_REDIS_LATEST_FEATURES_ENABLED", "false")
-    with TestClient(create_app(predictor=object())) as client:
-        response = client.post("/v1/bus/features:latest", json=request())
-        assert response.status_code == 503
-        assert response.json()["detail"] == "FEATURE_STORE_NOT_READY"
+    application = create_app(predictor=object())
+
+    async def exercise():
+        transport = httpx.ASGITransport(app=application)
+        async with application.router.lifespan_context(application):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post("/v1/bus/features:latest", json=request())
+                assert response.status_code == 503
+                assert response.json()["detail"] == "FEATURE_STORE_NOT_READY"
+                batch = await client.post("/v1/bus/features:batch", json={
+                    "requestId": "route-1",
+                    "masterVersion": MASTER,
+                    "asOf": "2026-09-18T10:00:10+09:00",
+                    "segmentIds": [SEGMENT],
+                })
+                assert batch.status_code == 503
+                assert batch.json()["detail"] == "FEATURE_STORE_NOT_READY"
+
+    asyncio.run(exercise())

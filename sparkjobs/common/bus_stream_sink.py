@@ -1,9 +1,12 @@
 """Shared Bus Silver rows -> Parquet history and compatible Redis latest JSON."""
+
 from urllib.parse import urlparse
 
-from pyspark.sql import Window, functions as F
 from batch.bus_silver import prepare
-from common.bus_normalizer import ALL_FIELDS, POSITION, ARRIVAL
+from pyspark.sql import Window
+from pyspark.sql import functions as F
+
+from common.bus_normalizer import ALL_FIELDS, ARRIVAL, POSITION
 from common.redis_sink import write_latest_with_row_ttl
 
 
@@ -15,20 +18,35 @@ def output_uri(env):
 
 
 def prepare_live(events, compatible):
-    archive = events.select(F.col("rawEventJson").alias("value"),
+    archive = events.select(
+        F.col("rawEventJson").alias("value"),
         F.col("kafkaPartition").alias("kafka_partition"),
         F.col("kafkaOffset").alias("kafka_offset"),
-        F.col("kafkaTimestamp").alias("kafka_timestamp"))
+        F.col("kafkaTimestamp").alias("kafka_timestamp"),
+    )
     _, checked = prepare(archive)
     # Mapping validation remains the existing realtime job's responsibility.
     mapping = compatible.select("eventId", "segmentIds", "canonicalMapping").dropDuplicates(["eventId"])
     result = checked.join(mapping, "eventId", "left")
-    key = F.concat_ws(":", "providerRouteId", F.when(F.col("eventType") == "bus.position", F.col("providerVehicleId")).otherwise(F.col("providerStopId")))
+    key = F.concat_ws(
+        ":",
+        "providerRouteId",
+        F.when(F.col("eventType") == "bus.position", F.col("providerVehicleId")).otherwise(F.col("providerStopId")),
+    )
     key = F.when(F.col("providerNamespace") == "SEOUL_BUS", key).otherwise(F.concat_ws(":", "providerNamespace", key))
-    key = F.when((F.col("providerNamespace") == "INCHEON_API") & (F.col("eventType") == "bus.arrival"), F.concat_ws(":", key, "providerVehicleId")).otherwise(key)
-    return result.withColumn("providerKey", key).withColumn("providerIds", F.struct(
-        F.col("providerNamespace").alias("namespace"), F.col("providerRouteId").alias("routeId"),
-        F.col("providerVehicleId").alias("vehicleId"), F.col("providerStopId").alias("stopId")))
+    key = F.when(
+        (F.col("providerNamespace") == "INCHEON_API") & (F.col("eventType") == "bus.arrival"),
+        F.concat_ws(":", key, "providerVehicleId"),
+    ).otherwise(key)
+    return result.withColumn("providerKey", key).withColumn(
+        "providerIds",
+        F.struct(
+            F.col("providerNamespace").alias("namespace"),
+            F.col("providerRouteId").alias("routeId"),
+            F.col("providerVehicleId").alias("vehicleId"),
+            F.col("providerStopId").alias("stopId"),
+        ),
+    )
 
 
 def redis_rows(silver):
@@ -36,25 +54,46 @@ def redis_rows(silver):
     order_time = F.coalesce(F.to_timestamp("observedAt"), F.to_timestamp("collectedAt"))
     accepted = accepted.withColumn("orderTime", order_time)
     order = Window.partitionBy("eventType", "providerKey").orderBy(
-        F.col("orderTime").desc(), F.to_timestamp("collectedAt").desc(),
-        F.col("kafka_partition").desc(), F.col("kafka_offset").desc())
+        F.col("orderTime").desc(),
+        F.to_timestamp("collectedAt").desc(),
+        F.col("kafka_partition").desc(),
+        F.col("kafka_offset").desc(),
+    )
     latest = accepted.withColumn("rank", F.row_number().over(order)).filter("rank = 1")
     occurred = F.date_format(F.to_timestamp("observedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     ordering = F.date_format("orderTime", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     observation = F.struct(*[F.col(name).alias(name) for name in dict(POSITION, **ARRIVAL)])
-    prefix = F.when(F.col("eventType") == "bus.position", "transit:latest:bus-position").otherwise("transit:latest:bus-arrival")
-    valid_until = F.date_format((F.to_timestamp("observedAt").cast("long") + 120).cast("timestamp"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    prefix = F.when(F.col("eventType") == "bus.position", "transit:latest:bus-position").otherwise(
+        "transit:latest:bus-arrival"
+    )
+    valid_until = F.date_format(
+        (F.to_timestamp("observedAt").cast("long") + 120).cast("timestamp"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    )
     return latest.select(
         F.concat_ws(":", prefix, "providerKey").alias("redisKey"),
-        F.to_json(F.struct(*[F.col(name) for name in ALL_FIELDS],
-            "providerKey", "providerIds", "segmentIds", "canonicalMapping",
-            (F.size("segmentIds") > 0).alias("canonicalMappingAvailable"),
-            observation.alias("observation"), F.struct("latitude", "longitude").alias("location"),
-            occurred.alias("occurredAt"), ordering.alias("_latestOrderAt"),
-            valid_until.alias("validUntil"), F.lit(120).alias("freshnessSeconds"),
-            F.lit(86400).alias("retentionSeconds")), {"ignoreNullFields": "false"}).alias("redisValue"),
-        F.lit(86400).alias("ttlSeconds"), ordering.alias("occurredAtOrder"), collected.alias("collectedAtOrder"))
+        F.to_json(
+            F.struct(
+                *[F.col(name) for name in ALL_FIELDS],
+                "providerKey",
+                "providerIds",
+                "segmentIds",
+                "canonicalMapping",
+                (F.size("segmentIds") > 0).alias("canonicalMappingAvailable"),
+                observation.alias("observation"),
+                F.struct("latitude", "longitude").alias("location"),
+                occurred.alias("occurredAt"),
+                ordering.alias("_latestOrderAt"),
+                valid_until.alias("validUntil"),
+                F.lit(120).alias("freshnessSeconds"),
+                F.lit(86400).alias("retentionSeconds"),
+            ),
+            {"ignoreNullFields": "false"},
+        ).alias("redisValue"),
+        F.lit(86400).alias("ttlSeconds"),
+        ordering.alias("occurredAtOrder"),
+        collected.alias("collectedAtOrder"),
+    )
 
 
 def segment_redis_rows(silver):
@@ -65,35 +104,53 @@ def segment_redis_rows(silver):
         F.to_timestamp("observedAt"),
         F.when(F.col("timestampBasis") == "received", F.to_timestamp("collectedAt")),
     )
-    accepted = silver.filter(
-        "status = 'ACCEPTED' AND repeatIndex = 1 AND eventType = 'bus.position' "
-        "AND size(segmentIds) > 0 AND collectedAt IS NOT NULL"
-    ).withColumn("effectiveObservedAt", observed_time).filter(
-        F.col("effectiveObservedAt").isNotNull() & F.to_timestamp("collectedAt").isNotNull()
-    ).withColumn("segmentId", F.explode("segmentIds"))
+    accepted = (
+        silver.filter(
+            "status = 'ACCEPTED' AND repeatIndex = 1 AND eventType = 'bus.position' "
+            "AND size(segmentIds) > 0 AND collectedAt IS NOT NULL"
+        )
+        .withColumn("effectiveObservedAt", observed_time)
+        .filter(F.col("effectiveObservedAt").isNotNull() & F.to_timestamp("collectedAt").isNotNull())
+        .withColumn("segmentId", F.explode("segmentIds"))
+    )
     order_time = F.col("effectiveObservedAt")
     order = Window.partitionBy("segmentId").orderBy(
-        order_time.desc(), F.to_timestamp("collectedAt").desc(),
-        F.col("kafka_partition").desc(), F.col("kafka_offset").desc())
-    latest = accepted.withColumn("orderTime", order_time).withColumn(
-        "rank", F.row_number().over(order)).filter("rank = 1")
+        order_time.desc(),
+        F.to_timestamp("collectedAt").desc(),
+        F.col("kafka_partition").desc(),
+        F.col("kafka_offset").desc(),
+    )
+    latest = (
+        accepted.withColumn("orderTime", order_time).withColumn("rank", F.row_number().over(order)).filter("rank = 1")
+    )
     occurred = F.date_format("effectiveObservedAt", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     ordering = F.date_format("orderTime", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
     valid_until = F.date_format(
-        (F.col("effectiveObservedAt").cast("long") + 120).cast("timestamp"),
-        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+        (F.col("effectiveObservedAt").cast("long") + 120).cast("timestamp"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    )
     observation = F.struct(*[F.col(name).alias(name) for name in dict(POSITION, **ARRIVAL)])
     return latest.select(
         F.concat(F.lit("ml:latest:bus-segment:"), "segmentId").alias("redisKey"),
-        F.to_json(F.struct(
-            *[F.col(name) for name in ALL_FIELDS], "segmentId", "providerKey", "providerIds",
-            "canonicalMapping", observation.alias("observation"),
-            F.struct("latitude", "longitude").alias("location"),
-            occurred.alias("occurredAt"), ordering.alias("_latestOrderAt"), valid_until.alias("validUntil"),
-            F.lit(120).alias("freshnessSeconds"), F.lit(86400).alias("retentionSeconds"),
-        ), {"ignoreNullFields": "false"}).alias("redisValue"),
-        F.lit(86400).alias("ttlSeconds"), ordering.alias("occurredAtOrder"),
+        F.to_json(
+            F.struct(
+                *[F.col(name) for name in ALL_FIELDS],
+                "segmentId",
+                "providerKey",
+                "providerIds",
+                "canonicalMapping",
+                observation.alias("observation"),
+                F.struct("latitude", "longitude").alias("location"),
+                occurred.alias("occurredAt"),
+                ordering.alias("_latestOrderAt"),
+                valid_until.alias("validUntil"),
+                F.lit(120).alias("freshnessSeconds"),
+                F.lit(86400).alias("retentionSeconds"),
+            ),
+            {"ignoreNullFields": "false"},
+        ).alias("redisValue"),
+        F.lit(86400).alias("ttlSeconds"),
+        ordering.alias("occurredAtOrder"),
         collected.alias("collectedAtOrder"),
     )
 
@@ -133,5 +190,7 @@ def save_batch(silver, batch_id, root, settings):
     """
     path = write_bus_silver(silver, batch_id, root)
     count = write_bus_redis(silver, settings)
-    silver.sparkSession.createDataFrame([(batch_id, count)], "batchId long, redisKeys long").write.mode("overwrite").json(path + "/complete")
+    silver.sparkSession.createDataFrame([(batch_id, count)], "batchId long, redisKeys long").write.mode(
+        "overwrite"
+    ).json(path + "/complete")
     return count

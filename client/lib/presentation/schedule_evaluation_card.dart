@@ -77,7 +77,8 @@ String? evaluationShortfallReason(ScheduleEvaluationV2 evaluation) {
   }
   if (has('ML_NOT_APPLIED') ||
       has('API_FALLBACK') ||
-      has('HISTORICAL_REFERENCE')) {
+      has('HISTORICAL_REFERENCE') ||
+      has('GTFS_FORMULA_APPLIED')) {
     return '버스 구간의 실시간 정보가 아직 없어서예요.';
   }
   final missing = evaluation.quality.missingInputs;
@@ -653,6 +654,21 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
 }
 
 /// "09:38" 형식. 배지처럼 짧은 자리에 쓴다.
+/// 구간 소요시간의 출처 문구. 실측 과거 평균과 GTFS 시간표 계산값은 반드시 구분한다.
+/// GTFS 계산값은 실제 운행 기록이 아니므로 실측·실시간·실제 평균으로 표시하지 않는다.
+String durationSourceLabel(DurationSource source) => switch (source) {
+  DurationSource.kakaoWalkingApi => '도보 API',
+  DurationSource.publicTransitStep => '원본 경로 기준',
+  DurationSource.providerTotalFallback => '전체 경로시간 기준',
+  DurationSource.realtimeArrival => '실시간 도착예측',
+  DurationSource.timetable => '시간표 기준',
+  DurationSource.mlPreview => '검증용 모델',
+  DurationSource.mlProduction => 'ML 예측(운영 계약)',
+  DurationSource.busHistoricalReference => '실측 과거 버스 평균 기준 · 실시간 아님',
+  DurationSource.busGtfsFormula => 'GTFS 시간표 계산 기준 · 실시간 아님',
+  DurationSource.unknown => '출처 확인 중',
+};
+
 String clockLabel(DateTime value) {
   final local = value.toLocal();
   return '${local.hour.toString().padLeft(2, '0')}:'
@@ -1254,17 +1270,7 @@ class _SummaryState extends State<ScheduleEvaluationSummary> {
       RouteLegRole.wait => '대기',
       RouteLegRole.unknown => '이동 구간',
     };
-    final source = switch (leg.durationSource) {
-      DurationSource.kakaoWalkingApi => '도보 API',
-      DurationSource.publicTransitStep => '원본 경로 기준',
-      DurationSource.providerTotalFallback => '전체 경로시간 기준',
-      DurationSource.realtimeArrival => '실시간 도착예측',
-      DurationSource.timetable => '시간표 기준',
-      DurationSource.mlPreview => '검증용 모델',
-      DurationSource.mlProduction => 'ML 예측(운영 계약)',
-      DurationSource.busHistoricalReference => '과거 버스 평균 기준 · 실시간 아님',
-      DurationSource.unknown => '출처 확인 중',
-    };
+    final source = durationSourceLabel(leg.durationSource);
     final endpoints = [
       leg.fromName,
       leg.toName,

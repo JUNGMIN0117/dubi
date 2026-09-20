@@ -41,9 +41,7 @@ class TrafficIncidentPolicyTests(unittest.TestCase):
         )
         for name, value, message in cases:
             with self.subTest(name=name):
-                with self.assertRaisesRegex(
-                    TrafficIncidentPolicyError, f"{name} must be {message}"
-                ):
+                with self.assertRaisesRegex(TrafficIncidentPolicyError, f"{name} must be {message}"):
                     policy({name: value})
 
 

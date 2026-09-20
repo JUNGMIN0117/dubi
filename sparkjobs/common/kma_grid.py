@@ -2,7 +2,6 @@
 
 import math
 
-
 GRID_VERSION = "kma-vilage-dfs-5km-v1"
 
 # Collector의 기본 서울 25개 구 설정과 같은 값이다. 운영에서 WEATHER_GRID_POINTS를
@@ -66,9 +65,7 @@ def latlon_to_kma_grid(latitude, longitude):
     slat2 = standard_latitude_2 * degree_to_radian
     olon = origin_longitude * degree_to_radian
     olat = origin_latitude * degree_to_radian
-    sn = math.tan(math.pi * 0.25 + slat2 * 0.5) / math.tan(
-        math.pi * 0.25 + slat1 * 0.5
-    )
+    sn = math.tan(math.pi * 0.25 + slat2 * 0.5) / math.tan(math.pi * 0.25 + slat1 * 0.5)
     sn = math.log(math.cos(slat1) / math.cos(slat2)) / math.log(sn)
     sf = math.tan(math.pi * 0.25 + slat1 * 0.5)
     sf = math.pow(sf, sn) * math.cos(slat1) / sn

@@ -3,14 +3,15 @@
 서버 설정과 모델이 없는 신규 체크아웃에서도 프로세스는 기동해야 한다.
 모델 미설치 readiness 503은 기존 동작이며 v13을 자동 연결해 숨기지 않는다.
 """
-from pathlib import Path
+
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_default_app_starts_without_static_bundle_or_v2_routes():
     """별도 프로세스에서 앱만 import하여 다른 테스트의 v13 import 영향을 제거한다."""
-    script = '''
+    script = """
 import os, sys
 for name in list(os.environ):
     if name.startswith('ML_'):
@@ -34,8 +35,12 @@ with TestClient(app) as client:
         '/v1/bus/environment:prepare', '/v1/bus/environment:predict',
         '/v1/bus/features:latest'}
 assert not any(name.startswith('static_bus_') for name in sys.modules)
-'''
-    result = subprocess.run([sys.executable, '-c', script],
-                            cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True, timeout=30)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     assert result.returncode == 0, result.stderr

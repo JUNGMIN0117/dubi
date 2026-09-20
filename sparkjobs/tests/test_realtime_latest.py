@@ -11,8 +11,9 @@ import pytest
 from pyspark.sql import SparkSession
 
 from common.kafka_source import parse_envelope
-from common.redis_sink import COLLECTED_TIME_COL, EVENT_TIME_COL, KEY_COL, TTL_COL, VALUE_COL
+from common.redis_sink import COLLECTED_TIME_COL, EVENT_TIME_COL, KEY_COL, MAX_ITEMS_COL, TTL_COL, VALUE_COL
 from streaming.realtime_latest import latest_per_provider, to_redis_rows, transform
+from streaming.subway_snapshots import snapshot_rows
 
 
 @pytest.fixture(scope="session")
@@ -112,6 +113,62 @@ def test_subway_timing_preserves_source_time_and_train_type_without_filling_miss
     assert rows["arrival"]["observation"]["sourceGeneratedAt"] == "2026-09-04 12:00:00"
     assert rows["arrival"]["observation"]["arrivalSeconds"] == 80
     assert rows["position"]["observation"].get("sourceGeneratedAt") is None
+
+
+def test_subway_arrivals_are_grouped_into_one_station_snapshot(spark):
+    """같은 역의 열차 여러 대를 Backend가 한 GET으로 읽을 수 있어야 한다."""
+    events = [
+        _event("a2", "subway.arrival", "2026-09-04T12:00:00+09:00", {
+            "providerLineId": "1002", "providerStationId": "0201", "providerTrainId": "T2",
+            "raw": {"barvlDt": "180", "arvlMsg2": "3분 후", "recptnDt": "2026-09-04 12:00:00"},
+        }),
+        _event("a1", "subway.arrival", "2026-09-04T12:00:00+09:00", {
+            "providerLineId": "1002", "providerStationId": "0201", "providerTrainId": "T1",
+            "raw": {"barvlDt": "60", "arvlMsg2": "1분 후", "recptnDt": "2026-09-04 12:00:00"},
+        }),
+        _event("other", "subway.arrival", "2026-09-04T12:00:00+09:00", {
+            "providerLineId": "1002", "providerStationId": "0202", "providerTrainId": "T3",
+            "raw": {"barvlDt": "30"},
+        }),
+    ]
+    rows = snapshot_rows(latest_per_provider(transform(_kafka_df(spark, events)))).collect()
+    by_key = {row[KEY_COL]: row for row in rows}
+
+    row = by_key["transit:snapshot:subway-arrivals:1002:0201"]
+    value = json.loads(row[VALUE_COL])
+    assert value["schemaVersion"] == "subway-snapshot-v1"
+    assert value["scope"] == {"lineId": "1002", "stationId": "0201"}
+    assert value["itemCount"] == 2
+    assert [item["trainId"] for item in value["items"]] == ["T1", "T2"]
+    assert value["items"][0]["arrivalSeconds"] == 60
+    assert value["items"][0]["validUntil"].startswith("2026-09-04T12:02:00")
+    assert row[TTL_COL] == 1080
+    assert row[MAX_ITEMS_COL] == 128
+
+
+def test_subway_positions_are_grouped_into_one_line_snapshot(spark):
+    """같은 호선의 열차 위치 여러 개를 노선 키 하나로 묶는다."""
+    events = [
+        _event("p1", "subway.position", "2026-09-04T12:00:00+09:00", {
+            "providerLineId": "1002", "providerStationId": "0201", "providerTrainId": "T1",
+            "raw": {"statnNm": "시청", "updnLine": "내선", "trainSttus": "0"},
+        }),
+        _event("p2", "subway.position", "2026-09-04T12:00:01+09:00", {
+            "providerLineId": "1002", "providerStationId": "0202", "providerTrainId": "T2",
+            "raw": {"statnNm": "을지로입구", "updnLine": "외선", "trainSttus": "1"},
+        }),
+    ]
+    rows = snapshot_rows(latest_per_provider(transform(_kafka_df(spark, events)))).collect()
+    assert len(rows) == 1
+    row = rows[0]
+    value = json.loads(row[VALUE_COL])
+    assert row[KEY_COL] == "transit:snapshot:subway-positions:1002"
+    assert value["snapshotType"] == "SUBWAY_POSITIONS_BY_LINE"
+    assert value["scope"] == {"lineId": "1002"}
+    assert {item["trainId"] for item in value["items"]} == {"T1", "T2"}
+    assert {item["stationId"] for item in value["items"]} == {"0201", "0202"}
+    assert row[TTL_COL] == 10800
+    assert row[MAX_ITEMS_COL] == 512
 
 
 def test_bus_waiting_preserves_units_identity_status_and_missing_prediction(spark):

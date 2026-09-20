@@ -4,7 +4,9 @@ import json
 
 from common.bus_city_mapping import build_edge_city_mapping, build_segment_city_mapping
 from common.bus_city_redis import redis_mapping_rows
-from test_realtime_latest import spark
+from test_realtime_latest import (
+    spark as spark,  # pytest가 이름으로 찾는 공유 fixture를 명시적으로 재노출한다.
+)
 
 
 def _edges(spark):

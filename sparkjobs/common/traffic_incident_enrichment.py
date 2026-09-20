@@ -1,4 +1,5 @@
 """Traffic incident Silver normalization with verified-link-only spatial matching."""
+
 from __future__ import annotations
 
 import gzip
@@ -79,14 +80,17 @@ def description_fields(text):
     direction = re.search(r"([가-힣A-Za-z0-9·]+\s*(?:방향|방면|쪽))", value)
     lanes = re.search(r"((?:전|전체|편도|\d+\s*개?)\s*차로(?:\s*(?:통제|차단))?)", value)
     region = re.search(r"([가-힣]+구)\s*(?:일대|전역|부근)", value)
-    return {"descriptionRoadName": road.group(1) if road else None,
-            "descriptionDirection": direction.group(1) if direction else None,
-            "descriptionLaneControl": lanes.group(1) if lanes else None,
-            "descriptionRegion": region.group(1) if region else None}
+    return {
+        "descriptionRoadName": road.group(1) if road else None,
+        "descriptionDirection": direction.group(1) if direction else None,
+        "descriptionLaneControl": lanes.group(1) if lanes else None,
+        "descriptionRegion": region.group(1) if region else None,
+    }
 
 
 class VerifiedLinkMaster:
     """A promoted official link artifact. Candidate/audit files are deliberately rejected."""
+
     def __init__(self, metadata=None, links=None):
         self.metadata = metadata or {}
         self.links = links or {}
@@ -115,11 +119,21 @@ class VerifiedLinkMaster:
         if _sha(raw) != expected_sha:
             raise ValueError("traffic link master SHA mismatch")
         data = json.loads(gzip.decompress(raw) if str(path).endswith(".gz") else raw)
-        required = {"schemaVersion": 1, "namespace": LINK_NAMESPACE, "idSystem": LINK_ID_SYSTEM,
-                    "sourceCrs": TARGET_CRS, "accInfoLinkIdVerified": True, "reviewStatus": "APPROVED"}
+        required = {
+            "schemaVersion": 1,
+            "namespace": LINK_NAMESPACE,
+            "idSystem": LINK_ID_SYSTEM,
+            "sourceCrs": TARGET_CRS,
+            "accInfoLinkIdVerified": True,
+            "reviewStatus": "APPROVED",
+        }
         if any(data.get(key) != value for key, value in required.items()):
             raise ValueError("traffic link master is not an approved AccInfo ID artifact")
-        if data.get("sourceDataset") != "OA-13310" or not _clean(data.get("version")) or not _clean(data.get("evidenceRef")):
+        if (
+            data.get("sourceDataset") != "OA-13310"
+            or not _clean(data.get("version"))
+            or not _clean(data.get("evidenceRef"))
+        ):
             raise ValueError("traffic link master source/version/evidence is missing")
         try:
             valid_from = datetime.fromisoformat(str(data["validFrom"]).replace("Z", "+00:00"))
@@ -127,23 +141,40 @@ class VerifiedLinkMaster:
             if valid_from.tzinfo is None or valid_until.tzinfo is None or valid_from >= valid_until:
                 raise ValueError
         except (KeyError, TypeError, ValueError):
-            raise ValueError("traffic link master validity interval is invalid")
+            raise ValueError("traffic link master validity interval is invalid") from None
         links = {}
         for row in data.get("links", []):
             link_id = _clean(row.get("linkId"))
             geometry = row.get("geometry")
-            valid_geometry = isinstance(geometry, list) and geometry and all(
-                isinstance(point, list) and len(point) == 2 and _float(point[0]) is not None and _float(point[1]) is not None
-                and 126.0 <= float(point[0]) <= 128.0 and 37.0 <= float(point[1]) <= 38.0 for point in geometry)
+            valid_geometry = (
+                isinstance(geometry, list)
+                and geometry
+                and all(
+                    isinstance(point, list)
+                    and len(point) == 2
+                    and _float(point[0]) is not None
+                    and _float(point[1]) is not None
+                    and 126.0 <= float(point[0]) <= 128.0
+                    and 37.0 <= float(point[1]) <= 38.0
+                    for point in geometry
+                )
+            )
             if not link_id or not valid_geometry or link_id in links:
                 raise ValueError("traffic link master contains invalid or duplicate links")
-            links[link_id] = {"linkId": link_id, "roadName": _clean(row.get("roadName")),
-                              "districtName": _clean(row.get("districtName")),
-                              "startNodeId": _clean(row.get("startNodeId")), "endNodeId": _clean(row.get("endNodeId")),
-                              "geometry": [[float(point[0]), float(point[1])] for point in geometry]}
+            links[link_id] = {
+                "linkId": link_id,
+                "roadName": _clean(row.get("roadName")),
+                "districtName": _clean(row.get("districtName")),
+                "startNodeId": _clean(row.get("startNodeId")),
+                "endNodeId": _clean(row.get("endNodeId")),
+                "geometry": [[float(point[0]), float(point[1])] for point in geometry],
+            }
         if not links:
             raise ValueError("traffic link master has no links")
-        return cls({key: data.get(key) for key in ("version", "evidenceRef", "sourceDataset", "validFrom", "validUntil")}, links)
+        return cls(
+            {key: data.get(key) for key in ("version", "evidenceRef", "sourceDataset", "validFrom", "validUntil")},
+            links,
+        )
 
     def exact(self, link_id):
         return self.links.get(link_id)
@@ -182,6 +213,7 @@ class VerifiedLinkMaster:
 @lru_cache(maxsize=1)
 def _transformer():
     from pyproj import Transformer
+
     return Transformer.from_crs(SOURCE_CRS, TARGET_CRS, always_xy=True)
 
 
@@ -211,13 +243,19 @@ def normalize_incident(envelope, master, stale_seconds=2700, direct_tolerance_me
     latitude, longitude, coordinate_status = transform_grs80(raw.get("grs80tmX"), raw.get("grs80tmY"))
     auxiliary = description_fields(raw.get("description"))
     reasons, flags = [], []
-    if not incident_id: reasons.append("MISSING_INCIDENT_ID")
-    if not collected_at: reasons.append("MISSING_COLLECTED_AT")
-    if start_status != "VALID": reasons.append("MISSING_OR_INVALID_STARTED_AT")
-    if expected_status == "INVALID": flags.append("INVALID_EXPECTED_CLEAR_AT")
+    if not incident_id:
+        reasons.append("MISSING_INCIDENT_ID")
+    if not collected_at:
+        reasons.append("MISSING_COLLECTED_AT")
+    if start_status != "VALID":
+        reasons.append("MISSING_OR_INVALID_STARTED_AT")
+    if expected_status == "INVALID":
+        flags.append("INVALID_EXPECTED_CLEAR_AT")
     if expected_at and starts_at and expected_at <= starts_at:
-        expected_at = None; flags.append("EXPECTED_CLEAR_NOT_AFTER_START")
-    if coordinate_status != "TRANSFORMED": flags.append("COORDINATE_" + coordinate_status)
+        expected_at = None
+        flags.append("EXPECTED_CLEAR_NOT_AFTER_START")
+    if coordinate_status != "TRANSFORMED":
+        flags.append("COORDINATE_" + coordinate_status)
 
     location_type, master_status, matched, distance, nearby_count = "UNMATCHED", "UNAVAILABLE", None, None, 0
     master_applicable = master.available and master.applicable(collected_at)
@@ -256,29 +294,74 @@ def normalize_incident(envelope, master, stale_seconds=2700, direct_tolerance_me
         flags.append("LINK_NAMESPACE_UNVERIFIED")
     if not matched and input_link_id and master_status in ("NOT_FOUND", "UNAVAILABLE"):
         flags.append("LINK_MASTER_" + master_status)
-    if location_type == "UNMATCHED": flags.append("LOCATION_UNMATCHED")
+    if location_type == "UNMATCHED":
+        flags.append("LOCATION_UNMATCHED")
 
     valid_until = None
     if collected_at:
-        try: valid_until = (datetime.fromisoformat(collected_at.replace("Z", "+00:00")) + timedelta(seconds=stale_seconds)).isoformat()
-        except ValueError: reasons.append("INVALID_COLLECTED_AT")
-    status = "REJECTED" if reasons else ("PARTIAL" if flags or location_type in ("UNMATCHED", "REGIONAL_CONTEXT") else "VALID")
-    row = {"silverVersion": VERSION, "eventId": _clean(envelope.get("eventId")), "source": _clean(envelope.get("source")),
-           "providerIncidentId": incident_id, "contentHash": _clean(payload.get("contentHash")) or _sha(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()),
-           "collectedAt": collected_at, "startedAt": starts_at, "expectedClearAt": expected_at,
-           "validUntil": valid_until, "lifecycleStatus": "ACTIVE_OBSERVED" if status != "REJECTED" else "UNKNOWN",
-           "incidentTypeCode": _clean(raw.get("incidentTypeCode")), "incidentDetailTypeCode": _clean(raw.get("incidentDetailTypeCode")),
-           "description": _clean(raw.get("description")), "inputLinkNamespace": _clean(payload.get("providerLinkNamespace")),
-           "inputLinkId": input_link_id, "matchedLinkId": matched["linkId"] if matched else None,
-           "matchedRoadName": matched["roadName"] if matched else None, "matchedDistrictName": matched["districtName"] if matched else None,
-           "matchedStartNodeId": matched["startNodeId"] if matched else None, "matchedEndNodeId": matched["endNodeId"] if matched else None,
-           "locationMatchType": location_type, "linkMasterStatus": master_status,
-           "linkMasterVersion": master.metadata.get("version"), "linkMasterEvidenceRef": master.metadata.get("evidenceRef"),
-           "grs80tmX": _float(raw.get("grs80tmX")), "grs80tmY": _float(raw.get("grs80tmY")),
-           "sourceCrs": SOURCE_CRS, "latitude": latitude, "longitude": longitude,
-           "coordinateStatus": coordinate_status, "linkCoordinateDistanceMeters": round(distance, 3) if distance is not None else None,
-           "nearbyCandidateCount": nearby_count, **auxiliary, "processingStatus": status,
-           "missingFields": [], "qualityFlags": sorted(set(flags)), "rejectionReasons": sorted(set(reasons)),
-           "rawPayloadJson": json.dumps(payload, ensure_ascii=False, sort_keys=True)}
-    row["missingFields"] = [name for name in ("providerIncidentId", "startedAt", "expectedClearAt", "inputLinkId", "latitude", "longitude", "matchedLinkId") if row.get(name) is None]
+        try:
+            valid_until = (
+                datetime.fromisoformat(collected_at.replace("Z", "+00:00")) + timedelta(seconds=stale_seconds)
+            ).isoformat()
+        except ValueError:
+            reasons.append("INVALID_COLLECTED_AT")
+    status = (
+        "REJECTED"
+        if reasons
+        else ("PARTIAL" if flags or location_type in ("UNMATCHED", "REGIONAL_CONTEXT") else "VALID")
+    )
+    row = {
+        "silverVersion": VERSION,
+        "eventId": _clean(envelope.get("eventId")),
+        "source": _clean(envelope.get("source")),
+        "providerIncidentId": incident_id,
+        "contentHash": _clean(payload.get("contentHash"))
+        or _sha(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()),
+        "collectedAt": collected_at,
+        "startedAt": starts_at,
+        "expectedClearAt": expected_at,
+        "validUntil": valid_until,
+        "lifecycleStatus": "ACTIVE_OBSERVED" if status != "REJECTED" else "UNKNOWN",
+        "incidentTypeCode": _clean(raw.get("incidentTypeCode")),
+        "incidentDetailTypeCode": _clean(raw.get("incidentDetailTypeCode")),
+        "description": _clean(raw.get("description")),
+        "inputLinkNamespace": _clean(payload.get("providerLinkNamespace")),
+        "inputLinkId": input_link_id,
+        "matchedLinkId": matched["linkId"] if matched else None,
+        "matchedRoadName": matched["roadName"] if matched else None,
+        "matchedDistrictName": matched["districtName"] if matched else None,
+        "matchedStartNodeId": matched["startNodeId"] if matched else None,
+        "matchedEndNodeId": matched["endNodeId"] if matched else None,
+        "locationMatchType": location_type,
+        "linkMasterStatus": master_status,
+        "linkMasterVersion": master.metadata.get("version"),
+        "linkMasterEvidenceRef": master.metadata.get("evidenceRef"),
+        "grs80tmX": _float(raw.get("grs80tmX")),
+        "grs80tmY": _float(raw.get("grs80tmY")),
+        "sourceCrs": SOURCE_CRS,
+        "latitude": latitude,
+        "longitude": longitude,
+        "coordinateStatus": coordinate_status,
+        "linkCoordinateDistanceMeters": round(distance, 3) if distance is not None else None,
+        "nearbyCandidateCount": nearby_count,
+        **auxiliary,
+        "processingStatus": status,
+        "missingFields": [],
+        "qualityFlags": sorted(set(flags)),
+        "rejectionReasons": sorted(set(reasons)),
+        "rawPayloadJson": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+    }
+    row["missingFields"] = [
+        name
+        for name in (
+            "providerIncidentId",
+            "startedAt",
+            "expectedClearAt",
+            "inputLinkId",
+            "latitude",
+            "longitude",
+            "matchedLinkId",
+        )
+        if row.get(name) is None
+    ]
     return row

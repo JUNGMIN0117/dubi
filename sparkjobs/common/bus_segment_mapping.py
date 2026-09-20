@@ -48,33 +48,27 @@ def build_bus_segment_mapping(edges):
     candidates = F.coalesce(F.col("candidateSegmentIds"), F.array().cast("array<string>"))
     candidate_count = F.size(candidates)
 
-    return (
-        grouped.select(
-            "providerNamespace",
-            "providerRouteId",
-            "providerFromStopId",
-            "providerToStopId",
-            F.when(candidate_count == 1, F.element_at(candidates, 1))
-            .cast("string")
-            .alias("segmentId"),
-            candidates.alias("candidateSegmentIds"),
-            F.when(candidate_count == 1, F.lit("RESOLVED"))
-            .when(candidate_count > 1, F.lit("AMBIGUOUS"))
-            .otherwise(F.lit("UNRESOLVED"))
-            .alias("mappingStatus"),
-            "masterVersion",
-            "idPolicy",
-            "crosswalkSha256",
-        )
+    return grouped.select(
+        "providerNamespace",
+        "providerRouteId",
+        "providerFromStopId",
+        "providerToStopId",
+        F.when(candidate_count == 1, F.element_at(candidates, 1)).cast("string").alias("segmentId"),
+        candidates.alias("candidateSegmentIds"),
+        F.when(candidate_count == 1, F.lit("RESOLVED"))
+        .when(candidate_count > 1, F.lit("AMBIGUOUS"))
+        .otherwise(F.lit("UNRESOLVED"))
+        .alias("mappingStatus"),
+        "masterVersion",
+        "idPolicy",
+        "crosswalkSha256",
     )
 
 
 def build_bus_segment_registry(mapping):
     """Feature 조립기가 사용할 고유 segmentId와 버전 목록을 만든다."""
     return (
-        mapping.filter(
-            (F.col("mappingStatus") == "RESOLVED") & F.col("segmentId").isNotNull()
-        )
+        mapping.filter((F.col("mappingStatus") == "RESOLVED") & F.col("segmentId").isNotNull())
         .select("segmentId", "masterVersion", "idPolicy", "crosswalkSha256")
         .distinct()
     )

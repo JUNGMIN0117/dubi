@@ -9,23 +9,26 @@ import sys
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from pyspark.sql import DataFrame, SparkSession, functions as F, types as T
-
 from common.city_realtime_normalizer import deduplicate, normalize_event
 from common.city_realtime_runtime import supervise
 from common.kafka_source import read_events_stream
 from common.redis_sink import write_latest_with_row_ttl
 from common.settings import Settings
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
 
 JOB = "city_realtime_silver"
 TOPIC = "city.raw"
 RETENTION_SECONDS = 64800
 log = logging.getLogger(JOB)
 
-GEOMETRY = T.StructType([
-    T.StructField("type", T.StringType()),
-    T.StructField("coordinates", T.ArrayType(T.ArrayType(T.DoubleType()))),
-])
+GEOMETRY = T.StructType(
+    [
+        T.StructField("type", T.StringType()),
+        T.StructField("coordinates", T.ArrayType(T.ArrayType(T.DoubleType()))),
+    ]
+)
 
 
 def _schema(strings=(), longs=(), doubles=(), integers=(), booleans=(), arrays=(), geometry=False):
@@ -41,41 +44,104 @@ def _schema(strings=(), longs=(), doubles=(), integers=(), booleans=(), arrays=(
 
 
 COMMON_STRINGS = (
-    "silverVersion", "eventId", "contentHash", "providerAreaId", "areaName",
-    "observedAt", "timestampBasis", "validUntil", "collectedAt", "processingStatus", "rawPayloadJson",
+    "silverVersion",
+    "eventId",
+    "contentHash",
+    "providerAreaId",
+    "areaName",
+    "observedAt",
+    "timestampBasis",
+    "validUntil",
+    "collectedAt",
+    "processingStatus",
+    "rawPayloadJson",
 )
 AREA_SCHEMA = _schema(
-    strings=COMMON_STRINGS + ("populationObservedAt", "roadTrafficObservedAt", "congestionLevelRaw",
-                              "congestionLevel", "congestionMessage"),
+    strings=COMMON_STRINGS
+    + ("populationObservedAt", "roadTrafficObservedAt", "congestionLevelRaw", "congestionLevel", "congestionMessage"),
     longs=("dataAgeSeconds", "populationMin", "populationMax", "populationMid"),
-    doubles=("avgRoadSpeedKph",), integers=("congestionScore",), booleans=("isStale",),
+    doubles=("avgRoadSpeedKph",),
+    integers=("congestionScore",),
+    booleans=("isStale",),
     arrays=("missingFields", "qualityFlags"),
 )
 ROAD_SCHEMA = _schema(
-    strings=COMMON_STRINGS + (
-        "linkNamespace", "linkId", "roadName", "startNodeId", "startNodeName", "endNodeId", "endNodeName",
-        "trafficStatusRaw", "trafficStatus", "coordinateCrs", "coordinateOrder", "coordinateStatus", "geometryStatus",
+    strings=COMMON_STRINGS
+    + (
+        "linkNamespace",
+        "linkId",
+        "roadName",
+        "startNodeId",
+        "startNodeName",
+        "endNodeId",
+        "endNodeName",
+        "trafficStatusRaw",
+        "trafficStatus",
+        "coordinateCrs",
+        "coordinateOrder",
+        "coordinateStatus",
+        "geometryStatus",
     ),
     longs=("dataAgeSeconds",),
-    doubles=("distanceMeters", "speedKph", "startLongitude", "startLatitude", "endLongitude", "endLatitude",
-             "representativeLongitude", "representativeLatitude"),
-    booleans=("isStale",), arrays=("missingFields", "qualityFlags"), geometry=True,
+    doubles=(
+        "distanceMeters",
+        "speedKph",
+        "startLongitude",
+        "startLatitude",
+        "endLongitude",
+        "endLatitude",
+        "representativeLongitude",
+        "representativeLatitude",
+    ),
+    booleans=("isStale",),
+    arrays=("missingFields", "qualityFlags"),
+    geometry=True,
 )
 FORECAST_SCHEMA = _schema(
-    strings=("silverVersion", "eventId", "contentHash", "providerAreaId", "areaName", "forecastCreatedAt",
-             "forecastAt", "timestampBasis", "collectedAt", "congestionLevelRaw", "congestionLevel", "processingStatus",
-             "rawPayloadJson"),
+    strings=(
+        "silverVersion",
+        "eventId",
+        "contentHash",
+        "providerAreaId",
+        "areaName",
+        "forecastCreatedAt",
+        "forecastAt",
+        "timestampBasis",
+        "collectedAt",
+        "congestionLevelRaw",
+        "congestionLevel",
+        "processingStatus",
+        "rawPayloadJson",
+    ),
     longs=("populationMin", "populationMax", "populationMid"),
-    integers=("congestionScore",), arrays=("missingFields", "qualityFlags"),
+    integers=("congestionScore",),
+    arrays=("missingFields", "qualityFlags"),
 )
 REJECTED_SCHEMA = _schema(
-    strings=("silverVersion", "eventId", "recordType", "providerAreaId", "collectedAt", "processingStatus",
-             "rawPayloadJson"), arrays=("rejectionReasons",),
+    strings=(
+        "silverVersion",
+        "eventId",
+        "recordType",
+        "providerAreaId",
+        "collectedAt",
+        "processingStatus",
+        "rawPayloadJson",
+    ),
+    arrays=("rejectionReasons",),
 )
 QUALITY_SCHEMA = _schema(
     strings=("silverVersion", "processedAt"),
-    longs=("batchId", "inputCount", "validCount", "partialCount", "rejectedCount", "duplicateCount",
-           "areaCount", "roadCount", "forecastCount"),
+    longs=(
+        "batchId",
+        "inputCount",
+        "validCount",
+        "partialCount",
+        "rejectedCount",
+        "duplicateCount",
+        "areaCount",
+        "roadCount",
+        "forecastCount",
+    ),
 )
 
 TIME_COLUMNS = {
@@ -125,18 +191,22 @@ def normalize_batch(batch: DataFrame, batch_id: int, freshness_seconds: int = 90
             rejected.extend(normalized.rejected)
         except Exception as exc:
             log.warning("city event rejected after normalization error: %s", type(exc).__name__, exc_info=True)
-            rejected.append({
-                "silverVersion": "city-realtime-v1", "eventId": None, "recordType": "ENVELOPE",
-                "providerAreaId": None, "collectedAt": None, "processingStatus": "REJECTED",
-                "rawPayloadJson": str(item.rawEventJson),
-                "rejectionReasons": ["NORMALIZATION_ERROR:" + type(exc).__name__],
-            })
+            rejected.append(
+                {
+                    "silverVersion": "city-realtime-v1",
+                    "eventId": None,
+                    "recordType": "ENVELOPE",
+                    "providerAreaId": None,
+                    "collectedAt": None,
+                    "processingStatus": "REJECTED",
+                    "rawPayloadJson": str(item.rawEventJson),
+                    "rejectionReasons": ["NORMALIZATION_ERROR:" + type(exc).__name__],
+                }
+            )
 
     areas, area_dupes = deduplicate(areas, ("providerAreaId", "observedAt"))
     roads, road_dupes = deduplicate(roads, ("linkNamespace", "linkId", "observedAt"))
-    forecasts, forecast_dupes = deduplicate(
-        forecasts, ("providerAreaId", "forecastCreatedAt", "forecastAt")
-    )
+    forecasts, forecast_dupes = deduplicate(forecasts, ("providerAreaId", "forecastCreatedAt", "forecastAt"))
     spark = batch.sparkSession
 
     def frame(rows, schema, kind):
@@ -145,16 +215,28 @@ def normalize_batch(batch: DataFrame, batch_id: int, freshness_seconds: int = 90
     all_rows = areas + roads + forecasts
     valid = sum(row.get("processingStatus") == "VALID" for row in all_rows)
     partial = sum(row.get("processingStatus") == "PARTIAL" for row in all_rows)
-    quality = [{
-        "silverVersion": "city-realtime-v1", "batchId": int(batch_id),
-        "processedAt": None, "inputCount": len(values), "validCount": valid, "partialCount": partial,
-        "rejectedCount": len(rejected), "duplicateCount": area_dupes + road_dupes + forecast_dupes,
-        "areaCount": len(areas), "roadCount": len(roads), "forecastCount": len(forecasts),
-    }]
+    quality = [
+        {
+            "silverVersion": "city-realtime-v1",
+            "batchId": int(batch_id),
+            "processedAt": None,
+            "inputCount": len(values),
+            "validCount": valid,
+            "partialCount": partial,
+            "rejectedCount": len(rejected),
+            "duplicateCount": area_dupes + road_dupes + forecast_dupes,
+            "areaCount": len(areas),
+            "roadCount": len(roads),
+            "forecastCount": len(forecasts),
+        }
+    ]
     quality_df = spark.createDataFrame(quality, QUALITY_SCHEMA).withColumn("processedAt", F.current_timestamp())
     return CityFrames(
-        frame(areas, AREA_SCHEMA, "area"), frame(roads, ROAD_SCHEMA, "roads"),
-        frame(forecasts, FORECAST_SCHEMA, "forecasts"), frame(rejected, REJECTED_SCHEMA, "rejected"), quality_df,
+        frame(areas, AREA_SCHEMA, "area"),
+        frame(roads, ROAD_SCHEMA, "roads"),
+        frame(forecasts, FORECAST_SCHEMA, "forecasts"),
+        frame(rejected, REJECTED_SCHEMA, "rejected"),
+        quality_df,
     )
 
 
@@ -162,7 +244,8 @@ def redis_rows(frames: CityFrames) -> DataFrame:
     def rows(df, key, order):
         eligible = df.filter(
             F.col("processingStatus").isin("VALID", "PARTIAL")
-            & F.col(order).isNotNull() & F.col("collectedAt").isNotNull()
+            & F.col(order).isNotNull()
+            & F.col("collectedAt").isNotNull()
             & ~F.array_contains(F.col("qualityFlags"), "PROVIDER_TIME_IN_FUTURE")
         )
         fields = [F.col(name) for name in df.columns] + [F.col(order).alias("_latestOrderAt")]
@@ -178,8 +261,9 @@ def redis_rows(frames: CityFrames) -> DataFrame:
     roads = rows(frames.roads, F.concat_ws(":", F.lit("city:latest:road"), "linkNamespace", "linkId"), "observedAt")
     forecasts = rows(
         frames.forecasts,
-        F.concat_ws(":", F.lit("city:forecast:population"), "providerAreaId",
-                    F.date_format("forecastAt", "yyyyMMddHHmmss")),
+        F.concat_ws(
+            ":", F.lit("city:forecast:population"), "providerAreaId", F.date_format("forecastAt", "yyyyMMddHHmmss")
+        ),
         "forecastCreatedAt",
     )
     return area.unionByName(roads).unionByName(forecasts)
@@ -216,7 +300,9 @@ def main() -> int:
     settings = Settings.from_env()
     target = output_uri(os.environ)
     freshness = int(os.environ.get("CITY_SILVER_FRESHNESS_SECONDS", "900"))
-    spark = SparkSession.builder.appName("ddubi-" + JOB).config("spark.sql.session.timeZone", "Asia/Seoul").getOrCreate()
+    spark = (
+        SparkSession.builder.appName("ddubi-" + JOB).config("spark.sql.session.timeZone", "Asia/Seoul").getOrCreate()
+    )
     spark.sparkContext.setLogLevel("WARN")
     events = read_events_stream(spark, settings, TOPIC)
 
@@ -232,21 +318,31 @@ def main() -> int:
             rows.unpersist()
 
     def start_redis():
-        return events.writeStream.foreachBatch(redis_batch).option(
-            "checkpointLocation", settings.checkpoint_for(JOB + "_redis")
-        ).trigger(processingTime="30 seconds").queryName(JOB + "_redis").start()
+        return (
+            events.writeStream.foreachBatch(redis_batch)
+            .option("checkpointLocation", settings.checkpoint_for(JOB + "_redis"))
+            .trigger(processingTime="30 seconds")
+            .queryName(JOB + "_redis")
+            .start()
+        )
 
     start_hdfs = None
     if target:
+
         def silver_batch(frame, batch_id):
             frames = normalize_batch(frame, batch_id, freshness)
             if frames.quality.first().inputCount:
                 write_silver(frames, batch_id, target)
 
         def start_silver():
-            return events.writeStream.foreachBatch(silver_batch).option(
-                "checkpointLocation", settings.checkpoint_for(JOB + "_hdfs")
-            ).trigger(processingTime="10 minutes").queryName(JOB + "_hdfs").start()
+            return (
+                events.writeStream.foreachBatch(silver_batch)
+                .option("checkpointLocation", settings.checkpoint_for(JOB + "_hdfs"))
+                .trigger(processingTime="10 minutes")
+                .queryName(JOB + "_hdfs")
+                .start()
+            )
+
         start_hdfs = start_silver
     else:
         log.warning("CITY_SILVER_OUTPUT_URI is empty; HDFS disabled while Redis remains enabled")

@@ -29,9 +29,7 @@ def policy(env: Mapping[str, str]) -> TrafficIncidentPolicy:
     """환경변수를 이름 있는 정책으로 검증한다. 오류는 잡 시작 전에 호출자에게 전달한다."""
     result = TrafficIncidentPolicy(
         stale_seconds=_integer(env, "TRAFFIC_INCIDENT_STALE_SECONDS", 2700),
-        direct_tolerance_meters=_integer(
-            env, "TRAFFIC_LINK_COORD_TOLERANCE_METERS", 200
-        ),
+        direct_tolerance_meters=_integer(env, "TRAFFIC_LINK_COORD_TOLERANCE_METERS", 200),
         nearby_max_meters=_integer(env, "TRAFFIC_NEARBY_MAX_METERS", 100),
     )
     ranges = (
@@ -46,7 +44,5 @@ def policy(env: Mapping[str, str]) -> TrafficIncidentPolicy:
     )
     for name, value, minimum, maximum in ranges:
         if not minimum <= value <= maximum:
-            raise TrafficIncidentPolicyError(
-                f"{name} must be between {minimum} and {maximum}"
-            )
+            raise TrafficIncidentPolicyError(f"{name} must be between {minimum} and {maximum}")
     return result

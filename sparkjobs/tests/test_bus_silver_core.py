@@ -1,4 +1,5 @@
 """Run with unittest without Spark; policy checks use collector-shaped fixtures."""
+
 import json
 import sys
 import tempfile
@@ -12,10 +13,25 @@ from tools.export_bus_silver import export
 
 
 def event(kind="bus.position", namespace="SEOUL_BUS", raw=None):
-    return dict(eventId="p1" if kind == "bus.position" else "a1", eventType=kind,
-                source={"SEOUL_BUS": "seoul.bus_location" if kind == "bus.position" else "seoul.bus_arrival", "GBIS": "gbis.arrival", "INCHEON_API": "incheon.arrival"}[namespace],
-                occurredAt="2026-09-16T08:10:00+09:00", collectedAt="2026-09-16T08:10:05+09:00",
-                payload=dict(providerNamespace=namespace, providerRouteId="00124", providerStopId="S12", providerVehicleId="V123", timestampBasis="received", raw=raw or {}))
+    return dict(
+        eventId="p1" if kind == "bus.position" else "a1",
+        eventType=kind,
+        source={
+            "SEOUL_BUS": "seoul.bus_location" if kind == "bus.position" else "seoul.bus_arrival",
+            "GBIS": "gbis.arrival",
+            "INCHEON_API": "incheon.arrival",
+        }[namespace],
+        occurredAt="2026-09-16T08:10:00+09:00",
+        collectedAt="2026-09-16T08:10:05+09:00",
+        payload=dict(
+            providerNamespace=namespace,
+            providerRouteId="00124",
+            providerStopId="S12",
+            providerVehicleId="V123",
+            timestampBasis="received",
+            raw=raw or {},
+        ),
+    )
 
 
 class BusSilverTests(unittest.TestCase):
@@ -51,7 +67,9 @@ class BusSilverTests(unittest.TestCase):
         self.assertIn("SOURCE_TIME_INVALID", row["qualityFlags"])
 
     def test_seconds_zero_and_minutes_remain_distinct(self):
-        row = normalize(event("bus.arrival", raw={"exps1": "0", "traTime1": "3.5", "mkTm": "2026-09-16 08:10:00", "full1": "0"}))
+        row = normalize(
+            event("bus.arrival", raw={"exps1": "0", "traTime1": "3.5", "mkTm": "2026-09-16 08:10:00", "full1": "0"})
+        )
         self.assertEqual(row["firstArrivalSeconds"], 0)
         self.assertEqual(row["firstTravelTimeMinutes"], 3.5)
         self.assertEqual(row["firstFullCode"], "0")
@@ -69,7 +87,7 @@ class BusSilverTests(unittest.TestCase):
         row = normalize(event(raw={"gpsX": "NaN", "gpsY": "37", "tmX": "200000", "tmY": "400000"}))
         self.assertIsNone(row["longitude"])
         self.assertIsNone(row["latitude"])
-        self.assertNotIn("NaN", normalize_json(event(raw={"gpsX": "NaN"})).split('"longitude":')[1].split(',')[0])
+        self.assertNotIn("NaN", normalize_json(event(raw={"gpsX": "NaN"})).split('"longitude":')[1].split(",")[0])
 
     def test_boolean_object_and_long_overflow_are_invalid(self):
         row = normalize(event("bus.arrival", raw={"exps1": True, "exps2": {"bad": 1}, "staOrd": "1e30"}))
@@ -85,7 +103,9 @@ class BusSilverTests(unittest.TestCase):
         self.assertIn("MISSING_OR_INVALID:providerVehicleId", row["rejectionReasons"])
 
     def test_region_units_and_incheon_vehicle(self):
-        row = normalize(event("bus.arrival", "GBIS", {"predictTime1": "3", "predictTimeSec2": "75", "predictTime2": "9"}))
+        row = normalize(
+            event("bus.arrival", "GBIS", {"predictTime1": "3", "predictTimeSec2": "75", "predictTime2": "9"})
+        )
         self.assertEqual((row["firstArrivalSeconds"], row["secondArrivalSeconds"]), (180, 75))
         row = normalize(event("bus.arrival", "INCHEON_API", {"ARRIVALESTIMATETIME": "90"}))
         self.assertEqual(row["firstVehicleId"], "V123")
@@ -116,8 +136,14 @@ class BusSilverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "result"
             report = export(lines, output)
-            self.assertEqual((report["acceptedRows"], report["rejectedRows"], report["duplicateRows"], report["ignoredRows"]), (1, 3, 1, 1))
-            self.assertEqual(report["inputRows"], sum(report[k] for k in ("acceptedRows", "rejectedRows", "duplicateRows", "ignoredRows")))
+            self.assertEqual(
+                (report["acceptedRows"], report["rejectedRows"], report["duplicateRows"], report["ignoredRows"]),
+                (1, 3, 1, 1),
+            )
+            self.assertEqual(
+                report["inputRows"],
+                sum(report[k] for k in ("acceptedRows", "rejectedRows", "duplicateRows", "ignoredRows")),
+            )
             with self.assertRaises(FileExistsError):
                 export(lines, output)
         with tempfile.TemporaryDirectory() as directory:

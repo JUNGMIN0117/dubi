@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.ddubi.domain.route.mapping.*;
+import com.ssafy.ddubi.domain.route.model.*;
 import java.time.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -18,15 +20,164 @@ class MlApplyModeTest {
             new RouteEvidenceAssembler.Snapshot(Map.of(), List.of());
 
     JourneyEvaluationService service(MlApplyMode mode) {
+        return service(mode, null);
+    }
+
+    JourneyEvaluationService service(MlApplyMode mode, BusHistoricalReferenceService historical) {
         return new JourneyEvaluationService(
                 client,
                 new RouteEvidenceAssembler(mock(StringRedisTemplate.class), new ObjectMapper()),
                 new RouteTimelineEvaluator(),
                 mock(SubwayTimingService.class),
                 new BusWaitingService(mock(StringRedisTemplate.class), new ObjectMapper(), false),
-                null,
+                historical,
                 JourneyEvaluationService.DEFAULT_ML_BUDGET_SHARE,
                 mode);
+    }
+
+    /** 경기 노선은 정적 topology만 사용하고 서울 실시간/ML ID는 채우지 않는다. */
+    RouteCandidate gbisRoute() {
+        var edge =
+                new MappedTransitSegment(
+                        1,
+                        "BUS:GBIS.1:GBIS.10:GBIS.11",
+                        TransportMode.BUS,
+                        "GBIS.1",
+                        null,
+                        "경기 노선",
+                        "FORWARD",
+                        "GBIS.10",
+                        "GBIS.11",
+                        null,
+                        null,
+                        1,
+                        2);
+        var mapping =
+                new TransitMappingResult(
+                        TransitMappingStatus.EXACT,
+                        "master",
+                        "policy",
+                        "GBIS.1",
+                        "경기 노선",
+                        "GBIS.10",
+                        "GBIS.11",
+                        1,
+                        2,
+                        "FORWARD",
+                        1,
+                        1,
+                        1,
+                        null,
+                        RealtimeMappingCoverage.NONE,
+                        List.of(edge));
+        var segment =
+                new RouteSegment(
+                        1,
+                        TransportMode.BUS,
+                        null,
+                        "GBIS.1",
+                        null,
+                        "A",
+                        "B",
+                        100,
+                        300,
+                        List.of("A", "B"),
+                        List.of(new VehicleInfo("1", "BUS")),
+                        List.of(),
+                        mapping);
+        return new RouteCandidate(
+                0, RouteType.BUS, 100, 300, 0, new FareRange(1000, 1000), 0, 0, List.of(segment));
+    }
+
+    @Test
+    void seoulFallsBackFromFailedMlToObservedFormulaThenToKakao() {
+        var historical = mock(BusHistoricalReferenceService.class);
+        when(client.predict(any())).thenReturn(BusPreviewClient.Estimate.unavailable("ML_TIMEOUT"));
+        when(historical.estimate(
+                        anyList(), eq("master"), any(), anyLong(), any(), any(), anyLong()))
+                .thenReturn(
+                        new BusHistoricalReferenceService.Estimate(
+                                42L,
+                                "HISTORICAL_REFERENCE_APPLIED",
+                                "seoul-v1",
+                                "HOURLY_SOURCE_MEAN",
+                                List.of()));
+        var formula =
+                service(MlApplyMode.TEST_APPLY, historical)
+                        .compare(
+                                List.of(MlRoutePreviewTest.route(0, "1", 300, 0, 1)),
+                                empty,
+                                now,
+                                now,
+                                now.plusSeconds(1000));
+        assertThat(formula.fastest().steps().get(0).source()).isEqualTo("BUS_HISTORICAL_REFERENCE");
+        assertThat(formula.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(42));
+        assertThat(formula.fastest().reasons())
+                .contains(
+                        "step-1:ML_NOT_APPLIED:ML_TIMEOUT",
+                        "step-1:HISTORICAL_REFERENCE_APPLIED",
+                        "step-1:BUS_REFERENCE_VERSION:seoul-v1");
+
+        when(historical.estimate(
+                        anyList(), eq("master"), any(), anyLong(), any(), any(), anyLong()))
+                .thenReturn(
+                        BusHistoricalReferenceService.Estimate.missing("EXACT_KEY_UNAVAILABLE"));
+        var kakao =
+                service(MlApplyMode.TEST_APPLY, historical)
+                        .compare(
+                                List.of(MlRoutePreviewTest.route(0, "1", 300, 0, 1)),
+                                empty,
+                                now,
+                                now,
+                                now.plusSeconds(1000));
+        assertThat(kakao.fastest().steps().get(0).source()).isEqualTo("FALLBACK");
+        assertThat(kakao.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(300));
+        assertThat(kakao.fastest().reasons())
+                .contains(
+                        "step-1:HISTORICAL_REFERENCE_EXACT_KEY_UNAVAILABLE", "step-1:API_FALLBACK");
+    }
+
+    @Test
+    void nonSeoulSkipsMlAndUsesGtfsFormulaBeforeKakao() {
+        var historical = mock(BusHistoricalReferenceService.class);
+        when(historical.estimate(
+                        anyList(), eq("master"), any(), anyLong(), any(), any(), anyLong()))
+                .thenReturn(
+                        new BusHistoricalReferenceService.Estimate(
+                                55L,
+                                "GTFS_FORMULA_APPLIED",
+                                "gtfs-v1",
+                                "GTFS_SCHEDULE_FORMULA",
+                                List.of()));
+        var result =
+                service(MlApplyMode.TEST_APPLY, historical)
+                        .compare(List.of(gbisRoute()), empty, now, now, now.plusSeconds(1000));
+        verify(client, never()).predict(any());
+        verify(client, never()).predictBatch(anyList(), any());
+        assertThat(result.fastest().steps().get(0).source()).isEqualTo("BUS_GTFS_FORMULA");
+        assertThat(result.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(55));
+        assertThat(result.fastest().reasons())
+                .contains(
+                        "step-1:ML_NOT_APPLIED:UNSUPPORTED_PROVIDER",
+                        "step-1:GTFS_FORMULA_APPLIED",
+                        "step-1:BUS_REFERENCE_KIND:GTFS_SCHEDULE_FORMULA");
+
+        // 경기·인천·부산 기준값은 아직 실측이 아니므로 결측을 임의 추정으로 메우지 않는다.
+        // 정확키 조회가 실패하면 동일 BUS step의 카카오 원본 300초가 최종 안전망이어야 한다.
+        when(historical.estimate(
+                        anyList(), eq("master"), any(), anyLong(), any(), any(), anyLong()))
+                .thenReturn(
+                        BusHistoricalReferenceService.Estimate.missing("EXACT_KEY_UNAVAILABLE"));
+        var kakao =
+                service(MlApplyMode.TEST_APPLY, historical)
+                        .compare(List.of(gbisRoute()), empty, now, now, now.plusSeconds(1000));
+        verify(client, never()).predict(any());
+        verify(client, never()).predictBatch(anyList(), any());
+        assertThat(kakao.fastest().steps().get(0).source()).isEqualTo("FALLBACK");
+        assertThat(kakao.fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(300));
+        assertThat(kakao.fastest().reasons())
+                .contains(
+                        "step-1:HISTORICAL_REFERENCE_EXACT_KEY_UNAVAILABLE", "step-1:API_FALLBACK");
     }
 
     BusPreviewClient.Estimate sufficient(double seconds) {

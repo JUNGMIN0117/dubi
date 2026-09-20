@@ -38,6 +38,25 @@ class BusHistoricalReferenceServiceTest {
                 .segments();
     }
 
+    /** 비서울 ID는 canonical component에 출처가 포함되며 실시간 ID를 서울 값으로 꾸미지 않는다. */
+    List<MappedTransitSegment> gbisEdges() {
+        return List.of(
+                new MappedTransitSegment(
+                        1,
+                        "BUS:GBIS.1:GBIS.10:GBIS.11",
+                        com.ssafy.ddubi.domain.route.model.TransportMode.BUS,
+                        "GBIS.1",
+                        null,
+                        "경기 노선",
+                        "FORWARD",
+                        "GBIS.10",
+                        "GBIS.11",
+                        null,
+                        null,
+                        1,
+                        2));
+    }
+
     BusReferenceService.Row row(
             BusReferenceService.Query q, double mean, int dates, String kind, LocalDate end) {
         return new BusReferenceService.Row(
@@ -76,6 +95,55 @@ class BusHistoricalReferenceServiceTest {
                                                         LocalDate.of(2026, 8, 27))),
                                         "truncated",
                                         false));
+    }
+
+    @Test
+    void gtfsFormulaUsesProviderNamespaceAndFeedValidityWithoutInventingObservedDates() {
+        var s = service();
+        when(publicReferences.lookup(eq("v1"), any()))
+                .thenAnswer(
+                        call -> {
+                            var q = (BusReferenceService.Query) call.getArgument(1);
+                            assertEquals("GBIS", q.namespace());
+                            assertEquals(1, q.dow()); // 실제 요일이 아니라 GTFS 템플릿 키다.
+                            var row =
+                                    new BusReferenceService.Row(
+                                            q.masterVersion(),
+                                            q.namespace(),
+                                            q.routeId(),
+                                            q.fromStopId(),
+                                            q.toStopId(),
+                                            q.fromOrder(),
+                                            q.toOrder(),
+                                            q.dow(),
+                                            q.hourSlot(),
+                                            "GTFS_SCHEDULE_FORMULA",
+                                            71.2,
+                                            5,
+                                            0,
+                                            LocalDate.of(2025, 3, 1),
+                                            LocalDate.of(2030, 12, 31),
+                                            "b".repeat(64));
+                            return Map.of(
+                                    "status",
+                                    "STAGED_REFERENCE_NOT_APPROVED",
+                                    "rows",
+                                    List.of(row),
+                                    "truncated",
+                                    false);
+                        });
+        var result =
+                s.estimate(
+                        gbisEdges(),
+                        "master",
+                        now,
+                        0,
+                        now,
+                        new BusHistoricalReferenceService.Session(),
+                        System.nanoTime() + Duration.ofSeconds(20).toNanos());
+        assertEquals(72, result.seconds());
+        assertEquals("GTFS_FORMULA_APPLIED", result.reason());
+        assertEquals("GTFS_SCHEDULE_FORMULA", result.sampleKind());
     }
 
     BusHistoricalReferenceService.Estimate estimate(
@@ -255,7 +323,7 @@ class BusHistoricalReferenceServiceTest {
     }
 
     @Test
-    void actualJourneyFallsBackToProviderRideInsteadOfHistoricalMean() {
+    void actualJourneyUsesHistoricalMeanAfterMlFailure() {
         var history = service();
         normal(45);
         var ml = mock(BusPreviewClient.class);
@@ -279,16 +347,17 @@ class BusHistoricalReferenceServiceTest {
                         now,
                         now,
                         now.plusSeconds(1000));
-        assertEquals(now.plusSeconds(300), result.fastest().estimatedArrivalAt());
-        assertEquals("API_ONLY", result.candidates().get(0).quality());
+        assertEquals(now.plusSeconds(90), result.fastest().estimatedArrivalAt());
+        assertEquals("BUS_REFERENCE", result.candidates().get(0).quality());
         assertEquals(0, result.candidates().get(0).mlSteps());
-        assertEquals("FALLBACK", result.fastest().steps().get(0).source());
+        assertEquals("BUS_HISTORICAL_REFERENCE", result.fastest().steps().get(0).source());
+        assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_APPLIED"));
         assertFalse(result.productionReady());
         assertTrue(result.predictions().stream().noneMatch(MlRoutePreview.Prediction::applied));
     }
 
     @Test
-    void mlBudgetExhaustionUsesProviderStep() {
+    void mlBudgetExhaustionUsesHistoricalFormulaBeforeProviderStep() {
         var history = service();
         normal(45);
         var ml = mock(BusPreviewClient.class);
@@ -305,7 +374,7 @@ class BusHistoricalReferenceServiceTest {
                                 mock(StringRedisTemplate.class), new ObjectMapper(), false),
                         history);
         var route = MlRoutePreviewTest.route(0, "1", 300, 10, 2);
-        // ML 예산이 소진되면 과거 평균 대신 해당 카카오 BUS step으로 대체한다.
+        // ML 예산이 소진돼도 남은 전체 예산으로 서울 실측 기준값을 조회한다.
         long nowNanos = System.nanoTime();
         var session =
                 JourneyEvaluationService.Session.withDeadlines(
@@ -319,8 +388,10 @@ class BusHistoricalReferenceServiceTest {
                         now.plusSeconds(1000),
                         session);
         verify(ml, never()).predict(any());
-        assertEquals("FALLBACK", result.fastest().steps().get(0).source());
+        assertEquals("BUS_HISTORICAL_REFERENCE", result.fastest().steps().get(0).source());
+        assertEquals(now.plusSeconds(90), result.fastest().estimatedArrivalAt());
         assertTrue(result.fastest().reasons().contains("step-1:ML_BUDGET_EXHAUSTED"));
+        assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_APPLIED"));
         assertFalse(result.budgetExhausted()); // 보조 ML 실패와 전체 후보 탐색 실패를 구별한다.
         // 기본 세션은 ML 마감이 전체 마감보다 앞선다. 전체 예산은 그대로다.
         var normal = evaluator.newSession(5000);

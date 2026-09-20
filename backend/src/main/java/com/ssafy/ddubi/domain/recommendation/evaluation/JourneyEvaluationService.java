@@ -246,7 +246,12 @@ public class JourneyEvaluationService {
             Journey original = evidence.assemble(route, snapshot, asOf);
             var legs = new ArrayList<Leg>();
             Instant cursor = departure;
-            int mlSteps = 0, apiSteps = 0, subwaySteps = 0, busWaitSteps = 0, roadSteps = 0;
+            int mlSteps = 0,
+                    referenceSteps = 0,
+                    apiSteps = 0,
+                    subwaySteps = 0,
+                    busWaitSteps = 0,
+                    roadSteps = 0;
             var reasons = new ArrayList<String>();
             for (Leg leg : original.legs()) {
                 RouteSegment segment =
@@ -264,7 +269,7 @@ public class JourneyEvaluationService {
                     var wait = busWaiting.estimate(segment, asOf, station, busSession);
                     boolean canUseWait = wait.seconds() != null && wait.boardingAt() != null;
                     boolean waitApplied = false;
-                    if (!supported(edges)) {
+                    if (!topologySupported(edges)) {
                         reasons.add(leg.key() + ":UNVERIFIED_OR_UNSUPPORTED_BUS_MAPPING");
                         if (segment.mapping() != null
                                 && BusAlternativeExpansion.LIMITED.equals(
@@ -273,165 +278,236 @@ public class JourneyEvaluationService {
                             exhausted = true;
                         }
                     } else {
-                        // 대기 후 실제 탑승 예상시각을 버스 ML의 첫 edge 입력으로 사용한다.
-                        Instant edgeCursor = canUseWait ? wait.boardingAt() : cursor;
-                        long total = 0;
-                        boolean complete = true;
-                        var attempts = new ArrayList<Prediction>();
-                        for (MappedTransitSegment edge : edges) {
-                            var start = edgeCursor.atZone(KST);
-                            var latest =
-                                    edgeCursor
-                                            .plusSeconds(leg.entryUncertaintySeconds())
-                                            .atZone(KST);
-                            if (!start.toLocalDate().equals(latest.toLocalDate())
-                                    || start.getHour() != latest.getHour()) {
-                                reasons.add(leg.key() + ":ENTRY_HOUR_UNCERTAIN");
-                                complete = false;
-                                break;
+                        // 서울 ML은 실시간 대응 ID가 확인된 서울 edge에만 호출한다. 경기·인천·부산은
+                        // 학습 범위 밖이므로 HTTP 호출 없이 아래 기준값 조회로 바로 내려간다.
+                        if (!mlSupported(edges)) {
+                            reasons.add(leg.key() + ":ML_NOT_APPLIED:UNSUPPORTED_PROVIDER");
+                        } else {
+                            // 대기 후 실제 탑승 예상시각을 버스 ML의 첫 edge 입력으로 사용한다.
+                            Instant edgeCursor = canUseWait ? wait.boardingAt() : cursor;
+                            long total = 0;
+                            boolean complete = true;
+                            var attempts = new ArrayList<Prediction>();
+                            for (MappedTransitSegment edge : edges) {
+                                var start = edgeCursor.atZone(KST);
+                                var latest =
+                                        edgeCursor
+                                                .plusSeconds(leg.entryUncertaintySeconds())
+                                                .atZone(KST);
+                                if (!start.toLocalDate().equals(latest.toLocalDate())
+                                        || start.getHour() != latest.getHour()) {
+                                    reasons.add(leg.key() + ":ENTRY_HOUR_UNCERTAIN");
+                                    complete = false;
+                                    break;
+                                }
+                                var input =
+                                        new BusPreviewClient.Input(
+                                                edge.routeId(),
+                                                edge.fromNodeId(),
+                                                edge.toNodeId(),
+                                                edge.fromOrder(),
+                                                start.toLocalDate(),
+                                                start.getHour());
+                                BusPreviewClient.Estimate estimate = cache.get(input);
+                                if (estimate == null) {
+                                    // 선조회 뒤 앞 edge 예측으로 진입 시간대가 바뀐 edge만 개별 호출한다. 개수·시간 한도를 넘으면 예산
+                                    // 소진.
+                                    if (session.mlIndividualCalls >= INDIVIDUAL_CALL_LIMIT
+                                            || System.nanoTime() >= session.mlDeadline
+                                            || !session.roomForMlCall(client.timeoutMillis())) {
+                                        estimate =
+                                                BusPreviewClient.Estimate.unavailable(
+                                                        "ML_BUDGET_EXHAUSTED");
+                                    } else {
+                                        session.mlIndividualCalls++;
+                                        estimate =
+                                                applyMode == MlApplyMode.PRODUCTION
+                                                        ? client.predictBatch(
+                                                                        List.of(input), contract())
+                                                                .getOrDefault(
+                                                                        input,
+                                                                        BusPreviewClient.Estimate
+                                                                                .unavailable(
+                                                                                        "ML_INVALID_RESPONSE"))
+                                                        : client.predict(input);
+                                        trackModel(session, estimate);
+                                        cache.put(input, estimate);
+                                    }
+                                }
+                                attempts.add(
+                                        new Prediction(
+                                                original.key(),
+                                                leg.key(),
+                                                edge.segmentId(),
+                                                edgeCursor,
+                                                input,
+                                                estimate,
+                                                false));
+                                String failure =
+                                        session.mixedModel
+                                                ? "ML_MODEL_VERSION_MISMATCH"
+                                                : usable(estimate);
+                                if (failure != null) {
+                                    reasons.add(leg.key() + ":" + failure);
+                                    reasons.add(leg.key() + ":ML_NOT_APPLIED:" + failure);
+                                    complete = false;
+                                    break;
+                                }
+                                long seconds = (long) Math.ceil(estimate.seconds());
+                                total += seconds;
+                                edgeCursor = edgeCursor.plusSeconds(seconds);
                             }
-                            var input =
-                                    new BusPreviewClient.Input(
-                                            edge.routeId(),
-                                            edge.fromNodeId(),
-                                            edge.toNodeId(),
-                                            edge.fromOrder(),
-                                            start.toLocalDate(),
-                                            start.getHour());
-                            BusPreviewClient.Estimate estimate = cache.get(input);
-                            if (estimate == null) {
-                                // 선조회 뒤 앞 edge 예측으로 진입 시간대가 바뀐 edge만 개별 호출한다. 개수·시간 한도를 넘으면 예산 소진.
-                                if (session.mlIndividualCalls >= INDIVIDUAL_CALL_LIMIT
-                                        || System.nanoTime() >= session.mlDeadline
-                                        || !session.roomForMlCall(client.timeoutMillis())) {
-                                    estimate =
-                                            BusPreviewClient.Estimate.unavailable(
-                                                    "ML_BUDGET_EXHAUSTED");
-                                } else {
-                                    session.mlIndividualCalls++;
-                                    estimate =
-                                            applyMode == MlApplyMode.PRODUCTION
-                                                    ? client.predictBatch(
-                                                                    List.of(input), contract())
-                                                            .getOrDefault(
-                                                                    input,
-                                                                    BusPreviewClient.Estimate
-                                                                            .unavailable(
-                                                                                    "ML_INVALID_RESPONSE"))
-                                                    : client.predict(input);
-                                    trackModel(session, estimate);
-                                    cache.put(input, estimate);
+                            boolean applyMl = complete && applyMode != MlApplyMode.SHADOW;
+                            for (Prediction attempt : attempts)
+                                predictions.add(
+                                        new Prediction(
+                                                attempt.candidateKey(),
+                                                attempt.stepKey(),
+                                                attempt.segmentId(),
+                                                attempt.enteredAt(),
+                                                attempt.input(),
+                                                attempt.estimate(),
+                                                applyMl));
+                            if (complete && !applyMl) {
+                                // SHADOW: 수치·모델 버전·결측 정보만 저장하고 시간 계산에는 쓰지 않는다.
+                                reasons.add(leg.key() + ":ML_SHADOW_RECORDED");
+                                reasons.add(leg.key() + ":ML_NOT_APPLIED:SHADOW_MODE");
+                            }
+                            if (applyMl) {
+                                // 확정된 각 입력의 날짜 범위는 HTTP 응답에서 확인했다. 이 Window는 관측 TTL이 아니라
+                                // 이번 고정 입력의 모델 결과를 타임라인 계산기에 전달하는 범위다. 다른 출발 탐색에는 재사용하지 않는다.
+                                String source =
+                                        applyMode == MlApplyMode.PRODUCTION
+                                                ? "ML_PRODUCTION"
+                                                : "ML_PREVIEW";
+                                chosen =
+                                        new Leg(
+                                                leg.key(),
+                                                leg.kind(),
+                                                leg.segmentIds(),
+                                                total,
+                                                total,
+                                                new Window(source, asOf, asOf, Instant.MAX),
+                                                List.of(),
+                                                leg.entryUncertaintySeconds());
+                                mlSteps++;
+                                reasons.add(
+                                        leg.key()
+                                                + (applyMode == MlApplyMode.PRODUCTION
+                                                        ? ":ML_APPLIED"
+                                                        : ":ML_TEST_APPLIED"));
+                                reasons.add(
+                                        leg.key() + ":ML_MODEL_VERSION:" + session.modelVersion);
+                                reasons.add(
+                                        leg.key()
+                                                + ":ML_MIN_HISTORY_SAMPLES:"
+                                                + attempts.stream()
+                                                        .mapToInt(
+                                                                a ->
+                                                                        a.estimate()
+                                                                                                .historySampleCount()
+                                                                                        == null
+                                                                                ? 0
+                                                                                : a.estimate()
+                                                                                        .historySampleCount())
+                                                        .min()
+                                                        .orElse(0));
+                                reasons.add(
+                                        leg.key()
+                                                + ":ML_MAX_MISSING_FEATURES:"
+                                                + attempts.stream()
+                                                        .mapToInt(
+                                                                a ->
+                                                                        a.estimate()
+                                                                                                .missingFeatureCount()
+                                                                                        == null
+                                                                                ? 0
+                                                                                : a.estimate()
+                                                                                        .missingFeatureCount())
+                                                        .max()
+                                                        .orElse(0));
+                                if (canUseWait) {
+                                    legs.add(
+                                            new Leg(
+                                                    leg.key() + "-wait",
+                                                    Kind.WAIT,
+                                                    List.of(),
+                                                    wait.seconds(),
+                                                    null,
+                                                    new Window(
+                                                            wait.source(), asOf, asOf, Instant.MAX),
+                                                    List.of(
+                                                            new Boarding(
+                                                                    wait.vehicleId(),
+                                                                    wait.boardingAt(),
+                                                                    wait.boardingAt(),
+                                                                    false))));
+                                    cursor = wait.boardingAt();
+                                    waitApplied = true;
+                                    busWaitSteps++;
                                 }
                             }
-                            attempts.add(
-                                    new Prediction(
-                                            original.key(),
-                                            leg.key(),
-                                            edge.segmentId(),
-                                            edgeCursor,
-                                            input,
-                                            estimate,
-                                            false));
-                            String failure =
-                                    session.mixedModel
-                                            ? "ML_MODEL_VERSION_MISMATCH"
-                                            : usable(estimate);
-                            if (failure != null) {
-                                reasons.add(leg.key() + ":" + failure);
-                                reasons.add(leg.key() + ":ML_NOT_APPLIED:" + failure);
-                                complete = false;
-                                break;
-                            }
-                            long seconds = (long) Math.ceil(estimate.seconds());
-                            total += seconds;
-                            edgeCursor = edgeCursor.plusSeconds(seconds);
                         }
-                        boolean applyMl = complete && applyMode != MlApplyMode.SHADOW;
-                        for (Prediction attempt : attempts)
-                            predictions.add(
-                                    new Prediction(
-                                            attempt.candidateKey(),
-                                            attempt.stepKey(),
-                                            attempt.segmentId(),
-                                            attempt.enteredAt(),
-                                            attempt.input(),
-                                            attempt.estimate(),
-                                            applyMl));
-                        if (complete && !applyMl) {
-                            // SHADOW: 수치·모델 버전·결측 정보만 저장하고 시간 계산에는 쓰지 않는다.
-                            reasons.add(leg.key() + ":ML_SHADOW_RECORDED");
-                            reasons.add(leg.key() + ":ML_NOT_APPLIED:SHADOW_MODE");
-                        }
-                        if (applyMl) {
-                            // 확정된 각 입력의 날짜 범위는 HTTP 응답에서 확인했다. 이 Window는 관측 TTL이 아니라
-                            // 이번 고정 입력의 모델 결과를 타임라인 계산기에 전달하는 범위다. 다른 출발 탐색에는 재사용하지 않는다.
-                            String source =
-                                    applyMode == MlApplyMode.PRODUCTION
-                                            ? "ML_PRODUCTION"
-                                            : "ML_PREVIEW";
-                            chosen =
-                                    new Leg(
-                                            leg.key(),
-                                            leg.kind(),
-                                            leg.segmentIds(),
-                                            total,
-                                            total,
-                                            new Window(source, asOf, asOf, Instant.MAX),
-                                            List.of(),
-                                            leg.entryUncertaintySeconds());
-                            mlSteps++;
-                            reasons.add(
-                                    leg.key()
-                                            + (applyMode == MlApplyMode.PRODUCTION
-                                                    ? ":ML_APPLIED"
-                                                    : ":ML_TEST_APPLIED"));
-                            reasons.add(leg.key() + ":ML_MODEL_VERSION:" + session.modelVersion);
-                            reasons.add(
-                                    leg.key()
-                                            + ":ML_MIN_HISTORY_SAMPLES:"
-                                            + attempts.stream()
-                                                    .mapToInt(
-                                                            a ->
-                                                                    a.estimate()
-                                                                                            .historySampleCount()
-                                                                                    == null
-                                                                            ? 0
-                                                                            : a.estimate()
-                                                                                    .historySampleCount())
-                                                    .min()
-                                                    .orElse(0));
-                            reasons.add(
-                                    leg.key()
-                                            + ":ML_MAX_MISSING_FEATURES:"
-                                            + attempts.stream()
-                                                    .mapToInt(
-                                                            a ->
-                                                                    a.estimate()
-                                                                                            .missingFeatureCount()
-                                                                                    == null
-                                                                            ? 0
-                                                                            : a.estimate()
-                                                                                    .missingFeatureCount())
-                                                    .max()
-                                                    .orElse(0));
-                            if (canUseWait) {
-                                legs.add(
+                        // 서울 ML 실패·SHADOW·미적용과 비서울 노선은 같은 정확키 기준값 경계로
+                        // 내려간다. 서비스는 미리 계산된 초만 합산하며 원본 수억 행이나 GTFS를
+                        // 요청 중에 다시 읽지 않는다. 한 edge라도 실패하면 chosen을 바꾸지 않아
+                        // 아래 API_FALLBACK이 BUS step 전체를 카카오 원본시간으로 유지한다.
+                        if (chosen == leg && historical != null && !session.mixedModel) {
+                            Instant referenceEntry = canUseWait ? wait.boardingAt() : cursor;
+                            var reference =
+                                    historical.estimate(
+                                            edges,
+                                            segment.mapping().masterDataVersion(),
+                                            referenceEntry,
+                                            leg.entryUncertaintySeconds(),
+                                            asOf,
+                                            session.historical,
+                                            deadline);
+                            reasons.add(leg.key() + ":" + reference.reason());
+                            if (reference.seconds() != null) {
+                                String source =
+                                        "GTFS_SCHEDULE_FORMULA".equals(reference.sampleKind())
+                                                ? "BUS_GTFS_FORMULA"
+                                                : "BUS_HISTORICAL_REFERENCE";
+                                chosen =
                                         new Leg(
-                                                leg.key() + "-wait",
-                                                Kind.WAIT,
+                                                leg.key(),
+                                                leg.kind(),
+                                                leg.segmentIds(),
+                                                reference.seconds(),
+                                                reference.seconds(),
+                                                new Window(source, asOf, asOf, Instant.MAX),
                                                 List.of(),
-                                                wait.seconds(),
-                                                null,
-                                                new Window(wait.source(), asOf, asOf, Instant.MAX),
-                                                List.of(
-                                                        new Boarding(
-                                                                wait.vehicleId(),
-                                                                wait.boardingAt(),
-                                                                wait.boardingAt(),
-                                                                false))));
-                                cursor = wait.boardingAt();
-                                waitApplied = true;
-                                busWaitSteps++;
+                                                leg.entryUncertaintySeconds());
+                                referenceSteps++;
+                                reasons.add(
+                                        leg.key()
+                                                + ":BUS_REFERENCE_VERSION:"
+                                                + reference.dataVersion());
+                                reasons.add(
+                                        leg.key()
+                                                + ":BUS_REFERENCE_KIND:"
+                                                + reference.sampleKind());
+                                if (canUseWait) {
+                                    legs.add(
+                                            new Leg(
+                                                    leg.key() + "-wait",
+                                                    Kind.WAIT,
+                                                    List.of(),
+                                                    wait.seconds(),
+                                                    null,
+                                                    new Window(
+                                                            wait.source(), asOf, asOf, Instant.MAX),
+                                                    List.of(
+                                                            new Boarding(
+                                                                    wait.vehicleId(),
+                                                                    wait.boardingAt(),
+                                                                    wait.boardingAt(),
+                                                                    false))));
+                                    cursor = wait.boardingAt();
+                                    waitApplied = true;
+                                    busWaitSteps++;
+                                }
                             }
                         }
                     }
@@ -586,11 +662,15 @@ public class JourneyEvaluationService {
                             reasons,
                             "transit-prev-v3");
             String quality =
-                    mlSteps + subwaySteps == 0
+                    mlSteps + referenceSteps + subwaySteps == 0
                             ? "API_ONLY"
-                            : busWaitSteps > 0 || apiSteps > 0 || mlSteps > 0 && subwaySteps > 0
+                            : busWaitSteps > 0
+                                            || apiSteps > 0
+                                            || (mlSteps + referenceSteps > 0 && subwaySteps > 0)
                                     ? "MIXED_PREVIEW"
-                                    : subwaySteps > 0 ? "SUBWAY_PREVIEW" : "ML_PREVIEW";
+                                    : subwaySteps > 0
+                                            ? "SUBWAY_PREVIEW"
+                                            : referenceSteps > 0 ? "BUS_REFERENCE" : "ML_PREVIEW";
             results.add(
                     new Candidate(result, quality, mlSteps, apiSteps, subwaySteps, busWaitSteps));
         }
@@ -748,7 +828,7 @@ public class JourneyEvaluationService {
                                 .orElse(null);
                 if (segment != null && segment.mode() == TransportMode.BUS) {
                     var edges = RouteEvidenceAssembler.edges(segment);
-                    if (supported(edges)) {
+                    if (mlSupported(edges)) {
                         var start = cursor.atZone(KST);
                         var latest = cursor.plusSeconds(leg.entryUncertaintySeconds()).atZone(KST);
                         if (start.toLocalDate().equals(latest.toLocalDate())
@@ -793,18 +873,24 @@ public class JourneyEvaluationService {
         return false;
     }
 
-    private boolean supported(List<MappedTransitSegment> edges) {
+    /** 정적 마스터에서 확정된 한 출처의 인접 edge인지 검사한다. 실시간 crosswalk는 요구하지 않는다. */
+    private boolean topologySupported(List<MappedTransitSegment> edges) {
         if (edges.isEmpty()) return false;
         for (int i = 0; i < edges.size(); i++) {
             var e = edges.get(i);
             if (e.mode() != TransportMode.BUS
-                    || !numeric(e.routeId())
-                    || !numeric(e.fromNodeId())
-                    || !numeric(e.toNodeId())
-                    || !Objects.equals(e.routeId(), e.realtimeRouteId())
-                    || !Objects.equals(e.fromNodeId(), e.fromRealtimeNodeId())
-                    || !Objects.equals(e.toNodeId(), e.toRealtimeNodeId())
-                    || e.fromOrder() < 0
+                    || !component(e.routeId())
+                    || !component(e.fromNodeId())
+                    || !component(e.toNodeId())
+                    || !e.segmentId()
+                            .equals(
+                                    "BUS:"
+                                            + e.routeId()
+                                            + ":"
+                                            + e.fromNodeId()
+                                            + ":"
+                                            + e.toNodeId())
+                    || e.fromOrder() < 1
                     || e.fromOrder() > 10000
                     || e.toOrder() != e.fromOrder() + 1
                     || e.sequence() != i + 1) return false;
@@ -814,6 +900,24 @@ public class JourneyEvaluationService {
                             || edges.get(i - 1).toOrder() != e.fromOrder())) return false;
         }
         return true;
+    }
+
+    /** 현재 ML bundle의 학습·HTTP 계약은 서울 숫자 ID만 지원한다. */
+    private boolean mlSupported(List<MappedTransitSegment> edges) {
+        if (!topologySupported(edges)) return false;
+        return edges.stream()
+                .allMatch(
+                        e ->
+                                numeric(e.routeId())
+                                        && numeric(e.fromNodeId())
+                                        && numeric(e.toNodeId())
+                                        && Objects.equals(e.routeId(), e.realtimeRouteId())
+                                        && Objects.equals(e.fromNodeId(), e.fromRealtimeNodeId())
+                                        && Objects.equals(e.toNodeId(), e.toRealtimeNodeId()));
+    }
+
+    private boolean component(String value) {
+        return value != null && value.matches("[A-Za-z0-9._-]{1,80}");
     }
 
     private boolean numeric(String value) {

@@ -69,7 +69,7 @@ public class PlaceService {
 
     @Transactional
     public PlaceResponse create(Long userId, PlaceCreateRequest request) {
-        requireInServiceArea(request.lat(), request.lng());
+        requireInServiceArea(request.lat(), request.lng(), request.address());
         User user = userRepository.getReferenceById(userId);
         Place place =
                 placeRepository.save(
@@ -110,7 +110,7 @@ public class PlaceService {
             if (request.getLat() == null || request.getLng() == null) {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST, "좌표는 null 일 수 없습니다.");
             }
-            requireInServiceArea(request.getLat(), request.getLng());
+            requireInServiceArea(request.getLat(), request.getLng(), request.getAddress());
             place.changeCoordinate(request.getLat(), request.getLng());
         }
         return PlaceResponse.from(place);
@@ -137,8 +137,13 @@ public class PlaceService {
         return place;
     }
 
-    private void requireInServiceArea(BigDecimal lat, BigDecimal lng) {
-        if (!SupportedServiceArea.contains(lat, lng)) {
+    /**
+     * 좌표 경계 상자로 먼저 거르고, 주소를 아는 경우 시도 이름으로 한 번 더 거른다. 수도권 상자는 사각형이라 강원 서부 등이 함께 들어오는데, 검색 화면이 이미
+     * 걸러내는 지역을 등록 단계가 받아주면 두 단계의 허용 범위가 달라진다. 낯선 주소 표기는 거절하지 않는다.
+     */
+    private void requireInServiceArea(BigDecimal lat, BigDecimal lng, String address) {
+        if (!SupportedServiceArea.contains(lat, lng)
+                || SupportedServiceArea.addressClearlyOutside(address)) {
             throw new BusinessException(ErrorCode.OUT_OF_SERVICE_AREA, "수도권과 부산 지역만 서비스합니다.");
         }
     }

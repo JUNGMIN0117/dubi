@@ -25,6 +25,30 @@ class SupportedServiceAreaTest {
     }
 
     @Test
+    void rectangleLetsUnsupportedRegionsInSoAddressDecidesToo() {
+        // 수도권 사각형은 강원 서부를 함께 덮는다. 좌표만으로는 춘천을 거를 수 없다.
+        assertThat(SupportedServiceArea.contains(37.8813, 127.7298)).isTrue(); // 춘천
+        assertThat(SupportedServiceArea.addressClearlyOutside("강원특별자치도 춘천시 시청길 11")).isTrue();
+        assertThat(SupportedServiceArea.addressClearlyOutside("강원 춘천시 옥천동")).isTrue();
+    }
+
+    @Test
+    void keepsServiceRegionAddresses() {
+        assertThat(SupportedServiceArea.addressClearlyOutside("서울 중구 세종대로 110")).isFalse();
+        assertThat(SupportedServiceArea.addressClearlyOutside("경기도 성남시 분당구")).isFalse();
+        assertThat(SupportedServiceArea.addressClearlyOutside("인천광역시 연수구")).isFalse();
+        assertThat(SupportedServiceArea.addressClearlyOutside("부산 해운대구 구남로 1")).isFalse();
+    }
+
+    @Test
+    void unknownAddressFormsAreNotRejected() {
+        // 표기 변화나 지번만 있는 주소 때문에 정상 장소가 사라지면 안 된다. 모르면 통과시킨다.
+        assertThat(SupportedServiceArea.addressClearlyOutside("성동구 성수동1가")).isFalse();
+        assertThat(SupportedServiceArea.addressClearlyOutside("")).isFalse();
+        assertThat(SupportedServiceArea.addressClearlyOutside(null)).isFalse();
+    }
+
+    @Test
     void exposesSeparateSearchRectangles() {
         assertThat(SupportedServiceArea.areas())
                 .extracting(SupportedServiceArea.Area::code)

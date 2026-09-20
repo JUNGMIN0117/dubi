@@ -2,6 +2,7 @@ package com.ssafy.ddubi.global.util;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 뚜비가 경로 후보를 조회하고 저장할 수 있는 서비스 권역을 판정한다.
@@ -35,6 +36,20 @@ public final class SupportedServiceArea {
 
     private static final List<Area> AREAS = List.of(CAPITAL, BUSAN);
 
+    /**
+     * 카카오 주소의 시도 표기. 짧은 형태와 정식 명칭을 모두 받는다. 경계 상자는 서비스 밖 지역(강원 서부 등)을 걸러내지 못하므로, 주소를 아는 경우에는 시도 이름으로
+     * 한 번 더 판정한다.
+     */
+    private static final Set<String> SERVICE_REGIONS =
+            Set.of("서울", "서울특별시", "경기", "경기도", "인천", "인천광역시", "부산", "부산광역시");
+
+    /** 서비스 밖인 것이 분명한 시도 표기. 여기에 없는 낯선 표기는 거절하지 않는다. */
+    private static final Set<String> KNOWN_OUTSIDE_REGIONS =
+            Set.of(
+                    "강원", "강원도", "강원특별자치도", "충북", "충청북도", "충남", "충청남도", "대전", "대전광역시", "세종",
+                    "세종특별자치시", "전북", "전라북도", "전북특별자치도", "전남", "전라남도", "광주", "광주광역시", "경북", "경상북도",
+                    "경남", "경상남도", "대구", "대구광역시", "울산", "울산광역시", "제주", "제주도", "제주특별자치도");
+
     private SupportedServiceArea() {}
 
     public static boolean contains(BigDecimal lat, BigDecimal lng) {
@@ -53,5 +68,19 @@ public final class SupportedServiceArea {
     /** 호출자가 목록을 바꾸지 못하도록 불변 권역 목록을 반환한다. */
     public static List<Area> areas() {
         return AREAS;
+    }
+
+    /**
+     * 주소가 서비스 밖인 것이 분명한지 판정한다.
+     *
+     * <p>경계 상자는 사각형이라 수도권 상자에 강원 서부가 함께 들어온다. 주소를 아는 경우에는 시도 이름으로 걸러낼 수 있다. 알 수 없는 표기는 거절하지 않는다. 표기
+     * 변화나 해외 주소 때문에 정상 장소가 사라지는 편이 미지원 지역 한 건이 보이는 것보다 나쁘기 때문이다.
+     */
+    public static boolean addressClearlyOutside(String address) {
+        if (address == null || address.isBlank()) {
+            return false;
+        }
+        String region = address.trim().split("\s+")[0];
+        return !SERVICE_REGIONS.contains(region) && KNOWN_OUTSIDE_REGIONS.contains(region);
     }
 }

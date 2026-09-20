@@ -32,7 +32,8 @@ with TestClient(app) as client:
     assert client.get('/v2/bus/health').status_code == 404
     assert set(client.get('/openapi.json').json()['paths']) == {
         '/health/live', '/health/ready', '/v1/bus/predictions:batch',
-        '/v1/bus/environment:prepare', '/v1/bus/environment:predict'}
+        '/v1/bus/environment:prepare', '/v1/bus/environment:predict',
+        '/v1/bus/features:latest'}
 assert not any(name.startswith('static_bus_') for name in sys.modules)
 """
     result = subprocess.run(

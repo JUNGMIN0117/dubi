@@ -30,6 +30,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["B011"]
+# 이 도구는 import 앞에서 sys.path 를 먼저 손본다. 순서를 바꾸면 import 가 실패한다.
+"sparkjobs/tools/verify_topis_enrichment.py" = ["E402"]
 
 # future annotations가 있어도 Python 3.8에서 런타임 타입 해석이 가능한 typing 표기를 보존한다.
 [tool.ruff.lint.pyupgrade]

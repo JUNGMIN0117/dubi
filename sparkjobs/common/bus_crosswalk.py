@@ -21,10 +21,22 @@ SCHEMA = T.StructType(
         for n in ("lookupType", "namespace", "routeId", "fromStopId", "toStopId", "segmentId")
     ]
 )
+EDGE_SCHEMA = T.StructType(
+    [
+        T.StructField("namespace", T.StringType(), False),
+        T.StructField("routeId", T.StringType(), False),
+        T.StructField("fromStopId", T.StringType(), False),
+        T.StructField("toStopId", T.StringType(), False),
+        T.StructField("fromOrder", T.LongType(), False),
+        T.StructField("toOrder", T.LongType(), False),
+        T.StructField("direction", T.StringType(), True),
+        T.StructField("segmentId", T.StringType(), False),
+    ]
+)
 
 
-def load_crosswalk(spark, path, expected_sha):
-    """기동 시 SHA·ID를 검증하고 집계 인덱스를 한 번 물리화한다. 잡 종료 때 unpersist한다."""
+def _verified_edges(path, expected_sha):
+    """SHA·정책·ID·순서를 검증한 원본 edge와 manifest를 반환한다."""
     with open(path, "rb") as stream:
         raw = stream.read()
     if not expected_sha or hashlib.sha256(raw).hexdigest() != expected_sha:
@@ -55,10 +67,29 @@ def load_crosswalk(spark, path, expected_sha):
         if key in seen or e["fromOrder"] < 1 or e["toOrder"] != e["fromOrder"] + 1:
             raise ValueError("crosswalk order invalid")
         seen.add(key)
+        rows.append(
+            (ns, parts[0], parts[1], parts[2], e["fromOrder"], e["toOrder"], e.get("direction"), e["segmentId"])
+        )
+    return rows, data
+
+
+def load_crosswalk_edges(spark, path, expected_sha, expected_master_sha=None):
+    """검증된 원본 인접 edge를 순번·방향과 함께 DataFrame으로 반환한다."""
+    rows, data = _verified_edges(path, expected_sha)
+    if expected_master_sha and data.get("masterSha256") != expected_master_sha:
+        raise ValueError("crosswalk bus master SHA mismatch")
+    return spark.createDataFrame(rows, EDGE_SCHEMA), data["masterVersion"], expected_sha
+
+
+def load_crosswalk(spark, path, expected_sha):
+    """기동 시 SHA·ID를 검증하고 집계 인덱스를 한 번 물리화한다. 잡 종료 때 unpersist한다."""
+    edges, data = _verified_edges(path, expected_sha)
+    rows = []
+    for ns, route_id, from_stop_id, to_stop_id, _, _, _, segment_id in edges:
         rows.extend(
             [
-                ("bus.arrival", ns, parts[0], "", parts[2], e["segmentId"]),
-                ("bus.position", ns, parts[0], parts[1], parts[2], e["segmentId"]),
+                ("bus.arrival", ns, route_id, "", to_stop_id, segment_id),
+                ("bus.position", ns, route_id, from_stop_id, to_stop_id, segment_id),
             ]
         )
     # 동명/순환 정류장의 여러 진입 edge를 첫 행으로 뽑지 않고 후보 집합으로 남긴다.

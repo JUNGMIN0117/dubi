@@ -96,6 +96,65 @@ def redis_rows(silver):
     )
 
 
+def segment_redis_rows(silver):
+    """현재 위치가 정확히 매핑된 구간별 최신 차량 관측을 Feature 조립용으로 복제한다."""
+    # 수신시각만 있는 위치 이벤트는 provider 관측시각을 지어내지 않는다.
+    # Redis 최신값의 유효기간에만 수집시각을 사용하고 timestampBasis를 함께 남긴다.
+    observed_time = F.coalesce(
+        F.to_timestamp("observedAt"),
+        F.when(F.col("timestampBasis") == "received", F.to_timestamp("collectedAt")),
+    )
+    accepted = (
+        silver.filter(
+            "status = 'ACCEPTED' AND repeatIndex = 1 AND eventType = 'bus.position' "
+            "AND size(segmentIds) > 0 AND collectedAt IS NOT NULL"
+        )
+        .withColumn("effectiveObservedAt", observed_time)
+        .filter(F.col("effectiveObservedAt").isNotNull() & F.to_timestamp("collectedAt").isNotNull())
+        .withColumn("segmentId", F.explode("segmentIds"))
+    )
+    order_time = F.col("effectiveObservedAt")
+    order = Window.partitionBy("segmentId").orderBy(
+        order_time.desc(),
+        F.to_timestamp("collectedAt").desc(),
+        F.col("kafka_partition").desc(),
+        F.col("kafka_offset").desc(),
+    )
+    latest = (
+        accepted.withColumn("orderTime", order_time).withColumn("rank", F.row_number().over(order)).filter("rank = 1")
+    )
+    occurred = F.date_format("effectiveObservedAt", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    collected = F.date_format(F.to_timestamp("collectedAt"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    ordering = F.date_format("orderTime", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+    valid_until = F.date_format(
+        (F.col("effectiveObservedAt").cast("long") + 120).cast("timestamp"), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    )
+    observation = F.struct(*[F.col(name).alias(name) for name in dict(POSITION, **ARRIVAL)])
+    return latest.select(
+        F.concat(F.lit("ml:latest:bus-segment:"), "segmentId").alias("redisKey"),
+        F.to_json(
+            F.struct(
+                *[F.col(name) for name in ALL_FIELDS],
+                "segmentId",
+                "providerKey",
+                "providerIds",
+                "canonicalMapping",
+                observation.alias("observation"),
+                F.struct("latitude", "longitude").alias("location"),
+                occurred.alias("occurredAt"),
+                ordering.alias("_latestOrderAt"),
+                valid_until.alias("validUntil"),
+                F.lit(120).alias("freshnessSeconds"),
+                F.lit(86400).alias("retentionSeconds"),
+            ),
+            {"ignoreNullFields": "false"},
+        ).alias("redisValue"),
+        F.lit(86400).alias("ttlSeconds"),
+        ordering.alias("occurredAtOrder"),
+        collected.alias("collectedAtOrder"),
+    )
+
+
 def write_bus_silver(silver, batch_id, root):
     """버스 Silver를 HDFS 이력으로만 쓴다. Redis는 쓰지 않는다.
 
@@ -113,7 +172,7 @@ def write_bus_redis(silver, settings):
 
     서비스가 읽는 값이라 쓰기 실패는 상위로 전파해 checkpoint가 실패 배치를 건너뛰지 않게 한다.
     """
-    rows = redis_rows(silver).cache()
+    rows = redis_rows(silver).unionByName(segment_redis_rows(silver)).cache()
     try:
         count = rows.count()
         if count:

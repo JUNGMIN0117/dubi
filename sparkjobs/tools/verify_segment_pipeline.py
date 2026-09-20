@@ -44,17 +44,25 @@ def main():
     version = "fixture-registry-v1"
     rows = []
     for day, durations in [(7, [40, 50, 60]), (0, [90, 100, 110])]:
-        at = (now - timedelta(days=day)).isoformat()
+        at = (now - timedelta(days=day, seconds=2)).isoformat()
         for i, duration in enumerate(durations):
+            exited = datetime.fromisoformat(at)
             rows.append(
                 dict(
                     eventId=out.name + f":segment-fixture-{day}-{i}",
                     segmentId=segment,
                     masterVersion=version,
-                    occurredAt=at,
-                    collectedAt=at,
+                    mappingVersion="fixture-mapping-v1",
+                    vehicleId=f"fixture-vehicle-{day}-{i}",
+                    occurredAt=exited.isoformat(),
+                    observedAt=(exited + timedelta(seconds=1)).isoformat(),
+                    enteredAt=(exited - timedelta(seconds=duration)).isoformat(),
+                    exitedAt=exited.isoformat(),
+                    collectedAt=(exited + timedelta(seconds=2)).isoformat(),
+                    validUntil=(exited + timedelta(minutes=5)).isoformat(),
                     weatherBucket="DRY",
                     sampleKind="ACTUAL_TRAVERSAL",
+                    quality="VERIFIED",
                     source="actual.fixture",
                     durationSeconds=float(duration),
                 )

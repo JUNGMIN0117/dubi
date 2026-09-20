@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -45,18 +46,27 @@ def frame(spark, rows, schema):
 
 
 def fact(i, duration, **extra):
-    return dict(
+    exited = datetime.fromisoformat("2026-09-10T10:09:00+09:00")
+    result = dict(
         eventId=str(i),
         segmentId="SUB:2:A:B",
         masterVersion="master1",
-        occurredAt="2026-09-10T10:09:00+09:00",
+        mappingVersion="fixture-mapping-v1",
+        vehicleId="fixture-vehicle-" + str(i),
+        occurredAt=exited.isoformat(),
+        observedAt=(exited + timedelta(seconds=5)).isoformat(),
+        enteredAt=(exited - timedelta(seconds=float(duration))).isoformat(),
+        exitedAt=exited.isoformat(),
         collectedAt="2026-09-10T10:09:10+09:00",
+        validUntil="2026-09-10T10:14:00+09:00",
         weatherBucket="DRY",
         sampleKind="ACTUAL_TRAVERSAL",
+        quality="VERIFIED",
         source="actual.fixture",
         durationSeconds=float(duration),
-        **extra,
     )
+    result.update(extra)
+    return result
 
 
 def registry(spark):
@@ -77,10 +87,18 @@ def test_actual_only_dedup_conflicts_and_hand_calculated_percentiles(spark):
         dict(fact("weather", 20), weatherBucket=None),
         dict(fact("version", 20), masterVersion="other"),
         dict(fact("future", 20), collectedAt="2026-09-11T00:00:00+09:00"),
+        dict(fact("estimated", 20), quality="ESTIMATED"),
+        dict(fact("vehicle", 20), vehicleId=None),
+        dict(fact("duration-mismatch", 20), durationSeconds=25.0),
     ]
     valid, rejected = validate(frame(spark, rows, FACT_SCHEMA), registry(spark), "2026-09-10T10:10:00+09:00")
     assert valid.count() == 10
-    assert rejected.count() == 6
+    assert rejected.count() == 9
+    assert {row.rejectionReason for row in rejected.collect()} >= {
+        "UNVERIFIED_TRAVERSAL",
+        "MISSING_VEHICLE_ID",
+        "DURATION_TIME_MISMATCH",
+    }
     result = aggregate(valid, "baseline1", 5, 1).first()
     assert (
         result.p50,
@@ -267,13 +285,19 @@ def test_hour_boundary_uses_observation_hour_and_insufficient_baseline_is_unknow
     spark,
 ):
     # 10:59의 실측은 11시가 되어도 10시 기준선 50초와 비교한다. 11시 기준선은 200초다.
+    exited = datetime.fromisoformat("2026-09-10T10:59:00+09:00")
     facts = frame(
         spark,
         [
-            dict(
-                fact(i, 100),
-                occurredAt="2026-09-10T10:59:00+09:00",
-                collectedAt="2026-09-10T10:59:10+09:00",
+            fact(
+                i,
+                100,
+                occurredAt=exited.isoformat(),
+                exitedAt=exited.isoformat(),
+                enteredAt=(exited - timedelta(seconds=100)).isoformat(),
+                observedAt=(exited + timedelta(seconds=5)).isoformat(),
+                collectedAt=(exited + timedelta(seconds=10)).isoformat(),
+                validUntil=(exited + timedelta(minutes=5)).isoformat(),
             )
             for i in range(3)
         ],

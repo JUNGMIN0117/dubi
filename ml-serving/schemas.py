@@ -39,7 +39,13 @@ class InvalidRequest(BaseModel):
 class ServiceUnavailable(BaseModel):
     """모델 미준비·대기열 초과/만료·추론 실패를 구분하는 503 응답이다."""
 
-    detail: Literal["MODEL_NOT_READY", "MODEL_BUSY", "MODEL_UNAVAILABLE"]
+    detail: Literal[
+        "MODEL_NOT_READY",
+        "MODEL_BUSY",
+        "MODEL_UNAVAILABLE",
+        "FEATURE_STORE_NOT_READY",
+        "FEATURE_STORE_UNAVAILABLE",
+    ]
 
 
 class SegmentRequest(BaseModel):

@@ -979,6 +979,8 @@ class _RecommendationEvidenceCard extends StatelessWidget {
     'MIXED_PREVIEW' => '경로 API와 교통 예측 정보를 함께 사용했어요.',
     'HISTORICAL_REFERENCE' || 'MIXED_HISTORICAL_REFERENCE' =>
       '일부 버스 구간에 과거 평균 소요시간을 사용한 참고 추정이에요. 실시간 또는 ML 예측값이 아니에요.',
+    'BUS_REFERENCE' =>
+      '버스 구간에 미리 계산한 기준 소요시간을 사용한 참고 추정이에요. 실시간 또는 ML 예측값이 아니에요.',
     _ => '계산에 사용된 정보가 확인되지 않았어요. 최신 평가의 제한 사항을 확인해 주세요.',
   };
 

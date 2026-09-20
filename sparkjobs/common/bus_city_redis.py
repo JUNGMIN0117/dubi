@@ -9,7 +9,6 @@ from pyspark.sql import functions as F
 
 from common.bus_city_mapping import MAPPING_VERSION
 
-
 DEFAULT_TTL_SECONDS = 2_592_000
 _SAFE_KEY_PART = re.compile(r"^[A-Za-z0-9._-]+$")
 _ACTIVATE_LUA = r"""
@@ -28,7 +27,7 @@ return actual
 def _key_part(name, value):
     value = str(value or "")
     if not value or not _SAFE_KEY_PART.fullmatch(value):
-        raise ValueError("{} contains unsafe Redis key characters: {!r}".format(name, value))
+        raise ValueError(f"{name} contains unsafe Redis key characters: {value!r}")
     return value
 
 
@@ -50,13 +49,20 @@ def mapping_keys(mapping_version, master_version, area_reference_sha, run_id=Non
 
 def redis_mapping_rows(segment_mapping):
     columns = [
-        "segmentId", "masterVersion", "mappingVersion", "primaryProviderAreaId",
-        "candidateProviderAreaIds", "averageNearestAreaDistanceMeters", "mappingStatus",
-        "mappingReason", "maxDistanceMeters", "ambiguityMeters",
+        "segmentId",
+        "masterVersion",
+        "mappingVersion",
+        "primaryProviderAreaId",
+        "candidateProviderAreaIds",
+        "averageNearestAreaDistanceMeters",
+        "mappingStatus",
+        "mappingReason",
+        "maxDistanceMeters",
+        "ambiguityMeters",
     ]
     missing = [name for name in columns if name not in segment_mapping.columns]
     if missing:
-        raise ValueError("segment city mapping is missing Redis columns: {}".format(missing))
+        raise ValueError(f"segment city mapping is missing Redis columns: {missing}")
     return segment_mapping.select(
         F.col("segmentId").alias("redisField"),
         F.to_json(F.struct(*[F.col(name) for name in columns]), {"ignoreNullFields": "false"}).alias("redisValue"),
@@ -66,15 +72,34 @@ def redis_mapping_rows(segment_mapping):
 def activate_staged_mapping(client, keys, expected_rows, ttl_seconds, metadata):
     if expected_rows <= 0 or ttl_seconds <= 0:
         raise ValueError("positive row count and TTL required")
-    return int(client.eval(
-        _ACTIVATE_LUA, 4, keys["staging"], keys["final"], keys["active"], keys["metadata"],
-        expected_rows, ttl_seconds, json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
-    ))
+    return int(
+        client.eval(
+            _ACTIVATE_LUA,
+            4,
+            keys["staging"],
+            keys["final"],
+            keys["active"],
+            keys["metadata"],
+            expected_rows,
+            ttl_seconds,
+            json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+        )
+    )
 
 
-def publish_segment_city_mapping(segment_mapping, *, host, port, password, master_version,
-                                 area_reference_sha, crosswalk_sha, bus_master_sha,
-                                 mapping_version=MAPPING_VERSION, ttl_seconds=DEFAULT_TTL_SECONDS):
+def publish_segment_city_mapping(
+    segment_mapping,
+    *,
+    host,
+    port,
+    password,
+    master_version,
+    area_reference_sha,
+    crosswalk_sha,
+    bus_master_sha,
+    mapping_version=MAPPING_VERSION,
+    ttl_seconds=DEFAULT_TTL_SECONDS,
+):
     import redis
 
     ttl_seconds = int(ttl_seconds)
@@ -91,6 +116,7 @@ def publish_segment_city_mapping(segment_mapping, *, host, port, password, maste
 
     def write_partition(partition):
         import redis as redis_module
+
         client = redis_module.Redis(**connection)
         pipe, pending = client.pipeline(transaction=False), 0
         try:
@@ -98,7 +124,8 @@ def publish_segment_city_mapping(segment_mapping, *, host, port, password, maste
                 pipe.hset(keys["staging"], row.redisField, row.redisValue)
                 pending += 1
                 if pending >= 1000:
-                    pipe.execute(); pending = 0
+                    pipe.execute()
+                    pending = 0
             if pending:
                 pipe.execute()
         finally:
@@ -112,14 +139,22 @@ def publish_segment_city_mapping(segment_mapping, *, host, port, password, maste
         rows.foreachPartition(write_partition)
         driver.hdel(keys["staging"], "__ddubi_staging__")
         metadata = {
-            "mappingVersion": mapping_version, "masterVersion": master_version,
-            "areaReferenceSha256": area_reference_sha, "crosswalkSha256": crosswalk_sha,
-            "busMasterSha256": bus_master_sha, "rowCount": expected,
+            "mappingVersion": mapping_version,
+            "masterVersion": master_version,
+            "areaReferenceSha256": area_reference_sha,
+            "crosswalkSha256": crosswalk_sha,
+            "busMasterSha256": bus_master_sha,
+            "rowCount": expected,
             "publishedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
         activated = activate_staged_mapping(driver, keys, expected, ttl_seconds, metadata)
-        return {"activeKey": keys["active"], "mappingKey": keys["final"],
-                "metadataKey": keys["metadata"], "rowCount": activated, "ttlSeconds": ttl_seconds}
+        return {
+            "activeKey": keys["active"],
+            "mappingKey": keys["final"],
+            "metadataKey": keys["metadata"],
+            "rowCount": activated,
+            "ttlSeconds": ttl_seconds,
+        }
     finally:
         if driver is not None:
             try:

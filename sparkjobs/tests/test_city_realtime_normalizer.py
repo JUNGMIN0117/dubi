@@ -18,25 +18,42 @@ def event(raw, event_id="city-1", content_hash="hash-1"):
 
 def sample_city():
     return {
-        "AREA_CD": "POI009", "AREA_NM": "광화문·덕수궁",
-        "LIVE_PPLTN_STTS": [{
-            "AREA_CONGEST_LVL": "약간 붐빔", "AREA_CONGEST_MSG": "이동에 약간 시간이 걸립니다.",
-            "AREA_PPLTN_MIN": "44000", "AREA_PPLTN_MAX": "46000", "PPLTN_TIME": "2026-09-17 16:25",
-            "FCST_PPLTN": [
-                {"FCST_TIME": "2026-09-17 17:00", "FCST_CONGEST_LVL": "붐빔",
-                 "FCST_PPLTN_MIN": "48000", "FCST_PPLTN_MAX": "50000"},
-                {"FCST_TIME": "bad", "FCST_PPLTN_MIN": "1", "FCST_PPLTN_MAX": "2"},
-            ],
-        }],
+        "AREA_CD": "POI009",
+        "AREA_NM": "광화문·덕수궁",
+        "LIVE_PPLTN_STTS": [
+            {
+                "AREA_CONGEST_LVL": "약간 붐빔",
+                "AREA_CONGEST_MSG": "이동에 약간 시간이 걸립니다.",
+                "AREA_PPLTN_MIN": "44000",
+                "AREA_PPLTN_MAX": "46000",
+                "PPLTN_TIME": "2026-09-17 16:25",
+                "FCST_PPLTN": [
+                    {
+                        "FCST_TIME": "2026-09-17 17:00",
+                        "FCST_CONGEST_LVL": "붐빔",
+                        "FCST_PPLTN_MIN": "48000",
+                        "FCST_PPLTN_MAX": "50000",
+                    },
+                    {"FCST_TIME": "bad", "FCST_PPLTN_MIN": "1", "FCST_PPLTN_MAX": "2"},
+                ],
+            }
+        ],
         "ROAD_TRAFFIC_STTS": {
             "AVG_ROAD_DATA": {"ROAD_TRAFFIC_SPD": 12, "ROAD_TRAFFIC_TIME": "2026-09-17 16:20"},
-            "ROAD_TRAFFIC_STTS": [{
-                "LINK_ID": "1000000301", "ROAD_NM": "율곡로", "START_ND_CD": "S1", "END_ND_CD": "E1",
-                "START_ND_XY": "126.9798999832241_37.5701535606807",
-                "END_ND_XY": "126.9793805233784_37.5701494116837",
-                "DIST": "46.0", "SPD": 17, "IDX": "서행",
-                "XYLIST": "126.9793805233784_37.5701494116837|126.9798999832241_37.5701535606807",
-            }],
+            "ROAD_TRAFFIC_STTS": [
+                {
+                    "LINK_ID": "1000000301",
+                    "ROAD_NM": "율곡로",
+                    "START_ND_CD": "S1",
+                    "END_ND_CD": "E1",
+                    "START_ND_XY": "126.9798999832241_37.5701535606807",
+                    "END_ND_XY": "126.9793805233784_37.5701494116837",
+                    "DIST": "46.0",
+                    "SPD": 17,
+                    "IDX": "서행",
+                    "XYLIST": "126.9793805233784_37.5701494116837|126.9798999832241_37.5701535606807",
+                }
+            ],
         },
         "WEATHER_STTS": [{"TEMP": "25.0"}],
     }
@@ -81,15 +98,17 @@ def test_expands_multiple_road_links_and_forecast_times():
     second_road = dict(city["ROAD_TRAFFIC_STTS"]["ROAD_TRAFFIC_STTS"][0])
     second_road["LINK_ID"] = "1000000401"
     city["ROAD_TRAFFIC_STTS"]["ROAD_TRAFFIC_STTS"].append(second_road)
-    city["LIVE_PPLTN_STTS"][0]["FCST_PPLTN"].append({
-        "FCST_TIME": "2026-09-17 18:00", "FCST_CONGEST_LVL": "보통",
-        "FCST_PPLTN_MIN": "30000", "FCST_PPLTN_MAX": "32000",
-    })
+    city["LIVE_PPLTN_STTS"][0]["FCST_PPLTN"].append(
+        {
+            "FCST_TIME": "2026-09-17 18:00",
+            "FCST_CONGEST_LVL": "보통",
+            "FCST_PPLTN_MIN": "30000",
+            "FCST_PPLTN_MAX": "32000",
+        }
+    )
     result = normalize_event(event(city))
     assert [row["linkId"] for row in result.roads] == ["1000000301", "1000000401"]
-    assert [row["forecastAt"] for row in result.forecasts] == [
-        "2026-09-17T17:00:00+09:00", "2026-09-17T18:00:00+09:00"
-    ]
+    assert [row["forecastAt"] for row in result.forecasts] == ["2026-09-17T17:00:00+09:00", "2026-09-17T18:00:00+09:00"]
 
 
 def test_missing_values_stay_null_and_min_max_are_not_silently_swapped():

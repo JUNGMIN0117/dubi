@@ -6,14 +6,14 @@
 
 import argparse
 
-from pyspark.sql import SparkSession, functions as F
-
 from common.bus_crosswalk import load_crosswalk_edges
 from common.bus_segment_mapping import (
     build_bus_segment_edges,
     build_bus_segment_mapping,
     build_bus_segment_registry,
 )
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 
 def prepare(verified_edges):
@@ -47,12 +47,8 @@ def main(argv=None):
                 "masterVersion string, crosswalkSha256 string, mappingVersion string",
             ).write.mode("errorifexists").json(root + "/_run")
 
-            edges.write.mode("errorifexists").partitionBy(
-                "providerNamespace"
-            ).parquet(root + "/edges")
-            mapping.write.mode("errorifexists").partitionBy(
-                "providerNamespace"
-            ).parquet(root + "/mappings")
+            edges.write.mode("errorifexists").partitionBy("providerNamespace").parquet(root + "/edges")
+            mapping.write.mode("errorifexists").partitionBy("providerNamespace").parquet(root + "/mappings")
             registry.write.mode("errorifexists").parquet(root + "/segments")
 
             quality = mapping.groupBy("mappingStatus").count()
@@ -60,9 +56,7 @@ def main(argv=None):
 
             mapping_count = mapping.count()
             segment_count = registry.count()
-            unresolved_count = mapping.filter(
-                F.col("mappingStatus") != "RESOLVED"
-            ).count()
+            unresolved_count = mapping.filter(F.col("mappingStatus") != "RESOLVED").count()
             spark.createDataFrame(
                 [
                     (

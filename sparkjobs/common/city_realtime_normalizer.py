@@ -31,8 +31,12 @@ CONGESTION = {
     "crowded": ("CROWDED", 4),
 }
 TRAFFIC = {
-    "원활": "SMOOTH", "서행": "SLOW", "정체": "CONGESTED",
-    "smooth": "SMOOTH", "slow": "SLOW", "congested": "CONGESTED",
+    "원활": "SMOOTH",
+    "서행": "SLOW",
+    "정체": "CONGESTED",
+    "smooth": "SMOOTH",
+    "slow": "SLOW",
+    "congested": "CONGESTED",
 }
 
 
@@ -167,9 +171,12 @@ def _geometry(value: Any) -> tuple[dict[str, Any] | None, dict[str, Any], list[s
         "coordinateOrder": "LONGITUDE_LATITUDE",
         "coordinateStatus": "MISSING",
         "geometryStatus": "MISSING",
-        "startLongitude": None, "startLatitude": None,
-        "endLongitude": None, "endLatitude": None,
-        "representativeLongitude": None, "representativeLatitude": None,
+        "startLongitude": None,
+        "startLatitude": None,
+        "endLongitude": None,
+        "endLatitude": None,
+        "representativeLongitude": None,
+        "representativeLatitude": None,
     }
     if value is None:
         return None, meta, ["XYLIST_ABSENT"]
@@ -189,13 +196,17 @@ def _geometry(value: Any) -> tuple[dict[str, Any] | None, dict[str, Any], list[s
         meta["coordinateStatus"] = "OUT_OF_SEOUL_BOUNDS"
         meta["geometryStatus"] = "INVALID"
         return None, meta, ["XYLIST_OUT_OF_SEOUL_BOUNDS"]
-    meta.update({
-        "coordinateStatus": "VALID_WGS84",
-        "startLongitude": coords[0][0], "startLatitude": coords[0][1],
-        "endLongitude": coords[-1][0], "endLatitude": coords[-1][1],
-        "representativeLongitude": sum(p[0] for p in coords) / len(coords),
-        "representativeLatitude": sum(p[1] for p in coords) / len(coords),
-    })
+    meta.update(
+        {
+            "coordinateStatus": "VALID_WGS84",
+            "startLongitude": coords[0][0],
+            "startLatitude": coords[0][1],
+            "endLongitude": coords[-1][0],
+            "endLatitude": coords[-1][1],
+            "representativeLongitude": sum(p[0] for p in coords) / len(coords),
+            "representativeLatitude": sum(p[1] for p in coords) / len(coords),
+        }
+    )
     if len(coords) < 2:
         meta["geometryStatus"] = "INSUFFICIENT_POINTS"
         return None, meta, ["XYLIST_INSUFFICIENT_POINTS"]
@@ -218,8 +229,9 @@ def _content_hash(payload: dict[str, Any], raw: Any) -> str:
     return _text(payload.get("contentHash")) or hashlib.sha256(_compact(raw).encode("utf-8")).hexdigest()
 
 
-def _reject(event: dict[str, Any], raw: Any, reasons: list[str], record_type: str,
-            area_id: str | None = None) -> dict[str, Any]:
+def _reject(
+    event: dict[str, Any], raw: Any, reasons: list[str], record_type: str, area_id: str | None = None
+) -> dict[str, Any]:
     return {
         "silverVersion": SILVER_VERSION,
         "eventId": _text(event.get("eventId")),
@@ -252,8 +264,14 @@ def normalize_event(event: dict[str, Any], freshness_seconds: int = 900) -> Norm
         live_value = raw.get("LIVE_PPLTN_STTS")
         live = _first_object(raw, "LIVE_PPLTN_STTS")
         road_groups = _objects(raw.get("ROAD_TRAFFIC_STTS"))
-        avg = next((_first_object(group, "AVG_ROAD_DATA") for group in road_groups
-                    if _first_object(group, "AVG_ROAD_DATA") is not None), None)
+        avg = next(
+            (
+                _first_object(group, "AVG_ROAD_DATA")
+                for group in road_groups
+                if _first_object(group, "AVG_ROAD_DATA") is not None
+            ),
+            None,
+        )
         road_rows = [road for group in road_groups for road in _objects(group.get("ROAD_TRAFFIC_STTS"))]
         road_links_present = any("ROAD_TRAFFIC_STTS" in group for group in road_groups)
         missing: list[str] = []
@@ -305,18 +323,27 @@ def normalize_event(event: dict[str, Any], freshness_seconds: int = 900) -> Norm
         flags.extend(time_flags)
         content_hash = _content_hash(payload, raw)
         area_row = {
-            "silverVersion": SILVER_VERSION, "eventId": _text(event.get("eventId")),
-            "contentHash": content_hash, "providerAreaId": area_id, "areaName": area_name,
-            **time_fields, "collectedAt": _iso(collected),
+            "silverVersion": SILVER_VERSION,
+            "eventId": _text(event.get("eventId")),
+            "contentHash": content_hash,
+            "providerAreaId": area_id,
+            "areaName": area_name,
+            **time_fields,
+            "collectedAt": _iso(collected),
             "populationObservedAt": _iso(_parse_time(live.get("PPLTN_TIME"))),
             "roadTrafficObservedAt": _iso(_parse_time(avg.get("ROAD_TRAFFIC_TIME"))),
             "congestionLevelRaw": _text(live.get("AREA_CONGEST_LVL")),
-            "congestionLevel": level, "congestionScore": score,
+            "congestionLevel": level,
+            "congestionScore": score,
             "congestionMessage": _text(live.get("AREA_CONGEST_MSG")),
-            "populationMin": population_min, "populationMax": population_max,
-            "populationMid": population_mid, "avgRoadSpeedKph": speed,
-            "missingFields": sorted(set(missing)), "qualityFlags": sorted(set(flags)),
-            "processingStatus": _status(missing, flags), "rawPayloadJson": raw_json,
+            "populationMin": population_min,
+            "populationMax": population_max,
+            "populationMid": population_mid,
+            "avgRoadSpeedKph": speed,
+            "missingFields": sorted(set(missing)),
+            "qualityFlags": sorted(set(flags)),
+            "processingStatus": _status(missing, flags),
+            "rawPayloadJson": raw_json,
         }
         result.area.append(area_row)
 
@@ -330,28 +357,45 @@ def normalize_event(event: dict[str, Any], freshness_seconds: int = 900) -> Norm
             forecast_flags: list[str] = list(time_flags)
             fmin = _number(forecast.get("FCST_PPLTN_MIN"), integer=True)
             fmax = _number(forecast.get("FCST_PPLTN_MAX"), integer=True)
-            if fmin is None: forecast_missing.append("FCST_PPLTN_MIN")
-            if fmax is None: forecast_missing.append("FCST_PPLTN_MAX")
+            if fmin is None:
+                forecast_missing.append("FCST_PPLTN_MIN")
+            if fmax is None:
+                forecast_missing.append("FCST_PPLTN_MAX")
             fmid = None
             if fmin is not None and fmax is not None:
-                if fmin > fmax: forecast_flags.append("POPULATION_MIN_GREATER_THAN_MAX")
-                elif fmin < 0: forecast_flags.append("NEGATIVE_POPULATION")
-                else: fmid = int(round((fmin + fmax) / 2))
+                if fmin > fmax:
+                    forecast_flags.append("POPULATION_MIN_GREATER_THAN_MAX")
+                elif fmin < 0:
+                    forecast_flags.append("NEGATIVE_POPULATION")
+                else:
+                    fmid = int(round((fmin + fmax) / 2))
             fcongestion, fflags = _normalize_category(forecast.get("FCST_CONGEST_LVL"), CONGESTION)
             forecast_flags.extend(fflags)
-            if fcongestion is None: forecast_missing.append("FCST_CONGEST_LVL")
-            result.forecasts.append({
-                "silverVersion": SILVER_VERSION, "eventId": _text(event.get("eventId")),
-                "contentHash": content_hash, "providerAreaId": area_id, "areaName": area_name,
-                "forecastCreatedAt": time_fields["observedAt"], "forecastAt": _iso(forecast_at),
-                "timestampBasis": time_fields["timestampBasis"], "collectedAt": _iso(collected),
-                "congestionLevelRaw": _text(forecast.get("FCST_CONGEST_LVL")),
-                "congestionLevel": fcongestion[0] if isinstance(fcongestion, tuple) else fcongestion,
-                "congestionScore": fcongestion[1] if isinstance(fcongestion, tuple) else None,
-                "populationMin": fmin, "populationMax": fmax, "populationMid": fmid,
-                "missingFields": sorted(set(forecast_missing)), "qualityFlags": sorted(set(forecast_flags)),
-                "processingStatus": _status(forecast_missing, forecast_flags), "rawPayloadJson": _compact(forecast),
-            })
+            if fcongestion is None:
+                forecast_missing.append("FCST_CONGEST_LVL")
+            result.forecasts.append(
+                {
+                    "silverVersion": SILVER_VERSION,
+                    "eventId": _text(event.get("eventId")),
+                    "contentHash": content_hash,
+                    "providerAreaId": area_id,
+                    "areaName": area_name,
+                    "forecastCreatedAt": time_fields["observedAt"],
+                    "forecastAt": _iso(forecast_at),
+                    "timestampBasis": time_fields["timestampBasis"],
+                    "collectedAt": _iso(collected),
+                    "congestionLevelRaw": _text(forecast.get("FCST_CONGEST_LVL")),
+                    "congestionLevel": fcongestion[0] if isinstance(fcongestion, tuple) else fcongestion,
+                    "congestionScore": fcongestion[1] if isinstance(fcongestion, tuple) else None,
+                    "populationMin": fmin,
+                    "populationMax": fmax,
+                    "populationMid": fmid,
+                    "missingFields": sorted(set(forecast_missing)),
+                    "qualityFlags": sorted(set(forecast_flags)),
+                    "processingStatus": _status(forecast_missing, forecast_flags),
+                    "rawPayloadJson": _compact(forecast),
+                }
+            )
 
         road_time = avg.get("ROAD_TRAFFIC_TIME")
         for road in road_rows:
@@ -371,35 +415,56 @@ def normalize_event(event: dict[str, Any], freshness_seconds: int = 900) -> Norm
                 road_flags.append("ROAD_SPEED_OUT_OF_RANGE")
             traffic_status, traffic_flags = _normalize_category(road.get("IDX"), TRAFFIC)
             road_flags.extend(traffic_flags)
-            if traffic_status is None: road_missing.append("IDX")
+            if traffic_status is None:
+                road_missing.append("IDX")
             geometry, geometry_meta, geometry_flags = _geometry(road.get("XYLIST"))
             road_flags.extend(geometry_flags)
-            if road.get("XYLIST") is None: road_missing.append("XYLIST")
+            if road.get("XYLIST") is None:
+                road_missing.append("XYLIST")
             start_point, endpoint_flags = _road_endpoint(road.get("START_ND_XY"), "START_ND_XY")
             road_flags.extend(endpoint_flags)
             end_point, endpoint_flags = _road_endpoint(road.get("END_ND_XY"), "END_ND_XY")
             road_flags.extend(endpoint_flags)
-            geometry_meta.update({
-                "startLongitude": start_point[0] if start_point else None,
-                "startLatitude": start_point[1] if start_point else None,
-                "endLongitude": end_point[0] if end_point else None,
-                "endLatitude": end_point[1] if end_point else None,
-            })
-            road_times, road_time_flags = _time_fields(road.get("ROAD_TRAFFIC_TIME") or road_time, collected, freshness_seconds)
+            geometry_meta.update(
+                {
+                    "startLongitude": start_point[0] if start_point else None,
+                    "startLatitude": start_point[1] if start_point else None,
+                    "endLongitude": end_point[0] if end_point else None,
+                    "endLatitude": end_point[1] if end_point else None,
+                }
+            )
+            road_times, road_time_flags = _time_fields(
+                road.get("ROAD_TRAFFIC_TIME") or road_time, collected, freshness_seconds
+            )
             road_flags.extend(road_time_flags)
-            result.roads.append({
-                "silverVersion": SILVER_VERSION, "eventId": _text(event.get("eventId")),
-                "contentHash": content_hash, "providerAreaId": area_id, "areaName": area_name,
-                "linkNamespace": LINK_NAMESPACE, "linkId": link_id,
-                "roadName": _text(road.get("ROAD_NM")), "startNodeId": _text(road.get("START_ND_CD")),
-                "startNodeName": _text(road.get("START_ND_NM")), "endNodeId": _text(road.get("END_ND_CD")),
-                "endNodeName": _text(road.get("END_ND_NM")), "distanceMeters": _number(road.get("DIST")),
-                **road_times, "collectedAt": _iso(collected), "speedKph": road_speed,
-                "trafficStatusRaw": _text(road.get("IDX")), "trafficStatus": traffic_status,
-                "geometry": geometry, **geometry_meta,
-                "missingFields": sorted(set(road_missing)), "qualityFlags": sorted(set(road_flags)),
-                "processingStatus": _status(road_missing, road_flags), "rawPayloadJson": _compact(road),
-            })
+            result.roads.append(
+                {
+                    "silverVersion": SILVER_VERSION,
+                    "eventId": _text(event.get("eventId")),
+                    "contentHash": content_hash,
+                    "providerAreaId": area_id,
+                    "areaName": area_name,
+                    "linkNamespace": LINK_NAMESPACE,
+                    "linkId": link_id,
+                    "roadName": _text(road.get("ROAD_NM")),
+                    "startNodeId": _text(road.get("START_ND_CD")),
+                    "startNodeName": _text(road.get("START_ND_NM")),
+                    "endNodeId": _text(road.get("END_ND_CD")),
+                    "endNodeName": _text(road.get("END_ND_NM")),
+                    "distanceMeters": _number(road.get("DIST")),
+                    **road_times,
+                    "collectedAt": _iso(collected),
+                    "speedKph": road_speed,
+                    "trafficStatusRaw": _text(road.get("IDX")),
+                    "trafficStatus": traffic_status,
+                    "geometry": geometry,
+                    **geometry_meta,
+                    "missingFields": sorted(set(road_missing)),
+                    "qualityFlags": sorted(set(road_flags)),
+                    "processingStatus": _status(road_missing, road_flags),
+                    "rawPayloadJson": _compact(road),
+                }
+            )
     return result
 
 

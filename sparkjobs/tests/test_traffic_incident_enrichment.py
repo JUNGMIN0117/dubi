@@ -18,28 +18,68 @@ class TrafficIncidentEnrichmentTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.geometry = [[127.0228, 37.5755], [127.0237, 37.5757]]
-        self.master_data = {"schemaVersion": 1, "namespace": "SEOUL_ACCINFO_LINK",
-            "idSystem": "SEOUL_TOPIS_ACCINFO_LINK_ID", "sourceCrs": "EPSG:4326",
-            "accInfoLinkIdVerified": True, "reviewStatus": "APPROVED", "sourceDataset": "OA-13310",
-            "version": "official-test-v1", "evidenceRef": "fixture-only",
-            "validFrom": "2026-01-01T00:00:00+09:00", "validUntil": "2027-01-01T00:00:00+09:00",
-            "links": [{"linkId": "1000000100", "roadName": "세종대로", "districtName": "종로구",
-                       "startNodeId": "n1", "endNodeId": "n2", "geometry": self.geometry}]}
+        self.master_data = {
+            "schemaVersion": 1,
+            "namespace": "SEOUL_ACCINFO_LINK",
+            "idSystem": "SEOUL_TOPIS_ACCINFO_LINK_ID",
+            "sourceCrs": "EPSG:4326",
+            "accInfoLinkIdVerified": True,
+            "reviewStatus": "APPROVED",
+            "sourceDataset": "OA-13310",
+            "version": "official-test-v1",
+            "evidenceRef": "fixture-only",
+            "validFrom": "2026-01-01T00:00:00+09:00",
+            "validUntil": "2027-01-01T00:00:00+09:00",
+            "links": [
+                {
+                    "linkId": "1000000100",
+                    "roadName": "세종대로",
+                    "districtName": "종로구",
+                    "startNodeId": "n1",
+                    "endNodeId": "n2",
+                    "geometry": self.geometry,
+                }
+            ],
+        }
         raw = gzip.compress(json.dumps(self.master_data, ensure_ascii=False).encode())
         self.path = self.root / "master.json.gz"
         self.path.write_bytes(raw)
         self.master = VerifiedLinkMaster.load(self.path, hashlib.sha256(raw).hexdigest())
 
-    def event(self, link="1000000100", x="202051.8241", y="452892.967", description="세종대로 종로 방향 2개 차로 통제", expected=True):
-        raw = {"incidentId": "i1", "occurredDate": "20260917", "occurredTime": "090000",
-               "incidentTypeCode": "A01", "incidentDetailTypeCode": "A0101", "linkId": link,
-               "grs80tmX": x, "grs80tmY": y, "description": description}
+    def event(
+        self,
+        link="1000000100",
+        x="202051.8241",
+        y="452892.967",
+        description="세종대로 종로 방향 2개 차로 통제",
+        expected=True,
+    ):
+        raw = {
+            "incidentId": "i1",
+            "occurredDate": "20260917",
+            "occurredTime": "090000",
+            "incidentTypeCode": "A01",
+            "incidentDetailTypeCode": "A0101",
+            "linkId": link,
+            "grs80tmX": x,
+            "grs80tmY": y,
+            "description": description,
+        }
         if expected:
             raw.update(expectedClearDate="20260917", expectedClearTime="110000")
-        return {"eventId": "e1", "eventType": "traffic.incident", "source": "traffic_incident",
-                "collectedAt": "2026-09-17T10:00:00+09:00",
-                "payload": {"providerIncidentId": "i1", "providerLinkNamespace": "SEOUL_ACCINFO_LINK",
-                            "providerLinkId": link, "contentHash": "hash", "raw": raw}}
+        return {
+            "eventId": "e1",
+            "eventType": "traffic.incident",
+            "source": "traffic_incident",
+            "collectedAt": "2026-09-17T10:00:00+09:00",
+            "payload": {
+                "providerIncidentId": "i1",
+                "providerLinkNamespace": "SEOUL_ACCINFO_LINK",
+                "providerLinkId": link,
+                "contentHash": "hash",
+                "raw": raw,
+            },
+        }
 
     def projected(self, longitude, latitude):
         return Transformer.from_crs(4326, 5181, always_xy=True).transform(longitude, latitude)

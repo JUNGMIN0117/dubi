@@ -1,7 +1,6 @@
 """기상청 격자 공식과 Collector 기본 수집 범위를 Spark 없이 검사한다."""
 
 import pytest
-
 from common.kma_grid import (
     DEFAULT_WEATHER_GRID_POINTS,
     latlon_to_kma_grid,

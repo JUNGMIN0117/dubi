@@ -1,4 +1,5 @@
 """TOPIS 최신 이벤트 키를 공지의 최신 완전 추출 결과와 맞춘다."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -61,8 +62,7 @@ def build_reconciliation_plans(rows, now=None):
                 # 유효시각이 깨진 행은 기존 키를 성급하게 지우지 않고 TTL 정리에 맡긴다.
                 if valid_until is None or valid_until > current:
                     active.add(event_id)
-        plans.append({"noticeId": notice_id, "collectedAt": collected_at.isoformat(),
-                      "activeEventIds": sorted(active)})
+        plans.append({"noticeId": notice_id, "collectedAt": collected_at.isoformat(), "activeEventIds": sorted(active)})
     return plans
 
 
@@ -78,6 +78,7 @@ def reconcile_topis_latest(plans, host, port, password):
     if not plans:
         return 0
     import json
+
     import redis
 
     client = redis.Redis(host=host, port=port, password=password, socket_timeout=5, socket_connect_timeout=5)

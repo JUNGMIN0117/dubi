@@ -9,7 +9,6 @@ from pyspark.sql import functions as F
 
 from common.bus_road_mapping import MAPPING_VERSION
 
-
 DEFAULT_TTL_SECONDS = 2_592_000
 _SAFE = re.compile(r"^[A-Za-z0-9._-]+$")
 _ACTIVATE = r"""
@@ -28,7 +27,7 @@ return actual
 def _part(name, value):
     value = str(value or "")
     if not value or not _SAFE.fullmatch(value):
-        raise ValueError("{} contains unsafe Redis key characters: {!r}".format(name, value))
+        raise ValueError(f"{name} contains unsafe Redis key characters: {value!r}")
     return value
 
 
@@ -40,7 +39,7 @@ def mapping_keys(mapping_version, master_version, road_crosswalk_sha, run_id=Non
     )
     result = {
         "final": base,
-        "active": "ml:mapping:bus-road:active:{}".format(master_version),
+        "active": f"ml:mapping:bus-road:active:{master_version}",
         "metadata": base + ":meta",
     }
     if run_id is not None:
@@ -50,14 +49,24 @@ def mapping_keys(mapping_version, master_version, road_crosswalk_sha, run_id=Non
 
 def redis_mapping_rows(segment_mapping):
     fields = [
-        "segmentId", "masterVersion", "mappingVersion", "roadCrosswalkVersion",
-        "trafficLinkMasterVersion", "mappingAsOf", "topisLinkNamespace",
-        "topisLinkIds", "topisLinkCount", "mappingStatus", "mappingReason",
-        "occurrenceCoverageRatio", "roadPathValidFrom", "roadPathValidUntil",
+        "segmentId",
+        "masterVersion",
+        "mappingVersion",
+        "roadCrosswalkVersion",
+        "trafficLinkMasterVersion",
+        "mappingAsOf",
+        "topisLinkNamespace",
+        "topisLinkIds",
+        "topisLinkCount",
+        "mappingStatus",
+        "mappingReason",
+        "occurrenceCoverageRatio",
+        "roadPathValidFrom",
+        "roadPathValidUntil",
     ]
     missing = [name for name in fields if name not in segment_mapping.columns]
     if missing:
-        raise ValueError("segment road mapping is missing Redis columns: {}".format(missing))
+        raise ValueError(f"segment road mapping is missing Redis columns: {missing}")
     return segment_mapping.select(
         F.col("segmentId").alias("redisField"),
         F.to_json(
@@ -71,10 +80,19 @@ def activate_staged_mapping(client, keys, expected_rows, ttl_seconds, metadata):
     if expected_rows <= 0 or ttl_seconds <= 0:
         raise ValueError("expected rows and TTL must be positive")
     value = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
-    return int(client.eval(
-        _ACTIVATE, 4, keys["staging"], keys["final"], keys["active"],
-        keys["metadata"], expected_rows, ttl_seconds, value,
-    ))
+    return int(
+        client.eval(
+            _ACTIVATE,
+            4,
+            keys["staging"],
+            keys["final"],
+            keys["active"],
+            keys["metadata"],
+            expected_rows,
+            ttl_seconds,
+            value,
+        )
+    )
 
 
 def publish_segment_road_mapping(
@@ -100,19 +118,18 @@ def publish_segment_road_mapping(
     rows = redis_mapping_rows(segment_mapping).cache()
     expected = rows.count()
     distinct = rows.select("redisField").distinct().count()
-    invalid = rows.filter(
-        F.col("redisField").isNull() | (F.length(F.trim("redisField")) == 0)
-    ).limit(1).count()
+    invalid = rows.filter(F.col("redisField").isNull() | (F.length(F.trim("redisField")) == 0)).limit(1).count()
     if expected == 0 or expected != distinct or invalid:
         rows.unpersist()
         raise ValueError(
-            "Redis road mapping requires unique non-empty segmentId rows: "
-            "rows={}, distinct={}".format(expected, distinct)
+            f"Redis road mapping requires unique non-empty segmentId rows: rows={expected}, distinct={distinct}"
         )
 
     keys = mapping_keys(MAPPING_VERSION, master_version, road_crosswalk_sha, uuid.uuid4().hex)
     connection = {
-        "host": host, "port": int(port), "password": password or None,
+        "host": host,
+        "port": int(port),
+        "password": password or None,
         "decode_responses": True,
     }
     driver = None
@@ -155,8 +172,10 @@ def publish_segment_road_mapping(
         }
         activated = activate_staged_mapping(driver, keys, expected, ttl_seconds, metadata)
         return {
-            "activeKey": keys["active"], "mappingKey": keys["final"],
-            "metadataKey": keys["metadata"], "rowCount": activated,
+            "activeKey": keys["active"],
+            "mappingKey": keys["final"],
+            "metadataKey": keys["metadata"],
+            "rowCount": activated,
             "ttlSeconds": ttl_seconds,
         }
     finally:

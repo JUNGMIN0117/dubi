@@ -134,12 +134,13 @@ class PlaceIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("좌표 수정도 서울 검증을 거친다")
-    void coordinateUpdateChecksSeoul() {
+    @DisplayName("좌표 수정도 지원 권역 검증을 거친다")
+    void coordinateUpdateChecksSupportedServiceArea() {
         Long placeId = createDefault().id();
         PlaceUpdateRequest update = new PlaceUpdateRequest();
-        update.setLat(new BigDecimal("35.1587"));
-        update.setLng(new BigDecimal("129.1604"));
+        // 부산은 지원 권역에 포함되므로, 지원하지 않는 대전 좌표로 실제 거부 경계를 검증한다.
+        update.setLat(new BigDecimal("36.3504"));
+        update.setLng(new BigDecimal("127.3845"));
 
         assertThatThrownBy(() -> placeService.update(ownerId, placeId, update))
                 .isInstanceOf(BusinessException.class)

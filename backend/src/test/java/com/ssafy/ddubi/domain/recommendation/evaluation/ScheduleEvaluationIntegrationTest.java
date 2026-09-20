@@ -192,25 +192,25 @@ class ScheduleEvaluationIntegrationTest extends IntegrationTestSupport {
         return store.complete(job,job.cache().search(),false,outcome,now.plusSeconds(600),null,null,now.plusSeconds(11));
     }
 
-    @Test void storedEvaluationKeepsMlDiagnosticsAndRecommendsFastestProviderCandidate() {
+    @Test void storedEvaluationAppliesTestMlAndRecommendsFastestPredictedCandidate() {
         when(routeClient.search(any())).thenReturn(new RouteSearchResult("KAKAO",now,null,
                 List.of(MlRoutePreviewTest.route(0,"1",10,0,1),MlRoutePreviewTest.route(1,"2",900,0,1))));
         when(mlClient.predict(any())).thenAnswer(call -> new BusPreviewClient.Estimate(
                 ((BusPreviewClient.Input)call.getArgument(0)).routeId().equals("1") ? 200.0 : 30.0,
                 "MODEL_NOT_PRODUCTION_READY","test-model",now,0,8,false));
         var result = workflow.evaluate(scheduleId,owner,TriggerType.INITIAL,now);
-        assertThat(result.preview().fastest().journeyKey()).isEqualTo("candidate-0");
-        assertThat(result.preview().fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(610));
+        assertThat(result.preview().fastest().journeyKey()).isEqualTo("candidate-1");
+        assertThat(result.preview().fastest().estimatedArrivalAt()).isEqualTo(now.plusSeconds(630));
         assertThat(result.preview().fastest().departureAt()).isEqualTo(now.plusSeconds(600));
         var stored = (ScheduleEvaluationWorkflow.Outcome) store.latest(scheduleId,owner).get("result");
-        assertThat(stored.preview().predictions()).hasSize(2).allMatch(p->!p.applied());
+        assertThat(stored.preview().predictions()).hasSize(2).allMatch(p->p.applied());
         assertThat(stored.preview().waitPredictions()).hasSize(2);
         assertThat(stored.preview().waitPredictions()).allMatch(w -> w.seconds() == null && !w.applied());
-        assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("API_ONLY");
-        // 수신한 시험 모델과 실제 추천 출처를 분리한다. 기본 경로 추천이 모델 운영 승인은 아니다.
+        assertThat(stored.preview().candidates().get(1).quality()).isEqualTo("ML_PREVIEW");
+        // 통합 테스트는 TEST_APPLY 프로필이므로 시험 모델의 수치를 적용하되, 운영 승인 여부는 false로 보존한다.
         assertThat(stored.recommendationId()).isNotNull();
-        assertThat(stored.persistence().source()).isEqualTo("API_ONLY");
-        assertThat(stored.persistence().mlSteps()).isZero();
+        assertThat(stored.persistence().source()).isEqualTo("ML_PREVIEW");
+        assertThat(stored.persistence().mlSteps()).isEqualTo(1);
         assertThat(stored.persistence().productionReady()).isFalse();
         assertThat(jdbc.queryForObject("SELECT confidence FROM recommendation WHERE id=?",String.class,stored.recommendationId()))
                 .isEqualTo("LOW");

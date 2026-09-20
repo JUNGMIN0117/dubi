@@ -2,9 +2,8 @@
 
 import fakeredis
 import pytest
-from redis.exceptions import ResponseError
-
 from common.bus_city_redis import activate_staged_mapping, mapping_keys
+from redis.exceptions import ResponseError
 
 
 def test_complete_city_mapping_is_activated():

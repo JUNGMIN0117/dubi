@@ -113,6 +113,11 @@ ddubi:
     secret: ${JWT_SECRET:} # 운영에서 반드시 주입. 비어 있으면 기동 실패시킬 것(Phase 1)
     access-token-validity: 60m
     refresh-token-validity: 14d
+  subway-timing:
+    # build_timetable.py가 만든 운행일별 JSON. 원본 CSV를 직접 지정하지 않는다.
+    timetable-path: ${DDUBI_SUBWAY_TIMING_TIMETABLE_PATH:}
+    # 카카오 총시간의 대기 포함 여부를 실측하기 전에는 계산 결과를 전체 ETA에 합치지 않는다.
+    decomposition-verified: ${DDUBI_SUBWAY_TIMING_DECOMPOSITION_VERIFIED:false}
   schedule:
     # 반복 일정 인스턴스 선생성 지평선. 연장은 Phase 4 일일 잡이 맡는다.
     repeat-horizon-days: 14

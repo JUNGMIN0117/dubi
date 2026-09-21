@@ -98,6 +98,35 @@ class WalkingEnrichmentTest {
     }
 
     @Test
+    void walkingPathReplacesSegmentGeometryForTheMap() {
+        var line = List.of(new Coordinate(127.0005, 37.5005), new Coordinate(127.001, 37.501));
+        var output =
+                service(
+                                r ->
+                                        new WalkingRouteClient.Evidence(
+                                                120L, now.plusSeconds(60), "fixture", null, line))
+                        .prepare(List.of(route(0)), origin, destination, now, points("BUS_STOP"));
+        var segments = output.candidates().get(0).segments();
+        // 도보 구간은 실제 걷는 길 좌표를 갖고, 대중교통 구간의 좌표는 그대로다.
+        assertThat(segments.get(0).geometry()).isEqualTo(line);
+        assertThat(segments.get(2).geometry()).isEqualTo(line);
+        assertThat(segments.get(1).geometry()).containsExactly(board, alight);
+    }
+
+    @Test
+    void walkingWithoutPathKeepsProviderGeometry() {
+        var output =
+                service(
+                                r ->
+                                        new WalkingRouteClient.Evidence(
+                                                120L, now.plusSeconds(60), "fixture", null))
+                        .prepare(List.of(route(0)), origin, destination, now, points("BUS_STOP"));
+        // 좌표가 없으면 원본 좌표를 그대로 둔다. 시간만 도보 API 값으로 바뀐다.
+        assertThat(output.candidates().get(0).segments().get(0).geometry()).isEmpty();
+        assertThat(output.evidence().legs().get(0).durationSeconds()).isEqualTo(120);
+    }
+
+    @Test
     void existingWalksReplaceTheirOwnCostsWithoutResidual() {
         var output =
                 service(
@@ -153,6 +182,11 @@ class WalkingEnrichmentTest {
             assertThat(actual.totalDurationSeconds()).isEqualTo(840);
             assertThat(actual.unassignedDurationSeconds()).isEqualTo(0);
             assertThat(actual.segments()).hasSize(3);
+            // 합성 도보도 route_segment에 저장되므로 양 끝 이름이 DB NOT NULL 계약을 만족해야 한다.
+            assertThat(actual.segments().get(0).fromName()).isEqualTo("출발지");
+            assertThat(actual.segments().get(0).toName()).isEqualTo("A");
+            assertThat(actual.segments().get(2).fromName()).isEqualTo("B");
+            assertThat(actual.segments().get(2).toName()).isEqualTo("도착지");
             assertThat(actual.totalDurationSeconds())
                     .isEqualTo(
                             actual.unassignedDurationSeconds()

@@ -47,6 +47,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
   final formKey = GlobalKey<FormState>();
   final title = TextEditingController();
   final time = TextEditingController(text: '09:00');
+  final departTime = TextEditingController();
   final weekdays = <int>{1, 2, 3, 4, 5};
   PlaceLocation? origin;
   PlaceLocation? destination;
@@ -63,6 +64,8 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
     final rule = widget.rule;
     title.text = rule?.title ?? '';
     time.text = rule?.time ?? '09:00';
+    // 값을 지어내지 않는다. 기존 규칙에 출발시각이 없으면 빈 칸으로 두고 사용자가 채운다.
+    departTime.text = rule?.departTime ?? '';
     origin = rule?.origin;
     destination = rule?.destination;
     weekdays
@@ -79,6 +82,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
   void dispose() {
     title.dispose();
     time.dispose();
+    departTime.dispose();
     super.dispose();
   }
 
@@ -96,8 +100,10 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
           return ListView(
             padding: screenPadding,
             children: [
-              const TtubeeGuideCard(
-                '출근이나 수업처럼 정해진 요일에 반복되는 일정을 한 번에 등록해요.',
+              TtubeeGuideCard(
+                widget.rule?.needsDepartTime == true
+                    ? '출발 시간이 없어서 추천 계산이 안 되고 있어요. 아래에 출발 시간을 넣고 저장해주세요.'
+                    : '출근이나 수업처럼 정해진 요일에 반복되는 일정을 한 번에 등록해요.',
                 compact: true,
               ),
               const SizedBox(height: 16),
@@ -166,9 +172,36 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
           searchService: widget.placeSearchService,
           onSelected: (value) => setState(() => origin = value),
         ),
+        _field(
+          '출발하는 시간',
+          departTime,
+          key: const Key('repeatDepartTimeField'),
+          icon: Icons.directions_walk,
+          timeField: true,
+        ),
+        // 자정을 넘겨 도착하는 반복(23:50 출발 → 00:30 도착)은 정상이라 막지 않는다.
+        // 서버가 전날 출발로 처리한다. 대부분은 실수이므로 알리기만 한다.
+        if (_crossesMidnight)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              '출발이 도착보다 늦어요. 전날 밤에 출발하는 일정으로 저장돼요.',
+              key: Key('repeatCrossesMidnightNotice'),
+              style: TextStyle(color: DdubiColors.red, fontSize: 12),
+            ),
+          ),
       ],
     ),
   );
+
+  /// 출발이 도착보다 늦은지. 둘 다 "HH:mm" 으로 채워져 있을 때만 본다.
+  bool get _crossesMidnight {
+    final depart = departTime.text.trim();
+    final arrive = time.text.trim();
+    final pattern = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
+    if (!pattern.hasMatch(depart) || !pattern.hasMatch(arrive)) return false;
+    return depart.compareTo(arrive) >= 0;
+  }
 
   Widget _repeatCard(BuildContext context) => InfoCard(
     child: Column(
@@ -365,6 +398,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
         origin: origin!,
         destination: destination!,
         time: time.text.trim(),
+        departTime: departTime.text.trim(),
         startDate: startDate,
         weekdays: {...weekdays},
         untilDate: hasEndDate ? endDate : null,

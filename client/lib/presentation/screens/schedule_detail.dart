@@ -301,6 +301,29 @@ class ScheduleDetailScreen extends StatelessWidget {
                 ],
               ),
             ),
+            // 반복에서 만들어진 일정이면 먼저 알린다. 수정·삭제가 이 일정 하나에만
+            // 적용된다는 점을 모르면 "지웠는데 또 생긴다" 로 느낀다.
+            if (schedule.isRepeating) ...[
+              const SizedBox(height: 12),
+              const InfoCard(
+                key: Key('scheduleRepeatNotice'),
+                child: Row(
+                  children: [
+                    Icon(Icons.event_repeat, size: 18, color: DdubiColors.blue),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '반복 일정에서 만들어진 일정이에요. 여기서 고치거나 지우면 이 날짜 하나에만 적용돼요.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF52677B),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [
@@ -346,11 +369,13 @@ class ScheduleDetailScreen extends StatelessWidget {
               headline: headline,
               onSelected: recommendationApi == null
                   ? null
-                  : (savedRoute) => _openSavedRoute(
+                  : (savedRoute, displayRank, durationMin) => _openSavedRoute(
                       c,
                       schedule,
                       savedRoute,
                       routeRepository,
+                      displayRank: displayRank,
+                      durationMin: durationMin,
                     ),
             ),
             const SizedBox(height: 16),
@@ -472,8 +497,10 @@ class ScheduleDetailScreen extends StatelessWidget {
     BuildContext c,
     Schedule schedule,
     SavedRouteSummary savedRoute,
-    DdubiRepository routeRepository,
-  ) {
+    DdubiRepository routeRepository, {
+    int? displayRank,
+    int? durationMin,
+  }) {
     if (savedRoute.routeId.trim().isEmpty) {
       ScaffoldMessenger.of(c).showSnackBar(
         const SnackBar(
@@ -493,6 +520,8 @@ class ScheduleDetailScreen extends StatelessWidget {
         selectedRoute: savedRoute.toRouteOption(schedule),
         departureLabel: savedRoute.fromName ?? schedule.departurePlace,
         destinationLabel: savedRoute.toName ?? schedule.place,
+        displayRank: displayRank,
+        evaluatedDurationMin: durationMin,
       ),
     );
   }
@@ -580,7 +609,10 @@ class _LiveSavedRouteList extends StatefulWidget {
   final RecommendationApi? api;
   final String scheduleId;
   final ValueNotifier<ScheduleEvaluationV2?> headline;
-  final Future<Object?> Function(SavedRouteSummary)? onSelected;
+
+  /// 목록에서 보이던 순번과 소요시간을 같이 넘긴다. 상세 화면이 서버 rankNo 와 경로 API
+  /// 원본 시간을 따로 보여주면 같은 경로인데 다른 숫자가 나온다.
+  final Future<Object?> Function(SavedRouteSummary, int, int?)? onSelected;
 
   @override
   State<_LiveSavedRouteList> createState() => _LiveSavedRouteListState();
@@ -663,8 +695,12 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
     estimates: _estimates,
     onSelected: widget.onSelected == null
         ? null
-        : (route) async {
-            final result = await widget.onSelected!(route);
+        : (route, displayRank, durationMin) async {
+            final result = await widget.onSelected!(
+              route,
+              displayRank,
+              durationMin,
+            );
             // 상세 화면이 "이 경로는 정리됐다"고 알려 주면 새 목록으로 바꾼다.
             if (result == true && mounted) {
               await _reload();
@@ -687,7 +723,9 @@ class _SavedRouteList extends StatelessWidget {
 
   /// 서버가 같은 기준으로 비교한 후보별 결과. `routeId` 로 카드와 이어 붙인다.
   final List<EvaluationCandidateEstimate> estimates;
-  final ValueChanged<SavedRouteSummary>? onSelected;
+
+  /// (경로, 화면 순번, 화면에 보인 소요시간(분)) 를 넘긴다.
+  final void Function(SavedRouteSummary, int, int?)? onSelected;
 
   EvaluationCandidateEstimate? _estimateFor(String routeId) {
     for (final estimate in estimates) {
@@ -720,12 +758,13 @@ class _SavedRouteList extends StatelessWidget {
             child: Text('아직 평가된 추천 경로가 없어요.'),
           )
         else ...[
-          // 화면 순번은 1부터 다시 매긴다. 중복을 묶은 뒤 서버 순위(1,2,6,8,10)를 그대로
-          // 보여주면 사용자에게는 번호가 건너뛴 것처럼 보인다. 서버 순위는 개발자 진단에 남는다.
+          // 순번은 서버가 준 displayRank 를 그대로 쓴다. 없으면(구버전 응답) 1부터
+          // 앱이 매긴다. 어느 쪽이든 상세 화면에 같은 값을 넘겨 두 화면이 어긋나지 않게 한다.
+          // 내부 순위(rankNo)는 소요시간 기준 캐시라 사용자 화면에 쓰지 않는다.
           for (var i = 0; i < routes.length; i++) ...[
             _SavedRouteTile(
               route: routes[i],
-              displayRank: i + 1,
+              displayRank: routes[i].displayRank ?? i + 1,
               estimate: _estimateFor(routes[i].routeId),
               onTap: onSelected,
             ),
@@ -766,14 +805,18 @@ class _SavedRouteTile extends StatelessWidget {
   final int displayRank;
 
   final SavedRouteSummary route;
-  final ValueChanged<SavedRouteSummary>? onTap;
 
-  /// 평가된 소요시간이 있으면 그 값을, 없으면 경로 API 원본을 보여준다.
-  String _durationLabel() {
+  /// (경로, 화면 순번, 화면에 보인 소요시간(분)) 를 넘긴다. 상세 화면이 같은 숫자를
+  /// 보여주게 하려고 카드가 실제로 그린 값을 그대로 전달한다.
+  final void Function(SavedRouteSummary, int, int?)? onTap;
+
+  /// 평가된 소요시간이 있으면 그 값을, 없으면 경로 API 원본을 쓴다(분).
+  int get _durationMin {
     final seconds = estimate?.durationSeconds;
-    if (seconds == null) return '약 ${route.baseDurationMin}분';
-    return '약 ${(seconds / 60).ceil()}분';
+    return seconds == null ? route.baseDurationMin : (seconds / 60).ceil();
   }
+
+  String _durationLabel() => '약 $_durationMin분';
 
   @override
   Widget build(BuildContext context) => Material(
@@ -782,7 +825,9 @@ class _SavedRouteTile extends StatelessWidget {
     child: InkWell(
       key: Key('savedRoute-${route.routeId}'),
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap == null ? null : () => onTap!(route),
+      onTap: onTap == null
+          ? null
+          : () => onTap!(route, displayRank, _durationMin),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(

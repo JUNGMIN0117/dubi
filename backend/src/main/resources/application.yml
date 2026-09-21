@@ -199,7 +199,6 @@ ddubi:
     path: /v2/routing/walk
     timeout-millis: 1500
     cache-seconds: 60
-    max-calls: ${DDUBI_WALKING_MAX_CALLS:10}
     endpoint-max-meters: ${DDUBI_WALKING_ENDPOINT_MAX_METERS:0}
     master-coordinate-path: ${DDUBI_WALKING_MASTER_COORDINATE_PATH:}
   external:

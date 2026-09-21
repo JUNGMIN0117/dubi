@@ -72,7 +72,7 @@ class WalkingEnrichmentTest {
     }
 
     WalkingEnrichmentService service(WalkingRouteClient client) {
-        return new WalkingEnrichmentService(client, new ObjectMapper(), true, 4, 20, "");
+        return new WalkingEnrichmentService(client, new ObjectMapper(), true, 20, "");
     }
 
     @Test
@@ -266,6 +266,23 @@ class WalkingEnrichmentTest {
     }
 
     @Test
+    void scheduledWalkingResultRemainsValidUntilScheduleEnds() {
+        var service =
+                service(
+                        r ->
+                                new WalkingRouteClient.Evidence(
+                                        120L, now.plusSeconds(60), "fixture", null));
+        var prepared =
+                service.prepare(List.of(route(0)), origin, destination, now, points("BUS_STOP"));
+        Instant scheduleEndsAt = now.plus(Duration.ofHours(24));
+
+        var retained = service.retainUntil(prepared, scheduleEndsAt);
+
+        assertThat(retained.evidence().validUntil()).isEqualTo(scheduleEndsAt);
+        assertThat(retained.candidates()).isEqualTo(prepared.candidates());
+    }
+
+    @Test
     void missingCoordinateMeaningCannotCrashOrCallProvider() {
         var output =
                 service(
@@ -303,7 +320,7 @@ class WalkingEnrichmentTest {
     }
 
     @Test
-    void candidateRefreshSharesBudgetAndCachedResponses() {
+    void candidateRefreshCachesResponsesWithoutCallLimit() {
         var seen = new ArrayList<WalkingRouteClient.Request>();
         var service =
                 new WalkingEnrichmentService(
@@ -327,8 +344,9 @@ class WalkingEnrichmentTest {
         var changed =
                 service.prepare(
                         List.of(route(0)), destination, origin, now, points("BUS_STOP"), session);
-        assertThat(seen).hasSize(2);
-        assertThat(changed.evidence().fallbackReasons()).contains("WALK_CALL_BUDGET_EXHAUSTED");
+        assertThat(seen).hasSize(4);
+        assertThat(changed.evidence().fallbackReasons()).isEmpty();
+        assertThat(changed.evidence().apiCalls()).isEqualTo(4);
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.ssafy.ddubi.domain.schedule.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.ddubi.domain.schedule.dto.request.LocationRequest;
 import com.ssafy.ddubi.domain.schedule.dto.request.RepeatCreateRequest;
 import com.ssafy.ddubi.domain.schedule.dto.request.RepeatUpdateRequest;
@@ -39,6 +40,9 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     @Autowired private ScheduleService scheduleService;
     @Autowired private ScheduleRepository scheduleRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    @Autowired private ObjectMapper objectMapper;
+    @Autowired private com.ssafy.ddubi.domain.recommendation.service.ScheduleEvaluationStore evaluationStore;
 
     private Long ownerId;
 
@@ -59,6 +63,7 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
                         HOME,
                         OFFICE,
                         LocalTime.of(23, 59),
+                        LocalTime.of(23, 0),
                         LocalDate.now(BusinessTime.ZONE),
                         EVERY_DAY,
                         null,
@@ -95,6 +100,7 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
                                 HOME,
                                 OFFICE,
                                 LocalTime.of(23, 59),
+                                LocalTime.of(23, 0),
                                 LocalDate.now(BusinessTime.ZONE),
                                 EVERY_DAY,
                                 LocalDate.now(BusinessTime.ZONE).plusDays(2),
@@ -115,6 +121,7 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
                                 HOME,
                                 OFFICE,
                                 LocalTime.of(23, 59),
+                                LocalTime.of(23, 0),
                                 LocalDate.now(BusinessTime.ZONE),
                                 "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
                                 null,
@@ -220,5 +227,185 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
         repeatService.update(ownerId, created.repeatId(), update);
 
         assertThat(instancesOf(created.repeatId())).hasSize(before);
+    }
+
+    // ------------------------------------------------------------------
+    // 출발 예정시각 (B3) — 이게 없으면 반복 인스턴스는 추천 계산이 아예 안 돈다
+    // ------------------------------------------------------------------
+
+    /**
+     * 규칙에 넣은 출발시각이 인스턴스까지 내려가야 한다. 여기가 비면
+     * {@code ScheduleEvaluationStore} 가 DEPARTURE_REQUIRED 로 끝내고, 자동 재계산 대상
+     * 조회도 {@code planned_depart_at IS NOT NULL} 로 걸러내 버린다.
+     */
+    @Test
+    @DisplayName("규칙의 출발시각이 인스턴스마다 채워진다")
+    void instancesCarryDepartTime() {
+        RepeatCreateResponse created = createDaily();
+
+        assertThat(instancesOf(created.repeatId()))
+                .isNotEmpty()
+                .allSatisfy(
+                        instance -> {
+                            assertThat(instance.getPlannedDepartAt())
+                                    .as("비어 있으면 추천 계산이 돌지 않는다")
+                                    .isNotNull();
+                            assertThat(instance.getPlannedDepartAt().toLocalTime())
+                                    .isEqualTo(LocalTime.of(23, 0));
+                            assertThat(instance.getPlannedDepartAt().toLocalDate())
+                                    .as("출발이 도착보다 이르므로 같은 날이다")
+                                    .isEqualTo(instance.getArriveBy().toLocalDate());
+                        });
+    }
+
+    /**
+     * B3 가 고친 증상 그 자체. 예전에는 반복으로 만든 일정을 열면 앱이 "출발 예정시각이
+     * 없어요" 를 띄웠다 — {@code latest()} 가 DEPARTURE_REQUIRED 로 끝냈기 때문이다.
+     */
+    @Test
+    @DisplayName("반복으로 만든 일정이 DEPARTURE_REQUIRED 로 막히지 않는다")
+    void instancesAreNoLongerBlockedFromEvaluation() {
+        RepeatCreateResponse created = createDaily();
+        Schedule instance = instancesOf(created.repeatId()).get(0);
+
+        assertThat(evaluationStore.latest(instance.getId(), ownerId))
+                .extracting(latest -> latest.get("state"))
+                .as("출발시각이 있으므로 계산 단계로 넘어가야 한다")
+                .isNotEqualTo("DEPARTURE_REQUIRED");
+    }
+
+    /**
+     * 빌더로 plannedDepartAt 을 직접 넣으면 plan_source 가 LEGACY_UNKNOWN 으로 남는다.
+     * 이 값은 사용자가 규칙에 직접 넣은 것이므로 출처가 USER_INPUT 이어야 한다 — V9 가
+     * 출처 추적을 넣은 이유가 "과거 계획의 입력 출처를 추측하지 않는다" 이다.
+     */
+    @Test
+    @DisplayName("출발시각의 출처를 USER_INPUT 으로 기록한다")
+    void departTimeIsRecordedAsUserInput() {
+        RepeatCreateResponse created = createDaily();
+
+        assertThat(instancesOf(created.repeatId()))
+                .allSatisfy(
+                        instance -> {
+                            assertThat(instance.getPlanSource()).isEqualTo("USER_INPUT");
+                            assertThat(instance.getUserInputDepartAt())
+                                    .isEqualTo(instance.getPlannedDepartAt());
+                        });
+    }
+
+    /**
+     * "00:30 도착 / 23:50 출발" 은 같은 날 23:50 이 아니다. 그대로 두면 출발이 도착보다
+     * 뒤가 되어 계산이 말이 안 된다.
+     */
+    @Test
+    @DisplayName("출발이 도착보다 늦으면 전날로 잡는다 — 자정을 넘는 일정")
+    void departBeforeMidnightBelongsToPreviousDay() {
+        RepeatCreateResponse created =
+                repeatService.create(
+                        ownerId,
+                        new RepeatCreateRequest(
+                                "심야 근무",
+                                HOME,
+                                OFFICE,
+                                LocalTime.of(0, 30),
+                                LocalTime.of(23, 50),
+                                LocalDate.now(BusinessTime.ZONE),
+                                EVERY_DAY,
+                                null,
+                                null,
+                                null));
+
+        assertThat(instancesOf(created.repeatId()))
+                .isNotEmpty()
+                .allSatisfy(
+                        instance -> {
+                            assertThat(instance.getPlannedDepartAt())
+                                    .as("출발은 도착보다 반드시 앞서야 한다")
+                                    .isBefore(instance.getArriveBy());
+                            assertThat(instance.getPlannedDepartAt().toLocalDate())
+                                    .isEqualTo(instance.getArriveBy().toLocalDate().minusDays(1));
+                        });
+    }
+
+    /**
+     * 출발시각 도입 이전 규칙은 depart_time 이 NULL 이다. 서버가 도착 시각에서 역산해
+     * 채우지 않는다 — 사용자가 정하지 않은 출발 시각으로 알림을 보내면 근거를 댈 수 없다.
+     */
+    @Test
+    @DisplayName("구버전 규칙(출발시각 없음)은 서버가 값을 지어내지 않는다")
+    void legacyRuleWithoutDepartTimeIsLeftAlone() {
+        RepeatCreateResponse created = createDaily();
+        jdbcTemplate.update(
+                "UPDATE schedule_repeat SET depart_time = NULL WHERE id = ?", created.repeatId());
+        scheduleRepository.deleteAll();
+
+        RepeatUpdateRequest regenerate = new RepeatUpdateRequest();
+        regenerate.setLocalTime(LocalTime.of(23, 58));
+        repeatService.update(ownerId, created.repeatId(), regenerate);
+
+        assertThat(instancesOf(created.repeatId()))
+                .isNotEmpty()
+                .allSatisfy(
+                        instance ->
+                                assertThat(instance.getPlannedDepartAt())
+                                        .as("추측해서 채우느니 비워 두고 사용자에게 받는다")
+                                        .isNull());
+    }
+
+    @Test
+    @DisplayName("출발시각을 수정하면 다시 만들어진 인스턴스에 반영된다")
+    void updatingDepartTimeRegeneratesInstances() {
+        RepeatCreateResponse created = createDaily();
+
+        RepeatUpdateRequest update = new RepeatUpdateRequest();
+        update.setDepartTime(LocalTime.of(21, 30));
+        repeatService.update(ownerId, created.repeatId(), update);
+
+        assertThat(repeatService.get(ownerId, created.repeatId()).departTime())
+                .isEqualTo(LocalTime.of(21, 30));
+        assertThat(instancesOf(created.repeatId()))
+                .isNotEmpty()
+                .allSatisfy(
+                        instance ->
+                                assertThat(instance.getPlannedDepartAt().toLocalTime())
+                                        .isEqualTo(LocalTime.of(21, 30)));
+    }
+
+    /** 출발시각을 지우는 것은 계산을 못 하게 만드는 일이라, 사용자가 의도할 동작이 아니다. */
+    @Test
+    @DisplayName("출발시각을 명시적 null 로 지울 수 없다 — 400")
+    void departTimeCannotBeClearedExplicitly() {
+        RepeatCreateResponse created = createDaily();
+
+        RepeatUpdateRequest update = new RepeatUpdateRequest();
+        update.setDepartTime(null);
+
+        assertThatThrownBy(() -> repeatService.update(ownerId, created.repeatId(), update))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    /**
+     * 앱은 초 없이 {@code "09:00"} 으로 보낸다. LocalTime 에 {@code @JsonFormat} 을 붙이면
+     * 그 형식이 깨지므로 붙이지 않는다 — 이 테스트가 그 약속을 고정한다.
+     */
+    @Test
+    @DisplayName("앱이 보내는 \"09:00\" 형식을 그대로 읽는다")
+    void parsesTimeWithoutSeconds() throws Exception {
+        String body =
+                """
+                {"title":"출근","origin":{"name":"집","lat":37.5013068,"lng":127.0396597},
+                 "destination":{"name":"회사","lat":37.5716229,"lng":126.9767879},
+                 "localTime":"09:00","departTime":"08:10",
+                 "startDate":"2026-10-01","rrule":"FREQ=WEEKLY;BYDAY=MO"}
+                """;
+
+        RepeatCreateRequest parsed = objectMapper.readValue(body, RepeatCreateRequest.class);
+
+        assertThat(parsed.localTime()).isEqualTo(LocalTime.of(9, 0));
+        assertThat(parsed.departTime()).isEqualTo(LocalTime.of(8, 10));
+        // 좌표까지 단언한다. 모르는 필드는 조용히 버려지므로, 여기를 비워 두면 필드명을
+        // 틀리게 적어도 이 테스트가 통과해 버린다.
+        assertThat(parsed.origin().lat()).isEqualByComparingTo("37.5013068");
+        assertThat(parsed.destination().lng()).isEqualByComparingTo("126.9767879");
     }
 }

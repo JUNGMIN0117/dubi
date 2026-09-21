@@ -22,6 +22,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 /**
@@ -53,6 +54,16 @@ public class ScheduleRepeat extends BaseTimeEntity {
 
     @Column(name = "arrive_time", nullable = false)
     private LocalTime arriveTime;
+
+    /**
+     * 출발 예정시각. NULL 이면 이 규칙이 찍어낸 인스턴스는 추천 계산이 돌지 않는다.
+     *
+     * <p>출발시각 도입 이전에 만들어진 규칙만 NULL 이다. 서버가 도착 시각에서 역산해
+     * 채우지 않는다 — 사용자가 정하지 않은 출발 시각으로 알림을 보내면 그 시각의 근거를
+     * 설명할 수 없다. 기존 규칙은 사용자가 수정 화면에서 직접 채운다.
+     */
+    @Column(name = "depart_time")
+    private LocalTime departTime;
 
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
@@ -92,6 +103,7 @@ public class ScheduleRepeat extends BaseTimeEntity {
 
     @Builder
     private ScheduleRepeat(User user, String title, String daysOfWeek, LocalTime arriveTime,
+                           LocalTime departTime,
                            LocalDate startDate, LocalDate untilDate,
                            LocationSnapshot origin, LocationSnapshot destination,
                            Importance importance, boolean considerLastTrip) {
@@ -99,6 +111,7 @@ public class ScheduleRepeat extends BaseTimeEntity {
         this.title = title;
         this.daysOfWeek = daysOfWeek;
         this.arriveTime = arriveTime;
+        this.departTime = departTime;
         this.startDate = startDate;
         this.untilDate = untilDate;
         this.origin = origin;
@@ -120,11 +133,27 @@ public class ScheduleRepeat extends BaseTimeEntity {
         this.title = title;
     }
 
-    public void changeRule(String daysOfWeek, LocalTime arriveTime, LocalDate startDate, LocalDate untilDate) {
+    public void changeRule(String daysOfWeek, LocalTime arriveTime, LocalTime departTime,
+                           LocalDate startDate, LocalDate untilDate) {
         this.daysOfWeek = daysOfWeek;
         this.arriveTime = arriveTime;
+        this.departTime = departTime;
         this.startDate = startDate;
         this.untilDate = untilDate;
+    }
+
+    /**
+     * 이 규칙이 만드는 인스턴스의 출발 시각. 출발이 도착보다 늦거나 같으면 전날로 본다 —
+     * "00:30 도착 / 23:50 출발" 같은 규칙은 같은 날 23:50 이 아니라 전날 23:50 이다.
+     *
+     * @return 출발시각이 없는(도입 이전) 규칙이면 null
+     */
+    public LocalDateTime departAtOn(LocalDate date) {
+        if (departTime == null) {
+            return null;
+        }
+        LocalDateTime departAt = date.atTime(departTime);
+        return departAt.isBefore(date.atTime(arriveTime)) ? departAt : departAt.minusDays(1);
     }
 
     public void changeOrigin(LocationSnapshot origin) {

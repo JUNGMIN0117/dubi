@@ -29,6 +29,9 @@ public class RepeatUpdateRequest {
     private LocalTime localTime;
     private boolean localTimePresent;
 
+    private LocalTime departTime;
+    private boolean departTimePresent;
+
     private LocalDate startDate;
     private boolean startDatePresent;
 
@@ -62,6 +65,11 @@ public class RepeatUpdateRequest {
     public void setLocalTime(LocalTime localTime) {
         this.localTime = localTime;
         this.localTimePresent = true;
+    }
+
+    public void setDepartTime(LocalTime departTime) {
+        this.departTime = departTime;
+        this.departTimePresent = true;
     }
 
     public void setStartDate(LocalDate startDate) {
@@ -105,6 +113,10 @@ public class RepeatUpdateRequest {
         return localTime;
     }
 
+    public LocalTime getDepartTime() {
+        return departTime;
+    }
+
     public LocalDate getStartDate() {
         return startDate;
     }
@@ -141,6 +153,10 @@ public class RepeatUpdateRequest {
         return localTimePresent;
     }
 
+    public boolean isDepartTimePresent() {
+        return departTimePresent;
+    }
+
     public boolean isStartDatePresent() {
         return startDatePresent;
     }
@@ -163,13 +179,14 @@ public class RepeatUpdateRequest {
 
     public boolean hasNoChanges() {
         return !titlePresent && !originPresent && !destinationPresent && !localTimePresent
+                && !departTimePresent
                 && !startDatePresent && !rrulePresent && !endDatePresent
                 && !importancePresent && !considerLastTripPresent;
     }
 
     /** 인스턴스를 다시 만들어야 하는 변경인가 — 제목·중요도만 바뀌면 재생성이 필요 없다. */
     public boolean affectsInstances() {
-        return originPresent || destinationPresent || localTimePresent
+        return originPresent || destinationPresent || localTimePresent || departTimePresent
                 || startDatePresent || rrulePresent || endDatePresent;
     }
 }

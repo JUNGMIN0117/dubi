@@ -121,9 +121,7 @@ def test_http_response_digest_uses_exact_request_bytes():
 
     raw = json.dumps(payload(), ensure_ascii=False, separators=(", ", ": ")).encode()
     with TestClient(create_app(predictor=Preview())) as client:
-        response = client.post(
-            "/v1/bus/predictions:batch", content=raw, headers={"Content-Type": "application/json"}
-        )
+        response = client.post("/v1/bus/predictions:batch", content=raw, headers={"Content-Type": "application/json"})
     assert response.status_code == 200
     assert response.json()["input_digest"] == hashlib.sha256(raw).hexdigest()
 

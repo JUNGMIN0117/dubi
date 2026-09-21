@@ -10,12 +10,108 @@ import java.nio.file.*;
 import java.time.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 /** 합성 시간표의 손계산, 놓친 환승, ID 오매칭, stale, 중복 대기 합산을 실제 Redis 없이 검증한다. */
 class SubwayTimingServiceTest {
+    @Test
+    @EnabledIfSystemProperty(named = "transit.timetable.path", matches = ".+")
+    void generatedArtifactLoadsAndCalculatesTimetableWaitAndRide() {
+        var loaded = new SubwayTimetable(json, System.getProperty("transit.timetable.path"));
+        assertThat(loaded.unavailableReason()).isNull();
+        assertThat(loaded.data()).isNotNull();
+
+        var selected =
+                loaded.data().trips().stream()
+                        .flatMap(
+                                trip ->
+                                        java.util.stream.IntStream.range(0, trip.calls().size() - 1)
+                                                .filter(
+                                                        i ->
+                                                                trip.calls().get(i).departureAt()
+                                                                                != null
+                                                                        && trip.calls()
+                                                                                        .get(i + 1)
+                                                                                        .arrivalAt()
+                                                                                != null)
+                                                .mapToObj(i -> Map.entry(trip, i)))
+                        .findFirst()
+                        .orElseThrow();
+        var trip = selected.getKey();
+        int index = selected.getValue();
+        var from = trip.calls().get(index);
+        var to = trip.calls().get(index + 1);
+        var edge =
+                new MappedTransitSegment(
+                        1,
+                        "SUB:" + trip.lineId() + ":" + from.stationId() + ":" + to.stationId(),
+                        TransportMode.SUBWAY,
+                        trip.lineId(),
+                        trip.providerLineId(),
+                        trip.lineId(),
+                        trip.direction(),
+                        from.stationId(),
+                        to.stationId(),
+                        from.providerStationId(),
+                        to.providerStationId(),
+                        index + 1,
+                        index + 2);
+        var mapping =
+                new TransitMappingResult(
+                        TransitMappingStatus.EXACT,
+                        loaded.data().masterDataVersion(),
+                        "generated-artifact-smoke",
+                        trip.lineId(),
+                        trip.lineId(),
+                        from.stationId(),
+                        to.stationId(),
+                        index + 1,
+                        index + 2,
+                        trip.direction(),
+                        1,
+                        1,
+                        1,
+                        null,
+                        null,
+                        List.of(edge));
+        var segment =
+                new RouteSegment(
+                        1,
+                        TransportMode.SUBWAY,
+                        edge.segmentId(),
+                        trip.lineId(),
+                        null,
+                        from.stationId(),
+                        to.stationId(),
+                        0,
+                        0,
+                        List.of(from.stationId(), to.stationId()),
+                        List.of(),
+                        List.of(),
+                        mapping);
+        Instant platformAt = from.departureAt().minusSeconds(30);
+        Instant asOf =
+                platformAt.isBefore(loaded.data().publishedAt())
+                        ? loaded.data().publishedAt()
+                        : platformAt;
+        if (asOf.isAfter(platformAt)) platformAt = asOf;
+
+        var result =
+                new SubwayTimingService(loaded, redis, json, false)
+                        .estimate(segment, asOf, platformAt, new SubwayTimingService.Session());
+
+        assertThat(result.source()).isEqualTo("SUBWAY_TIMETABLE");
+        assertThat(result.waitSeconds()).isNotNegative();
+        assertThat(result.rideSeconds()).isPositive();
+        assertThat(result.boardingAt()).isAfterOrEqualTo(platformAt);
+        assertThat(result.arrivalAt()).isAfter(result.boardingAt());
+        assertThat(result.reasons()).contains("SUBWAY_REALTIME_TRAIN_CROSSWALK_MISSING");
+        verifyNoInteractions(redis);
+    }
+
     @Test
     void timetableOnlyUsesCanonicalIdsWithoutInventingRealtimeTrainAndKeepsEndpointNulls() {
         var trip =

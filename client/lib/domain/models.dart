@@ -15,26 +15,6 @@ enum ScheduleImportance {
   );
 }
 
-enum TransportPreferenceChoice {
-  subwayFirst('지하철 우선'),
-  balanced('버스 + 지하철'),
-  busFirst('버스 우선');
-
-  const TransportPreferenceChoice(this.label);
-
-  final String label;
-
-  List<Map<String, String>> get apiTransportPrefs => switch (this) {
-    TransportPreferenceChoice.subwayFirst => const [
-      {'mode': 'SUBWAY', 'preference': 'PREFER'},
-    ],
-    TransportPreferenceChoice.balanced => const [],
-    TransportPreferenceChoice.busFirst => const [
-      {'mode': 'BUS', 'preference': 'PREFER'},
-    ],
-  };
-}
-
 class PlaceLocation {
   const PlaceLocation({
     required this.name,
@@ -140,7 +120,6 @@ class Schedule {
     this.plannedDepartAt,
     this.importance = ScheduleImportance.high,
     this.considerLastTrip = false,
-    this.preferredTransport = TransportPreferenceChoice.balanced,
     this.repeatLabel,
     this.updatedAt,
     this.status = ScheduleStatus.upcoming,
@@ -155,7 +134,6 @@ class Schedule {
   final DateTime? plannedDepartAt;
   final ScheduleImportance importance;
   final bool considerLastTrip;
-  final TransportPreferenceChoice preferredTransport;
   final String? repeatLabel;
   final DateTime? updatedAt;
   final ScheduleStatus status;
@@ -233,7 +211,6 @@ class Schedule {
     plannedDepartAt: plannedDepartAt ?? this.plannedDepartAt,
     importance: importance ?? this.importance,
     considerLastTrip: considerLastTrip ?? this.considerLastTrip,
-    preferredTransport: preferredTransport,
     repeatLabel: repeatLabel,
     updatedAt: updatedAt ?? this.updatedAt,
     status: status,
@@ -252,7 +229,6 @@ class RepeatScheduleRule {
     this.untilDate,
     this.importance = ScheduleImportance.high,
     this.considerLastTrip = false,
-    this.preferredTransport = TransportPreferenceChoice.balanced,
     this.active = true,
   });
 
@@ -266,7 +242,6 @@ class RepeatScheduleRule {
   final DateTime? untilDate;
   final ScheduleImportance importance;
   final bool considerLastTrip;
-  final TransportPreferenceChoice preferredTransport;
   final bool active;
 
   String get place => destination.name;

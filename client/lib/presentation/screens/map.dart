@@ -396,7 +396,11 @@ class _SavedRouteDetailPanel extends StatelessWidget {
           '이동 안내 시작',
           onPressed: () => openPage(
             context,
-            MovingScreen(repository: repository, route: route),
+            MovingScreen(
+              repository: repository,
+              route: route,
+              segments: detail.segments,
+            ),
           ),
         ),
       ],
@@ -1145,8 +1149,8 @@ class _RouteMapDetail extends StatelessWidget {
           children: [
             Expanded(child: _liveMetric('도착까지', route.detail)),
             Container(width: 1, height: 40, color: const Color(0xFFE0E8EE)),
-            Expanded(child: _liveMetric('남은 거리', '약 6.2km')),
-            Container(width: 1, height: 40, color: const Color(0xFFE0E8EE)),
+            // 남은 거리는 서버에서 받지 않는다. 예전에는 '약 6.2km' 가 박혀 있어
+            // 어떤 경로를 봐도 같은 거리가 나왔다. 칸을 지운다.
             Expanded(child: _liveMetric('도착 예정', route.arrival)),
           ],
         ),

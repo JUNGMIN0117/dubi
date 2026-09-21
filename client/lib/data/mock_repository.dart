@@ -164,7 +164,6 @@ class MockDdubiRepository implements DdubiRepository {
           ),
           importance: rule.importance,
           considerLastTrip: rule.considerLastTrip,
-          preferredTransport: rule.preferredTransport,
           repeatLabel: _repeatLabel(rule.weekdays),
         ),
       );

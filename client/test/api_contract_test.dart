@@ -299,16 +299,6 @@ void main() {
     expect(schedule.updatedAt, DateTime(2026, 9, 3, 9, 14, 22, 123, 456));
   });
 
-  test('교통수단 3지선다를 사용자 API transportPrefs로 변환한다', () {
-    expect(TransportPreferenceChoice.balanced.apiTransportPrefs, isEmpty);
-    expect(TransportPreferenceChoice.subwayFirst.apiTransportPrefs, [
-      {'mode': 'SUBWAY', 'preference': 'PREFER'},
-    ]);
-    expect(TransportPreferenceChoice.busFirst.apiTransportPrefs, [
-      {'mode': 'BUS', 'preference': 'PREFER'},
-    ]);
-  });
-
   test('반복 일정 요청을 백엔드 rrule과 장소 좌표 계약으로 변환한다', () {
     final request = RepeatScheduleRule(
       id: 'local-id',

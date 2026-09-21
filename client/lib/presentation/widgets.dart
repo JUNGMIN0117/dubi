@@ -695,37 +695,6 @@ class PlaceSearchField extends StatelessWidget {
   );
 }
 
-class TransportPreferenceSelector extends StatelessWidget {
-  const TransportPreferenceSelector({
-    super.key,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final TransportPreferenceChoice value;
-  final ValueChanged<TransportPreferenceChoice> onChanged;
-
-  @override
-  Widget build(BuildContext context) => RadioGroup<TransportPreferenceChoice>(
-    groupValue: value,
-    onChanged: (choice) {
-      if (choice != null) onChanged(choice);
-    },
-    child: Column(
-      children: TransportPreferenceChoice.values
-          .map(
-            (choice) => RadioListTile<TransportPreferenceChoice>(
-              key: Key('transportPreference-${choice.name}'),
-              contentPadding: EdgeInsets.zero,
-              value: choice,
-              title: Text(choice.label),
-            ),
-          )
-          .toList(growable: false),
-    ),
-  );
-}
-
 class _PlaceSearchDialog extends StatefulWidget {
   const _PlaceSearchDialog({required this.title, required this.searchService});
 

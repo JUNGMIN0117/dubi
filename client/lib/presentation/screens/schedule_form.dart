@@ -56,7 +56,6 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
   bool hasEndDate = false;
   bool considerLastTrip = false;
   ScheduleImportance importance = ScheduleImportance.high;
-  TransportPreferenceChoice transport = TransportPreferenceChoice.balanced;
 
   @override
   void initState() {
@@ -74,7 +73,6 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
     hasEndDate = rule?.untilDate != null;
     considerLastTrip = rule?.considerLastTrip ?? false;
     importance = rule?.importance ?? ScheduleImportance.high;
-    transport = rule?.preferredTransport ?? TransportPreferenceChoice.balanced;
   }
 
   @override
@@ -260,12 +258,6 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
           value: considerLastTrip,
           onChanged: (value) => setState(() => considerLastTrip = value),
         ),
-        const SizedBox(height: 18),
-        const Text('교통수단 선호', style: TextStyle(fontWeight: FontWeight.w700)),
-        TransportPreferenceSelector(
-          value: transport,
-          onChanged: (value) => setState(() => transport = value),
-        ),
       ],
     ),
   );
@@ -378,7 +370,6 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
         untilDate: hasEndDate ? endDate : null,
         importance: importance,
         considerLastTrip: considerLastTrip,
-        preferredTransport: transport,
       );
       if (widget.rule == null) {
         await widget.repository.addRepeatSchedule(rule);
@@ -397,7 +388,6 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
 
 class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
   late ScheduleImportance importance;
-  TransportPreferenceChoice transport = TransportPreferenceChoice.balanced;
   late bool considerLastTrip;
   late DateTime departureDate;
   late DateTime arrivalDate;
@@ -435,8 +425,6 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     destination = schedule?.destination;
     importance = schedule?.importance ?? ScheduleImportance.high;
     considerLastTrip = schedule?.considerLastTrip ?? false;
-    transport =
-        schedule?.preferredTransport ?? TransportPreferenceChoice.balanced;
   }
 
   @override
@@ -755,7 +743,6 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
       plannedDepartAt: plannedDeparture,
       importance: importance,
       considerLastTrip: considerLastTrip,
-      preferredTransport: transport,
       repeatLabel: widget.schedule?.repeatLabel,
       updatedAt: widget.schedule?.updatedAt,
     );

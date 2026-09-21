@@ -12,7 +12,6 @@ import '../../domain/auth.dart';
 import '../../domain/models.dart';
 import '../../services/app_api.dart';
 import '../help_inquiry_screen.dart';
-import '../more_page_widgets.dart';
 import '../widgets.dart';
 import '../../core/diagnostics/developer_diagnostics.dart';
 import '../../core/config/app_environment.dart';
@@ -132,7 +131,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: _mobileAccountCard(context, user),
             ),
             const SizedBox(height: 2),
-            _weeklyStampBoardCard(context),
             const SizedBox(height: 14),
             _mobileServiceStatus(context),
             const SizedBox(height: 14),
@@ -260,7 +258,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 16),
                 _permissionCard(),
                 const SizedBox(height: 16),
-                _weeklyStampBoardCard(context),
                 const SizedBox(height: 16),
                 _serviceStatus(context),
                 const SizedBox(height: 16),
@@ -941,26 +938,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _notificationAllowed = allowed);
   }
 
-  Widget _weeklyStampBoardCard(BuildContext context) => const Card(
-    key: Key('weeklyStampBoardCard'),
-    child: Padding(
-      padding: EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Icon(Icons.workspace_premium_outlined, color: Color(0xFF10B8A5)),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              '도장판은 실제 미션 데이터 연동 후 제공될 예정이에요.',
-              key: Key('stampBoardPreparing'),
-              style: TextStyle(color: Color(0xFF64708B), fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-
   Widget _mobileServiceStatus(BuildContext context) => _settingsCard(
     color: const Color(0xFFFFFCFA),
     child: Stack(
@@ -1044,26 +1021,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     ),
   );
-
-  // ignore: unused_element
-  Future<void> _showStampBoardGuide(BuildContext context) =>
-      showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => const StampBoardGuideSheet(),
-      );
-
-  // ignore: unused_element
-  Future<void> _showStampBoardDetails(BuildContext context) =>
-      showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => const StampBoardDetailSheet(),
-      );
 
   Widget _logoutCard(BuildContext context) => Material(
     color: const Color(0xFFFFF3F5),
@@ -1861,53 +1818,6 @@ class _MoreMenuRow extends StatelessWidget {
         const SizedBox(width: 6),
         const Icon(Icons.chevron_right_rounded, color: Color(0xFF425273)),
       ],
-    ),
-  );
-}
-
-// ignore: unused_element
-class _SettingsAccountAction extends StatelessWidget {
-  const _SettingsAccountAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: const Color(0xFFF2F8FC),
-    borderRadius: BorderRadius.circular(14),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: SizedBox(
-        height: 54,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: const Color(0xFF17243F), size: 20),
-            const SizedBox(width: 7),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF17243F),
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(width: 3),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: Color(0xFF62708B),
-              size: 18,
-            ),
-          ],
-        ),
-      ),
     ),
   );
 }

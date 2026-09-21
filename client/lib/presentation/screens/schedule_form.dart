@@ -56,7 +56,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
   late DateTime endDate;
   bool hasEndDate = false;
   bool considerLastTrip = false;
-  ScheduleImportance importance = ScheduleImportance.high;
+  ScheduleImportance importance = ScheduleImportance.normal;
 
   @override
   void initState() {
@@ -75,7 +75,7 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
     endDate = rule?.untilDate ?? startDate.add(const Duration(days: 84));
     hasEndDate = rule?.untilDate != null;
     considerLastTrip = rule?.considerLastTrip ?? false;
-    importance = rule?.importance ?? ScheduleImportance.high;
+    importance = rule?.importance ?? ScheduleImportance.normal;
   }
 
   @override
@@ -270,13 +270,10 @@ class _RepeatScheduleFormScreenState extends State<RepeatScheduleFormScreen> {
         const Text('중요도', style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         SegmentedButton<ScheduleImportance>(
-          segments: const [
-            ButtonSegment(value: ScheduleImportance.normal, label: Text('일반')),
-            ButtonSegment(value: ScheduleImportance.high, label: Text('중요')),
-            ButtonSegment(
-              value: ScheduleImportance.critical,
-              label: Text('절대 지각 불가'),
-            ),
+          key: const Key('repeatImportanceSelector'),
+          segments: [
+            for (final choice in ScheduleImportance.choices)
+              ButtonSegment(value: choice, label: Text(choice.label)),
           ],
           selected: {importance},
           onSelectionChanged: (value) =>
@@ -460,7 +457,7 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     departureTime = TimeOfDay.fromDateTime(departAt);
     origin = schedule?.origin;
     destination = schedule?.destination;
-    importance = schedule?.importance ?? ScheduleImportance.high;
+    importance = schedule?.importance ?? ScheduleImportance.normal;
     considerLastTrip = schedule?.considerLastTrip ?? false;
   }
 
@@ -574,6 +571,8 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
               ),
             ),
             const SizedBox(height: 14),
+            _importanceCard(),
+            const SizedBox(height: 12),
             _lastTripCard(),
             const SizedBox(height: 12),
             _infoCard(),
@@ -667,6 +666,47 @@ class _ScheduleFormScreenState extends State<ScheduleFormScreen> {
     if (!context.mounted) return;
     GoRouter.maybeOf(context)?.go('/schedules');
   }
+
+  /// 일반 일정의 중요도 선택.
+  ///
+  /// 예전에는 이 화면에 고르는 칸이 아예 없어서, 모든 일정이 앱 기본값("중요")으로
+  /// 저장되고 사용자가 바꿀 방법이 없었다. 반복 일정 화면과 같은 두 단계를 쓴다.
+  Widget _importanceCard() => Container(
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFDCE6EC)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '중요도',
+          style: TextStyle(
+            color: DdubiColors.navy,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          '놓치면 곤란한 일정은 중요로 표시해 두세요.',
+          style: TextStyle(fontSize: 12, color: Color(0xFF6E8193)),
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<ScheduleImportance>(
+          key: const Key('scheduleImportanceSelector'),
+          segments: [
+            for (final choice in ScheduleImportance.choices)
+              ButtonSegment(value: choice, label: Text(choice.label)),
+          ],
+          selected: {importance},
+          onSelectionChanged: (value) =>
+              setState(() => importance = value.first),
+        ),
+      ],
+    ),
+  );
 
   Widget _lastTripCard() => Container(
     decoration: BoxDecoration(

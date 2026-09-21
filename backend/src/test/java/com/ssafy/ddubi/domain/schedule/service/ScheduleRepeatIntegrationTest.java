@@ -413,9 +413,8 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * 사용자가 3일 뒤 일정을 열어 "이후 일정 전체" 를 고르면 그 날짜부터 바뀌길 기대한다.
-     * 기준이 없으면 오늘·내일 일정까지 같이 바뀐다 — "다음 주부터 바꿀게요" 라고 했는데
-     * 오늘 것이 바뀌는 셈이다.
+     * 사용자가 3일 뒤 일정을 열어 "이후 일정 전체" 를 고르면 그 날짜부터 바뀌길 기대한다. 기준이 없으면 오늘·내일 일정까지 같이 바뀐다 — "다음 주부터 바꿀게요"
+     * 라고 했는데 오늘 것이 바뀌는 셈이다.
      */
     @Test
     @DisplayName("effectiveFrom 을 주면 그 시각 이전 인스턴스는 건드리지 않는다")
@@ -440,12 +439,16 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
                 .as("경계 이전은 id 도 시각도 그대로여야 한다")
                 .hasSize(untouched.size())
                 .allSatisfy(
-                        s -> assertThat(s.getArriveBy().toLocalTime()).isEqualTo(LocalTime.of(23, 59)));
+                        s ->
+                                assertThat(s.getArriveBy().toLocalTime())
+                                        .isEqualTo(LocalTime.of(23, 59)));
         assertThat(after)
                 .filteredOn(s -> !s.getArriveBy().isBefore(boundary))
                 .isNotEmpty()
                 .allSatisfy(
-                        s -> assertThat(s.getArriveBy().toLocalTime()).isEqualTo(LocalTime.of(23, 58)));
+                        s ->
+                                assertThat(s.getArriveBy().toLocalTime())
+                                        .isEqualTo(LocalTime.of(23, 58)));
     }
 
     /** 기존 앱은 effectiveFrom 을 보내지 않는다. 예전과 똑같이 동작해야 한다. */
@@ -461,7 +464,9 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
         assertThat(instancesOf(created.repeatId()))
                 .isNotEmpty()
                 .allSatisfy(
-                        s -> assertThat(s.getArriveBy().toLocalTime()).isEqualTo(LocalTime.of(23, 58)));
+                        s ->
+                                assertThat(s.getArriveBy().toLocalTime())
+                                        .isEqualTo(LocalTime.of(23, 58)));
     }
 
     /** 과거를 그대로 받으면 이미 지난 일정을 다시 만들게 된다. */
@@ -487,10 +492,7 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
                         });
     }
 
-    /**
-     * 규칙 11 — 삭제는 soft(CANCELED) 다. 물리 삭제는 탈퇴 CASCADE 뿐이다. 행이 사라지면
-     * 이미 그 일정을 참조한 알림·추천이 고아가 된다.
-     */
+    /** 규칙 11 — 삭제는 soft(CANCELED) 다. 물리 삭제는 탈퇴 CASCADE 뿐이다. 행이 사라지면 이미 그 일정을 참조한 알림·추천이 고아가 된다. */
     @Test
     @DisplayName("cancelFutureInstances=true 면 미래 인스턴스를 지우지 않고 CANCELED 로 바꾼다")
     void deactivateCancelsFutureInstancesWithoutDeleting() {

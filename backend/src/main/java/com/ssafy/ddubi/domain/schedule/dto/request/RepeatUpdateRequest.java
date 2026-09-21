@@ -49,8 +49,7 @@ public class RepeatUpdateRequest {
     /**
      * 이 시각 이후의 인스턴스만 다시 만든다. 안 보내면 지금부터 — 기존 앱 동작 그대로다.
      *
-     * <p>사용자가 3일 뒤 일정을 열어 "이후 일정 전체" 를 고르면 오늘/내일 일정은 그대로여야
-     * 한다. 이 값이 없으면 오늘부터 전부 다시 만들어 버린다.
+     * <p>사용자가 3일 뒤 일정을 열어 "이후 일정 전체" 를 고르면 오늘/내일 일정은 그대로여야 한다. 이 값이 없으면 오늘부터 전부 다시 만들어 버린다.
      */
     private LocalDateTime effectiveFrom;
 
@@ -208,9 +207,8 @@ public class RepeatUpdateRequest {
     /**
      * 인스턴스를 다시 만들어야 하는 변경인가 — 제목·중요도만 바뀌면 재생성이 필요 없다.
      *
-     * <p>{@code effectiveFrom} 은 여기에도 {@link #hasNoChanges()} 에도 넣지 않는다. 그것만
-     * 보내는 것은 "아무것도 안 바꾸고 범위만 지정" 이라 할 일이 없다. 재생성을 일으키는
-     * 값이 아니라, 다른 변경이 일으킨 재생성의 <b>범위</b>를 정하는 값이다.
+     * <p>{@code effectiveFrom} 은 여기에도 {@link #hasNoChanges()} 에도 넣지 않는다. 그것만 보내는 것은 "아무것도 안 바꾸고 범위만
+     * 지정" 이라 할 일이 없다. 재생성을 일으키는 값이 아니라, 다른 변경이 일으킨 재생성의 <b>범위</b>를 정하는 값이다.
      */
     public boolean affectsInstances() {
         return originPresent

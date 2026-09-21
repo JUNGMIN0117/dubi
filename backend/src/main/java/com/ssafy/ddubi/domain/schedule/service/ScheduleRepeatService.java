@@ -196,9 +196,8 @@ public class ScheduleRepeatService {
     /**
      * "이후 일정 전체" 의 기준 시각 (B8).
      *
-     * <p>안 보내면 지금부터다 — 기존 앱은 이 값을 보내지 않으므로 예전과 똑같이 동작해야
-     * 한다. 과거를 보내면 지금으로 당긴다. 이미 지난 일정을 다시 만들 수는 없고, 그걸
-     * 허용하면 "지난주부터 바꿔 줘" 같은 요청이 조용히 과거 데이터를 만들어 낸다.
+     * <p>안 보내면 지금부터다 — 기존 앱은 이 값을 보내지 않으므로 예전과 똑같이 동작해야 한다. 과거를 보내면 지금으로 당긴다. 이미 지난 일정을 다시 만들 수는
+     * 없고, 그걸 허용하면 "지난주부터 바꿔 줘" 같은 요청이 조용히 과거 데이터를 만들어 낸다.
      */
     private LocalDateTime effectiveFrom(RepeatUpdateRequest request) {
         LocalDateTime now = BusinessTime.now();
@@ -217,9 +216,8 @@ public class ScheduleRepeatService {
     }
 
     /**
-     * @param cancelFutureInstances true 면 아직 시작하지 않은 미래 인스턴스를 CANCELED 로
-     *     바꾼다. <b>기본은 false 다</b> — 기존 앱은 이 값을 보내지 않는데 기본을 true 로
-     *     두면 "중지" 만 누른 사용자의 2주치 일정이 통째로 사라진다. 되돌릴 수 없다.
+     * @param cancelFutureInstances true 면 아직 시작하지 않은 미래 인스턴스를 CANCELED 로 바꾼다. <b>기본은 false 다</b> —
+     *     기존 앱은 이 값을 보내지 않는데 기본을 true 로 두면 "중지" 만 누른 사용자의 2주치 일정이 통째로 사라진다. 되돌릴 수 없다.
      */
     @Transactional
     public void deactivate(Long userId, Long repeatId, boolean cancelFutureInstances) {
@@ -227,7 +225,8 @@ public class ScheduleRepeatService {
         repeat.deactivate();
         int canceled =
                 cancelFutureInstances
-                        ? scheduleRepository.cancelRegenerableInstances(repeatId, BusinessTime.now())
+                        ? scheduleRepository.cancelRegenerableInstances(
+                                repeatId, BusinessTime.now())
                         : 0;
         log.info("반복 일정 중지 — repeatId={}, 미래 인스턴스 취소 {}건", repeatId, canceled);
     }

@@ -24,6 +24,8 @@ class RouteMapScreen extends StatefulWidget {
     this.departureLabel,
     this.destinationLabel,
     this.initialRouteDeviation = false,
+    this.displayRank,
+    this.evaluatedDurationMin,
   });
 
   final DdubiRepository repository;
@@ -34,6 +36,15 @@ class RouteMapScreen extends StatefulWidget {
   final String? departureLabel;
   final String? destinationLabel;
   final bool initialRouteDeviation;
+
+  /// 목록에서 보이던 순번(1부터). 서버가 준 rankNo 와 다르다 — 서버 값은 소요시간 기준
+  /// 캐시라 선택된 추천이 20 번일 수도 있다. 목록은 "1순위" 인데 상세가 "20순위" 로
+  /// 보이던 문제를 막으려고 목록에서 본 번호를 그대로 받아 쓴다.
+  final int? displayRank;
+
+  /// 목록에서 보여준 소요시간(분). 서버 평가 결과가 있으면 경로 API 원본이 아니라 이 값을
+  /// 쓴다. 목록과 상세가 다른 숫자를 보여주지 않게 한다.
+  final int? evaluatedDurationMin;
 
   @override
   State<RouteMapScreen> createState() => _RouteMapScreenState();
@@ -65,6 +76,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       ? _SavedRouteApiScreen(
           api: widget.api!,
           summary: widget.savedRoute!,
+          displayRank: widget.displayRank,
+          evaluatedDurationMin: widget.evaluatedDurationMin,
           route:
               widget.selectedRoute ??
               widget.savedRoute!.toRouteOption(
@@ -193,6 +206,8 @@ class _SavedRouteApiScreen extends StatefulWidget {
     required this.repository,
     required this.departureLabel,
     required this.destinationLabel,
+    this.displayRank,
+    this.evaluatedDurationMin,
   });
 
   final RecommendationApi api;
@@ -201,6 +216,8 @@ class _SavedRouteApiScreen extends StatefulWidget {
   final DdubiRepository repository;
   final String departureLabel;
   final String destinationLabel;
+  final int? displayRank;
+  final int? evaluatedDurationMin;
 
   @override
   State<_SavedRouteApiScreen> createState() => _SavedRouteApiScreenState();
@@ -276,6 +293,8 @@ class _SavedRouteApiScreenState extends State<_SavedRouteApiScreen> {
               detail: data.detail,
               route: widget.route,
               repository: widget.repository,
+              displayRank: widget.displayRank,
+              evaluatedDurationMin: widget.evaluatedDurationMin,
             );
             if (constraints.maxWidth >= 760) {
               return Padding(
@@ -326,12 +345,29 @@ class _SavedRouteDetailPanel extends StatelessWidget {
     required this.detail,
     required this.route,
     required this.repository,
+    this.displayRank,
+    this.evaluatedDurationMin,
   });
 
   final SavedRouteSummary summary;
   final SavedRouteDetail detail;
   final RouteOption route;
   final DdubiRepository repository;
+
+  /// 목록에서 보이던 순번. 목록과 상세가 같은 번호를 쓰게 하려고 그대로 받아 온다.
+  /// 없으면 상세 응답의 displayRank 를 쓰고, 그것도 없으면 순위 칸을 그리지 않는다 —
+  /// 내부 순위(rankNo)는 소요시간 기준 캐시라 사용자에게 보여줄 번호가 아니다.
+  final int? displayRank;
+
+  /// 화면에 보여줄 순위. 목록에서 온 값이 먼저다.
+  int? get _visibleRank => displayRank ?? detail.displayRank;
+
+  /// 목록에서 보여준 소요시간(분). 없을 때만 경로 API 원본을 쓴다.
+  final int? evaluatedDurationMin;
+
+  /// 목록 카드와 같은 숫자를 보여준다.
+  String get _durationLabel =>
+      '약 ${evaluatedDurationMin ?? detail.baseDurationMin}분';
 
   @override
   Widget build(BuildContext context) => InfoCard(
@@ -341,8 +377,9 @@ class _SavedRouteDetailPanel extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: _metric('예상 시간', '약 ${detail.baseDurationMin}분')),
-            Expanded(child: _metric('경로 순위', '${detail.rankNo}순위')),
+            Expanded(child: _metric('예상 시간', _durationLabel)),
+            if (_visibleRank != null)
+              Expanded(child: _metric('경로 순위', '$_visibleRank순위')),
             Expanded(child: _metric('이동 구간', '${detail.segments.length}개')),
           ],
         ),
@@ -363,7 +400,11 @@ class _SavedRouteDetailPanel extends StatelessWidget {
           '이동 안내 시작',
           onPressed: () => openPage(
             context,
-            MovingScreen(repository: repository, route: route),
+            MovingScreen(
+              repository: repository,
+              route: route,
+              segments: detail.segments,
+            ),
           ),
         ),
       ],
@@ -1112,8 +1153,8 @@ class _RouteMapDetail extends StatelessWidget {
           children: [
             Expanded(child: _liveMetric('도착까지', route.detail)),
             Container(width: 1, height: 40, color: const Color(0xFFE0E8EE)),
-            Expanded(child: _liveMetric('남은 거리', '약 6.2km')),
-            Container(width: 1, height: 40, color: const Color(0xFFE0E8EE)),
+            // 남은 거리는 서버에서 받지 않는다. 예전에는 '약 6.2km' 가 박혀 있어
+            // 어떤 경로를 봐도 같은 거리가 나왔다. 칸을 지운다.
             Expanded(child: _liveMetric('도착 예정', route.arrival)),
           ],
         ),

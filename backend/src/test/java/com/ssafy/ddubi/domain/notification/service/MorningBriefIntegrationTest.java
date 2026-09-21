@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,7 @@ class MorningBriefIntegrationTest extends IntegrationTestSupport {
     @Autowired private UserRepository users;
     @Autowired private ScheduleService scheduleService;
     @Autowired private DeviceTokenService deviceTokens;
+    @Autowired private MorningBriefScheduler scheduler;
 
     private User user;
 
@@ -250,5 +252,43 @@ class MorningBriefIntegrationTest extends IntegrationTestSupport {
         assertThat(briefs()).filteredOn(brief -> brief.isOwnedBy(other.getId()))
                 .singleElement()
                 .satisfies(theirs -> assertThat(theirs.getBody()).isEqualTo("15:00 남의 일정"));
+    }
+    /**
+     * 스케줄러가 시각을 어디서 얻느냐가 이 기능의 전부다.
+     *
+     * <p>{@code BusinessTime.now()} 는 {@code LocalDateTime.now()} 라 <b>JVM 기본 시간대</b>를
+     * 쓴다. JVM 이 UTC 면 07:00 브리핑이 한국 시간 16:00 에 나간다. 운영은 {@code TZ=Asia/Seoul}
+     * 이라 안 드러나지만, 알림 발송 시각을 그 환경변수 하나에 기대게 두지 않는다.
+     *
+     * <p>JVM 이 KST 면 아무것도 증명하지 못하므로 <b>건너뛴다.</b> 실패시키면 내 PC 에서
+     * 빨간불이 뜬다. CI 는 UTC 라 거기서 실제로 돈다.
+     */
+    @Test
+    @DisplayName("스케줄러는 JVM 시간대가 아니라 KST 로 판정한다")
+    void schedulerJudgesInKstNotJvmZone() {
+        Assumptions.assumeFalse(ZoneId.systemDefault().getRules().equals(ZoneId.of("Asia/Seoul").getRules()),
+                "JVM 이 KST 라 건너뛴다. -Duser.timezone=UTC 로 돌리면 실제로 검증된다");
+        LocalDateTime nowKst = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
+        // 자정이 가까우면 '오늘 남은 일정' 을 만들 수 없다. 그때는 판정할 거리가 없다.
+        Assumptions.assumeTrue(nowKst.toLocalTime().isAfter(LocalTime.of(0, 10))
+                        && nowKst.toLocalTime().isBefore(LocalTime.of(22, 0)),
+                "자정 근처에는 오늘 남은 일정을 만들 수 없어 건너뛴다");
+        // 15:00 KST 근처만 피한다. briefing_time 은 TIME 컬럼이라 JVM 이 UTC 면 +9h 시프트가
+        // 걸리는데, 기준 시각과 브리핑 시각이 그 경계(=24:00)를 사이에 두면 한쪽만 한 바퀴 돌아
+        // SQL 대소 비교가 뒤집힌다. 이 테스트가 볼 문제가 아니라 별도 이슈다.
+        Assumptions.assumeFalse(nowKst.toLocalTime().isAfter(LocalTime.of(14, 55))
+                        && nowKst.toLocalTime().isBefore(LocalTime.of(15, 5)),
+                "TIME 컬럼 시프트가 자정을 넘는 구간이라 건너뛴다");
+
+        user.changeBriefingTime(nowKst.toLocalTime().minusMinutes(1).withSecond(0).withNano(0));
+        users.saveAndFlush(user);
+        scheduleService.create(user.getId(), new ScheduleCreateRequest("오늘 남은 일정",
+                new LocationRequest("강남", new BigDecimal("37.4979"), new BigDecimal("127.0276")),
+                new LocationRequest("역삼", new BigDecimal("37.5006"), new BigDecimal("127.0364")),
+                nowKst.toLocalDate().atTime(23, 30), null, null, null));
+
+        scheduler.tick();
+
+        assertThat(briefs()).as("KST 로 판정하면 방금 지난 브리핑이 나가야 한다").hasSize(1);
     }
 }

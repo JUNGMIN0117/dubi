@@ -1,11 +1,14 @@
 package com.ssafy.ddubi.domain.notification.service;
 
-import com.ssafy.ddubi.global.util.BusinessTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 
 /**
  * 아침 브리핑을 분마다 확인해 보낸다 (REQ-NTF-003).
@@ -24,6 +27,8 @@ import org.springframework.stereotype.Component;
 public class MorningBriefScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(MorningBriefScheduler.class);
+    /** 사용자가 정한 브리핑 시각은 KST 업무시각이다. JVM 기본 시간대에 기대지 않는다. */
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final MorningBriefService morningBriefService;
 
@@ -34,12 +39,18 @@ public class MorningBriefScheduler {
     /**
      * 한 바퀴의 실패가 다음 바퀴를 막지 않는다. 스케줄러 메서드에서 예외가 올라가면
      * 스프링이 그 뒤로 이 작업을 더 실행하지 않는다.
+     *
+     * <h3>판정 시각을 KST로 명시한다</h3>
+     * {@code BusinessTime.now()}는 {@code LocalDateTime.now()}라 <b>JVM 기본 시간대</b>를 쓴다.
+     * 사용자가 정한 {@code briefingTime}은 KST 업무시각이므로, JVM이 UTC면 07:00 브리핑을
+     * 한국 시간 16:00에 보낸다. 운영은 {@code TZ=Asia/Seoul}이라 드러나지 않지만, 알림을
+     * 보내는 시각을 그 환경변수 하나에 기대게 두지 않는다.
      */
     @Scheduled(fixedDelayString = "${ddubi.briefing.scheduler-delay-ms:60000}",
             initialDelayString = "${ddubi.briefing.scheduler-delay-ms:60000}")
     public void tick() {
         try {
-            int sent = morningBriefService.dispatchDue(BusinessTime.now());
+            int sent = morningBriefService.dispatchDue(LocalDateTime.now(KST).truncatedTo(ChronoUnit.SECONDS));
             if (sent > 0) {
                 log.info("아침 브리핑 발송 {}건", sent);
             }

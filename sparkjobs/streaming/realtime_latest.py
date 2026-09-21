@@ -35,10 +35,12 @@ from common.redis_sink import (
     TTL_COL,
     VALUE_COL,
     write_latest_with_row_ttl,
+    write_subway_snapshots,
 )
 from common.settings import Settings
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
+from streaming.subway_snapshots import snapshot_rows
 
 JOB_NAME = os.environ.get("SPARK_JOB_NAME", "realtime_latest")
 # Spark Kafka의 subscribe 옵션은 쉼표 구분 토픽을 지원한다. 하나의 checkpoint에 두 토픽의
@@ -459,6 +461,7 @@ def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crossw
     normalized = transform(batch_df, crosswalk).cache()
     latest = None
     rows = None
+    snapshots = None
     try:
         supported_count = normalized.count()
         valid_count = normalized.filter(F.col("providerKey").isNotNull()).count()
@@ -475,9 +478,18 @@ def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crossw
                 settings.redis_port,
                 settings.redis_password,
             )
+        snapshots = snapshot_rows(latest).cache()
+        snapshot_count = snapshots.count()
+        if snapshot_count:
+            write_subway_snapshots(
+                snapshots,
+                settings.redis_host,
+                settings.redis_port,
+                settings.redis_password,
+            )
         log.info(
             "batch=%d supported=%d validIdentity=%d invalidIdentity=%d "
-            "validTimestamp=%d invalidTimestamp=%d redisKeys=%d",
+            "validTimestamp=%d invalidTimestamp=%d redisKeys=%d subwaySnapshots=%d",
             batch_id,
             supported_count,
             valid_count,
@@ -485,8 +497,11 @@ def process_batch(batch_df: DataFrame, batch_id: int, settings: Settings, crossw
             valid_timestamp_count,
             supported_count - valid_timestamp_count,
             output_count,
+            snapshot_count,
         )
     finally:
+        if snapshots is not None:
+            snapshots.unpersist()
         if rows is not None:
             rows.unpersist()
         if latest is not None:

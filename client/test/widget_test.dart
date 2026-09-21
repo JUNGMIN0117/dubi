@@ -662,6 +662,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('placeSearchResult0')));
     await tester.pumpAndSettle();
+    // 출발 예정시각은 서버가 생성 때 필수로 받는다. 앱이 임의로 채우지 않으므로
+    // 사용자가 직접 넣어야 저장된다.
+    await tester.enterText(
+      find.byKey(const Key('repeatDepartTimeField')),
+      '08:10',
+    );
     await tester.drag(find.byType(ListView).last, const Offset(0, -450));
     await tester.pumpAndSettle();
     expect(find.text('반복 요일'), findsOneWidget);

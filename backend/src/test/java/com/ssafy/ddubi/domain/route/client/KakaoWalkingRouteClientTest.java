@@ -208,4 +208,58 @@ class KakaoWalkingRouteClientTest {
         assertThat(result.path()).isEmpty();
         server.verify();
     }
+
+    /** 공식 문서의 응답 예시(2026-09-21 확인) 그대로 넣어 시간과 좌표를 함께 읽는지 본다. */
+    @Test
+    void officialSampleResponseIsReadAsTimeAndLine() {
+        enabled();
+        server.expect(anything())
+                .andRespond(
+                        withSuccess(
+                                """
+                {
+                  "route": {
+                    "properties": {
+                      "totalDistance": 4025,
+                      "totalTime": 3914,
+                      "landingUrl": "https://map.kakao.com/link/by/walk/..."
+                    },
+                    "legs": [
+                      {
+                        "properties": {"distance": 4025, "time": 3914},
+                        "steps": [
+                          {
+                            "properties": {
+                              "distance": 93,
+                              "guidance": "판교역 1번 출구까지 역사 내 이동",
+                              "time": 84,
+                              "x": 127.11119783,
+                              "y": 37.39477573
+                            },
+                            "path": {
+                              "points": [
+                                [127.11119783, 37.39477573],
+                                [127.11119779, 37.39474869],
+                                [127.1114835, 37.39474572],
+                                [127.11148211, 37.39533499]
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "status": "OK"
+                }
+                """,
+                                MediaType.APPLICATION_JSON));
+        var result = client().route(request);
+        // 역사 내 이동 안내에는 횡단보도 여유를 더하지 않는다. 공식 totalTime 그대로다.
+        assertThat(result.seconds()).isEqualTo(3914);
+        assertThat(result.reason()).isNull();
+        assertThat(result.path()).hasSize(4);
+        assertThat(result.path().get(0)).isEqualTo(new Coordinate(127.11119783, 37.39477573));
+        assertThat(result.path().get(3)).isEqualTo(new Coordinate(127.11148211, 37.39533499));
+        server.verify();
+    }
 }

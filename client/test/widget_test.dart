@@ -829,7 +829,8 @@ void main() {
     expect(find.byKey(const Key('webSettingsLayout')), findsOneWidget);
     expect(find.byKey(const Key('mobileSettingsLayout')), findsNothing);
     expect(find.text('뚜비와 더 편리한 이동을 위한 설정을 관리해요.'), findsOneWidget);
-    expect(find.byKey(const Key('weeklyStampBoardCard')), findsOneWidget);
+    // 도장판(미션 스탬프)은 제공하지 않기로 했다. 화면에 남아 있으면 안 된다.
+    expect(find.byKey(const Key('weeklyStampBoardCard')), findsNothing);
     expect(find.text('서비스 상태'), findsNothing);
     expect(find.text('회원 탈퇴'), findsNothing);
   });
@@ -868,8 +869,8 @@ void main() {
     expect(find.text('도보'), findsNothing);
     expect(find.text('택시'), findsNothing);
     expect(find.text('더보기'), findsWidgets);
-    expect(find.byKey(const Key('weeklyStampBoardCard')), findsOneWidget);
-    expect(find.byKey(const Key('stampBoardPreparing')), findsOneWidget);
+    expect(find.byKey(const Key('weeklyStampBoardCard')), findsNothing);
+    expect(find.byKey(const Key('stampBoardPreparing')), findsNothing);
     expect(find.byKey(const Key('stampMissionPreviewRow')), findsNothing);
     expect(find.byKey(const Key('stampMissionGrid')), findsNothing);
     expect(find.byKey(const Key('stampBoardProgress')), findsNothing);
@@ -1139,6 +1140,17 @@ class _FakePlaceSearchService implements PlaceSearchService {
         lng: 127.014,
       ),
   ];
+
+  @override
+  Future<PlaceSearchPage> searchPage(
+    String query, {
+    int page = 0,
+    int size = 10,
+  }) async => PlaceSearchPage(
+    items: await search(query, page: page, size: size),
+    hasNext: false,
+    totalElements: 1,
+  );
 }
 
 class _FakeRecommendationApi extends RecommendationApi {

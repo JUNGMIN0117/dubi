@@ -50,10 +50,19 @@ class RecommendationOverview {
     fare: confidence == null ? '신뢰도 확인 중' : '신뢰도 $confidence',
   );
 
-  static String _clock(DateTime? value) => value == null
-      ? '--:--'
-      : '${value.hour.toString().padLeft(2, '0')}:'
-            '${value.minute.toString().padLeft(2, '0')}';
+  /// 서버 시각을 사람이 읽는 시:분으로 바꾼다.
+  ///
+  /// 반드시 [DateTime.toLocal] 을 거친다. 이 값의 출처가 섞여 있기 때문이다 — 평가 결과의
+  /// `departureAt`·`estimatedArrivalAt` 은 UTC(`...Z`)로 오고, 추천 근거 API 의 `departAt`
+  /// 은 시간대 표기가 없는 한국 시각으로 온다. 앞의 것을 그대로 찍으면 9시간 이른 시각이
+  /// 화면에 뜬다(같은 화면 아래 평가 카드는 맞는 시각을 보여주므로 두 값이 어긋나 보였다).
+  /// 시간대 표기가 없는 값에 toLocal 을 불러도 값은 바뀌지 않으므로 두 출처 모두 안전하다.
+  static String _clock(DateTime? value) {
+    if (value == null) return '--:--';
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+  }
 
   static String _sourceLabel(String? source) => switch (source) {
     'API_ONLY' => '경로 API 시간 기준',
@@ -419,9 +428,13 @@ class RecommendationApi {
         .toList(growable: false);
   }
 
-  static String _time(DateTime value) =>
-      '${value.hour.toString().padLeft(2, '0')}:'
-      '${value.minute.toString().padLeft(2, '0')}';
+  /// 같은 이유로 여기서도 지역 시각으로 맞춘다. 지금 인자는 일정 API 값(시간대 표기 없음)
+  /// 뿐이라 값이 바뀌지 않지만, 나중에 UTC 값이 들어와도 틀리지 않게 둔다.
+  static String _time(DateTime value) {
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+  }
 
   static String _isoWithOffset(DateTime value) {
     if (value.isUtc) return value.toIso8601String();

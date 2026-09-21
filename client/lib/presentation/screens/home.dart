@@ -112,6 +112,33 @@ class HomeScreen extends StatelessWidget {
   );
 }
 
+/// 서버가 주는 파이프라인 신선도 코드를 사람 말로 옮긴다.
+///
+/// 예전에는 `NORMAL`·`STALE`·`UNKNOWN` 을 그대로 화면에 찍었다. 내부 코드를 사용자에게
+/// 보여주는 셈이고, 게다가 어떤 값이든 초록색이라 "오래된 자료" 인데도 정상으로 보였다.
+/// 모르는 코드는 지어내지 않고 "확인 중" 으로 둔다.
+@visibleForTesting
+String dataStateLabel(String state) => switch (state) {
+  'NORMAL' => '정상',
+  'STALE' => '자료 오래됨',
+  'UNKNOWN' => '확인 중',
+  _ => '확인 중',
+};
+
+@visibleForTesting
+Color dataStateTone(String state) => switch (state) {
+  'NORMAL' => DdubiColors.green,
+  'STALE' => const Color(0xFFFF6B35),
+  _ => const Color(0xFF7F91A2),
+};
+
+@visibleForTesting
+IconData dataStateIcon(String state) => switch (state) {
+  'NORMAL' => Icons.check_circle_outline,
+  'STALE' => Icons.history_toggle_off_outlined,
+  _ => Icons.help_outline,
+};
+
 class _HomeData {
   const _HomeData({
     required this.summary,
@@ -712,10 +739,10 @@ class _WebHomeContent extends StatelessWidget {
           Expanded(
             child: DashboardMetricCard(
               label: '데이터 상태',
-              value: summary.dataState,
+              value: dataStateLabel(summary.dataState),
               caption: '안 읽은 알림 ${summary.unreadNotificationCount}건',
-              icon: Icons.check_circle_outline,
-              tone: DdubiColors.green,
+              icon: dataStateIcon(summary.dataState),
+              tone: dataStateTone(summary.dataState),
             ),
           ),
         ],
@@ -878,7 +905,10 @@ class _HomeScheduleCard extends StatelessWidget {
         Row(
           children: [
             Text(
-              previewRoutes.isEmpty ? '17:57' : previewRoutes.first.departure,
+              // 추천이 없을 때 그럴듯한 시각을 지어내지 않는다. 예전에는 '17:57' 이
+              // 박혀 있어서, 일정도 추천도 없는 사용자에게 근거 없는 출발 시각을
+              // 알려주고 있었다.
+              previewRoutes.isEmpty ? '--:--' : previewRoutes.first.departure,
               style: Theme.of(context).textTheme.headlineMedium
                   ?.copyWith(color: DdubiColors.blue),
             ),

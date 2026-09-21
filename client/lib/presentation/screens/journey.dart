@@ -56,27 +56,47 @@ class _DelayAlertScreenState extends ConsumerState<DelayAlertScreen> {
           }
           final evaluationRepository =
               repository as ScheduleEvaluationRepository;
-          final schedules = snapshot.data ?? <Schedule>[];
+          // 취소된 일정과 이미 지난 일정은 평가가 멈춘 상태라 카드를 만들 이유가 없다.
+          final now = DateTime.now();
+          final schedules =
+              Schedule.visible(snapshot.data ?? const <Schedule>[])
+                  .where((schedule) => schedule.arriveBy.isAfter(now))
+                  .toList()
+                ..sort((a, b) => a.arriveBy.compareTo(b.arriveBy));
           if (schedules.isEmpty) {
-            return const Center(child: Text('등록된 일정이 없습니다.'));
+            return const Center(child: Text('앞으로 예정된 일정이 없습니다.'));
           }
-          return ListView(
+          // ListView.builder 로 그린다. 예전에는 모든 카드를 한 번에 만들어서, 일정이
+          // 열 개면 열 개가 동시에 서버에 물어보고 각자 3초마다 다시 물었다. 화면에 보이는
+          // 카드만 만들면 화면 밖 카드는 아예 요청하지 않고, 스크롤을 벗어나면 타이머도
+          // 정리된다(카드의 dispose 가 타이머를 끈다).
+          return ListView.builder(
             padding: screenPadding,
-            children: [
-              const Text('각 일정의 최신 평가와 데이터 부족 사유를 확인하세요.'),
-              for (final schedule in schedules) ...[
-                const SizedBox(height: 16),
-                Text(
-                  schedule.title,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                ScheduleEvaluationCard(
-                  key: ValueKey(schedule.id),
-                  repository: evaluationRepository,
-                  scheduleId: schedule.id,
-                ),
-              ],
-            ],
+            itemCount: schedules.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return const Padding(
+                  padding: EdgeInsets.only(bottom: 4),
+                  child: Text('각 일정의 최신 평가와 데이터 부족 사유를 확인하세요.'),
+                );
+              }
+              final schedule = schedules[index - 1];
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 16),
+                  Text(
+                    schedule.title,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  ScheduleEvaluationCard(
+                    key: ValueKey(schedule.id),
+                    repository: evaluationRepository,
+                    scheduleId: schedule.id,
+                  ),
+                ],
+              );
+            },
           );
         },
       ),

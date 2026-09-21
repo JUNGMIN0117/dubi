@@ -346,11 +346,13 @@ class ScheduleDetailScreen extends StatelessWidget {
               headline: headline,
               onSelected: recommendationApi == null
                   ? null
-                  : (savedRoute) => _openSavedRoute(
+                  : (savedRoute, displayRank, durationMin) => _openSavedRoute(
                       c,
                       schedule,
                       savedRoute,
                       routeRepository,
+                      displayRank: displayRank,
+                      durationMin: durationMin,
                     ),
             ),
             const SizedBox(height: 16),
@@ -472,8 +474,10 @@ class ScheduleDetailScreen extends StatelessWidget {
     BuildContext c,
     Schedule schedule,
     SavedRouteSummary savedRoute,
-    DdubiRepository routeRepository,
-  ) {
+    DdubiRepository routeRepository, {
+    int? displayRank,
+    int? durationMin,
+  }) {
     if (savedRoute.routeId.trim().isEmpty) {
       ScaffoldMessenger.of(c).showSnackBar(
         const SnackBar(
@@ -493,6 +497,8 @@ class ScheduleDetailScreen extends StatelessWidget {
         selectedRoute: savedRoute.toRouteOption(schedule),
         departureLabel: savedRoute.fromName ?? schedule.departurePlace,
         destinationLabel: savedRoute.toName ?? schedule.place,
+        displayRank: displayRank,
+        evaluatedDurationMin: durationMin,
       ),
     );
   }
@@ -580,7 +586,10 @@ class _LiveSavedRouteList extends StatefulWidget {
   final RecommendationApi? api;
   final String scheduleId;
   final ValueNotifier<ScheduleEvaluationV2?> headline;
-  final Future<Object?> Function(SavedRouteSummary)? onSelected;
+
+  /// 목록에서 보이던 순번과 소요시간을 같이 넘긴다. 상세 화면이 서버 rankNo 와 경로 API
+  /// 원본 시간을 따로 보여주면 같은 경로인데 다른 숫자가 나온다.
+  final Future<Object?> Function(SavedRouteSummary, int, int?)? onSelected;
 
   @override
   State<_LiveSavedRouteList> createState() => _LiveSavedRouteListState();
@@ -663,8 +672,12 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
     estimates: _estimates,
     onSelected: widget.onSelected == null
         ? null
-        : (route) async {
-            final result = await widget.onSelected!(route);
+        : (route, displayRank, durationMin) async {
+            final result = await widget.onSelected!(
+              route,
+              displayRank,
+              durationMin,
+            );
             // 상세 화면이 "이 경로는 정리됐다"고 알려 주면 새 목록으로 바꾼다.
             if (result == true && mounted) {
               await _reload();
@@ -687,7 +700,9 @@ class _SavedRouteList extends StatelessWidget {
 
   /// 서버가 같은 기준으로 비교한 후보별 결과. `routeId` 로 카드와 이어 붙인다.
   final List<EvaluationCandidateEstimate> estimates;
-  final ValueChanged<SavedRouteSummary>? onSelected;
+
+  /// (경로, 화면 순번, 화면에 보인 소요시간(분)) 를 넘긴다.
+  final void Function(SavedRouteSummary, int, int?)? onSelected;
 
   EvaluationCandidateEstimate? _estimateFor(String routeId) {
     for (final estimate in estimates) {
@@ -766,14 +781,18 @@ class _SavedRouteTile extends StatelessWidget {
   final int displayRank;
 
   final SavedRouteSummary route;
-  final ValueChanged<SavedRouteSummary>? onTap;
 
-  /// 평가된 소요시간이 있으면 그 값을, 없으면 경로 API 원본을 보여준다.
-  String _durationLabel() {
+  /// (경로, 화면 순번, 화면에 보인 소요시간(분)) 를 넘긴다. 상세 화면이 같은 숫자를
+  /// 보여주게 하려고 카드가 실제로 그린 값을 그대로 전달한다.
+  final void Function(SavedRouteSummary, int, int?)? onTap;
+
+  /// 평가된 소요시간이 있으면 그 값을, 없으면 경로 API 원본을 쓴다(분).
+  int get _durationMin {
     final seconds = estimate?.durationSeconds;
-    if (seconds == null) return '약 ${route.baseDurationMin}분';
-    return '약 ${(seconds / 60).ceil()}분';
+    return seconds == null ? route.baseDurationMin : (seconds / 60).ceil();
   }
+
+  String _durationLabel() => '약 $_durationMin분';
 
   @override
   Widget build(BuildContext context) => Material(
@@ -782,7 +801,9 @@ class _SavedRouteTile extends StatelessWidget {
     child: InkWell(
       key: Key('savedRoute-${route.routeId}'),
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap == null ? null : () => onTap!(route),
+      onTap: onTap == null
+          ? null
+          : () => onTap!(route, displayRank, _durationMin),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(

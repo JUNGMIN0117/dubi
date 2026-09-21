@@ -971,11 +971,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Opacity(
             opacity: .92,
             child: Image.asset(
-              'assets/images/ttubee/concerned.png',
+              'assets/images/ttubee/route-guide.png',
               width: 88,
               height: 88,
               fit: BoxFit.contain,
-              semanticLabel: '서비스 상태를 안내하는 뚜비',
+              semanticLabel: '일정별 교통 상황을 안내하는 뚜비',
             ),
           ),
         ),
@@ -984,22 +984,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SectionHeader('서비스 연결 안내'),
+              // 제목·아이콘·그림을 들어가는 화면(일정별 교통 상황)과 맞춘다. 예전에는
+              // 제목이 '서비스 연결 안내' 이고 연결 끊김 아이콘에 걱정하는 뚜비까지 붙어
+              // 있어서, 기능 안내가 아니라 고장 알림으로 보였다.
+              const SectionHeader('일정별 교통 상황'),
               const SizedBox(height: 10),
               const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
-                    Icons.cloud_off_outlined,
-                    color: Color(0xFFFF6B35),
+                    Icons.directions_transit_outlined,
+                    color: DdubiColors.blue,
                     size: 20,
                   ),
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '일정별 최신 교통 상황을 확인하세요.',
+                      '등록한 일정마다 교통 상황을 확인할 수 있어요.',
                       style: TextStyle(
-                        color: Color(0xFFFF5A2A),
+                        color: DdubiColors.navy,
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1009,7 +1012,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 7),
               const Text(
-                '등록한 일정의 평가 결과와 정보 갱신 시각을 확인할 수 있어요.',
+                '일정별로 계산 결과와 마지막 확인 시각을 볼 수 있어요.',
                 style: TextStyle(
                   color: Color(0xFF64708B),
                   fontSize: 12,
@@ -1277,15 +1280,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader('서비스 연결 안내'),
+        const SectionHeader('일정별 교통 상황'),
         const SizedBox(height: 10),
         const StatusBadge(
-          '일정별 최신 교통 상황을 확인하세요.',
-          tone: DdubiColors.orange,
-          icon: Icons.cloud_off_outlined,
+          '등록한 일정마다 교통 상황을 확인할 수 있어요.',
+          tone: DdubiColors.blue,
+          icon: Icons.directions_transit_outlined,
         ),
         const SizedBox(height: 6),
-        const Text('등록한 일정의 평가 결과와 정보 갱신 시각을 확인할 수 있어요.'),
+        const Text('일정별로 계산 결과와 마지막 확인 시각을 볼 수 있어요.'),
         const SizedBox(height: 12),
         Align(
           alignment: Alignment.centerRight,

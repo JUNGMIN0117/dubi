@@ -9,8 +9,10 @@ import '../../services/app_api.dart';
 import '../../services/recommendation_api.dart';
 import '../widgets.dart';
 import '../departure_headline.dart';
+import '../recommendation_guide_card.dart';
 import '../schedule_evaluation_card.dart';
 import '../../domain/schedule_evaluation.dart';
+import '../../domain/route_evaluated_numbers.dart';
 import '../../domain/saved_route_display.dart';
 import '../../domain/transit_reference.dart';
 import '../transit_reference_panel.dart';
@@ -354,10 +356,13 @@ class ScheduleDetailScreen extends StatelessWidget {
             else ...[
               _FinalRouteSummary(route: route),
               const SizedBox(height: 10),
+              // 계산 근거(내부 사유 코드) 대신 사용자가 행동할 수 있는 안내를 보여준다.
+              // 시간과 순서는 서버 계산값이고 앱은 받은 값을 그대로 쓴다.
               if (recommendationApi != null)
-                _RecommendationEvidenceCard(
+                RecommendationGuideCard(
                   api: recommendationApi!,
-                  overview: overview,
+                  scheduleId: schedule.id,
+                  headline: headline,
                 ),
             ],
             const SizedBox(height: 16),
@@ -369,13 +374,13 @@ class ScheduleDetailScreen extends StatelessWidget {
               headline: headline,
               onSelected: recommendationApi == null
                   ? null
-                  : (savedRoute, displayRank, durationMin) => _openSavedRoute(
+                  : (savedRoute, displayRank, evaluated) => _openSavedRoute(
                       c,
                       schedule,
                       savedRoute,
                       routeRepository,
                       displayRank: displayRank,
-                      durationMin: durationMin,
+                      evaluated: evaluated,
                     ),
             ),
             const SizedBox(height: 16),
@@ -499,7 +504,7 @@ class ScheduleDetailScreen extends StatelessWidget {
     SavedRouteSummary savedRoute,
     DdubiRepository routeRepository, {
     int? displayRank,
-    int? durationMin,
+    RouteEvaluatedNumbers evaluated = RouteEvaluatedNumbers.empty,
   }) {
     if (savedRoute.routeId.trim().isEmpty) {
       ScaffoldMessenger.of(c).showSnackBar(
@@ -521,7 +526,7 @@ class ScheduleDetailScreen extends StatelessWidget {
         departureLabel: savedRoute.fromName ?? schedule.departurePlace,
         destinationLabel: savedRoute.toName ?? schedule.place,
         displayRank: displayRank,
-        evaluatedDurationMin: durationMin,
+        evaluated: evaluated,
       ),
     );
   }
@@ -610,9 +615,10 @@ class _LiveSavedRouteList extends StatefulWidget {
   final String scheduleId;
   final ValueNotifier<ScheduleEvaluationV2?> headline;
 
-  /// 목록에서 보이던 순번과 소요시간을 같이 넘긴다. 상세 화면이 서버 rankNo 와 경로 API
+  /// 목록에서 보이던 순번과 평가 결과를 같이 넘긴다. 상세 화면이 서버 rankNo 와 경로 API
   /// 원본 시간을 따로 보여주면 같은 경로인데 다른 숫자가 나온다.
-  final Future<Object?> Function(SavedRouteSummary, int, int?)? onSelected;
+  final Future<Object?> Function(SavedRouteSummary, int, RouteEvaluatedNumbers)?
+  onSelected;
 
   @override
   State<_LiveSavedRouteList> createState() => _LiveSavedRouteListState();
@@ -623,6 +629,9 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
 
   /// 서버가 같은 기준으로 비교한 후보별 결과. 새 평가가 오면 갱신한다.
   List<EvaluationCandidateEstimate> _estimates = const [];
+
+  /// 카드·상세·지도가 같은 숫자를 쓰도록 평가 결과를 통째로 들고 있는다.
+  ScheduleEvaluationV2? _evaluation;
   late bool _unavailable = widget.unavailable;
   final DateTime _loadedAt = DateTime.now();
   DateTime? _seenComputedAt;
@@ -646,7 +655,10 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
   void _onEvaluation() {
     final value = widget.headline.value;
     if (value != null && mounted && !_sameEstimates(value.candidateEstimates)) {
-      setState(() => _estimates = value.candidateEstimates);
+      setState(() {
+        _estimates = value.candidateEstimates;
+        _evaluation = value;
+      });
     }
     final computedAt = widget.headline.value?.computedAt;
     if (computedAt == null) return;
@@ -688,18 +700,29 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
     }
   }
 
+  /// 이번 평가에서 서버가 바꾸라고 제안한 경로. 없으면 null 이다.
+  String? get _proposedRouteId {
+    for (final estimate in _estimates) {
+      if (estimate.proposed && estimate.routeId != null) {
+        return estimate.routeId;
+      }
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) => _SavedRouteList(
-    display: SavedRouteDisplay.from(_routes),
+    display: SavedRouteDisplay.from(_routes, proposedRouteId: _proposedRouteId),
     unavailable: _unavailable,
     estimates: _estimates,
+    evaluation: _evaluation,
     onSelected: widget.onSelected == null
         ? null
-        : (route, displayRank, durationMin) async {
+        : (route, displayRank, evaluated) async {
             final result = await widget.onSelected!(
               route,
               displayRank,
-              durationMin,
+              evaluated,
             );
             // 상세 화면이 "이 경로는 정리됐다"고 알려 주면 새 목록으로 바꾼다.
             if (result == true && mounted) {
@@ -716,7 +739,11 @@ class _SavedRouteList extends StatelessWidget {
     required this.unavailable,
     required this.onSelected,
     this.estimates = const [],
+    this.evaluation,
   });
+
+  /// 이번 평가 결과 전체. 카드에 쓸 시간과 출처를 여기서만 꺼낸다.
+  final ScheduleEvaluationV2? evaluation;
 
   final SavedRouteDisplay display;
   final bool unavailable;
@@ -725,7 +752,8 @@ class _SavedRouteList extends StatelessWidget {
   final List<EvaluationCandidateEstimate> estimates;
 
   /// (경로, 화면 순번, 화면에 보인 소요시간(분)) 를 넘긴다.
-  final void Function(SavedRouteSummary, int, int?)? onSelected;
+  final void Function(SavedRouteSummary, int, RouteEvaluatedNumbers)?
+  onSelected;
 
   EvaluationCandidateEstimate? _estimateFor(String routeId) {
     for (final estimate in estimates) {
@@ -742,7 +770,7 @@ class _SavedRouteList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '저장된 추천 경로',
+          '추천 경로',
           style: TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w900,
@@ -766,6 +794,10 @@ class _SavedRouteList extends StatelessWidget {
               route: routes[i],
               displayRank: routes[i].displayRank ?? i + 1,
               estimate: _estimateFor(routes[i].routeId),
+              evaluated: RouteEvaluatedNumbers.of(
+                evaluation,
+                routes[i].routeId,
+              ),
               onTap: onSelected,
             ),
             if (i != routes.length - 1) const SizedBox(height: 8),
@@ -796,7 +828,11 @@ class _SavedRouteTile extends StatelessWidget {
     required this.displayRank,
     required this.onTap,
     this.estimate,
+    this.evaluated = RouteEvaluatedNumbers.empty,
   });
+
+  /// 이번 평가가 이 경로에 계산한 시간·출처. 상세와 지도에 그대로 넘겨 같은 숫자를 쓰게 한다.
+  final RouteEvaluatedNumbers evaluated;
 
   /// 서버가 이번 평가에서 계산한 값. 있으면 원본 경로시간 대신 이 값을 보여준다.
   final EvaluationCandidateEstimate? estimate;
@@ -806,17 +842,23 @@ class _SavedRouteTile extends StatelessWidget {
 
   final SavedRouteSummary route;
 
-  /// (경로, 화면 순번, 화면에 보인 소요시간(분)) 를 넘긴다. 상세 화면이 같은 숫자를
-  /// 보여주게 하려고 카드가 실제로 그린 값을 그대로 전달한다.
-  final void Function(SavedRouteSummary, int, int?)? onTap;
+  /// (경로, 화면 순번, 이번 평가 결과) 를 넘긴다. 상세 화면이 같은 숫자를 보여주게 하려고
+  /// 카드가 실제로 쓴 값을 그대로 전달한다.
+  final void Function(SavedRouteSummary, int, RouteEvaluatedNumbers)? onTap;
 
   /// 평가된 소요시간이 있으면 그 값을, 없으면 경로 API 원본을 쓴다(분).
-  int get _durationMin {
-    final seconds = estimate?.durationSeconds;
-    return seconds == null ? route.baseDurationMin : (seconds / 60).ceil();
-  }
+  int get _durationMin =>
+      evaluated.totalMinutes ??
+      ((estimate?.durationSeconds) == null
+          ? route.baseDurationMin
+          : (estimate!.durationSeconds! / 60).ceil());
 
-  String _durationLabel() => '약 $_durationMin분';
+  /// 이 숫자가 어디서 왔는지. 지도 상세와 같은 문구를 쓴다.
+  bool get _fromEvaluation =>
+      evaluated.totalMinutes != null || estimate?.durationSeconds != null;
+
+  String _durationLabel() =>
+      '약 $_durationMin분 · ${_fromEvaluation ? '이동 예측 기준' : '원본 경로 기준'}';
 
   @override
   Widget build(BuildContext context) => Material(
@@ -825,9 +867,7 @@ class _SavedRouteTile extends StatelessWidget {
     child: InkWell(
       key: Key('savedRoute-${route.routeId}'),
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap == null
-          ? null
-          : () => onTap!(route, displayRank, _durationMin),
+      onTap: onTap == null ? null : () => onTap!(route, displayRank, evaluated),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -867,7 +907,9 @@ class _SavedRouteTile extends StatelessWidget {
                               ? '선택된 추천 경로'
                               : estimate?.proposed == true
                               ? '새로 제안된 경로'
-                              : '$displayRank순위 경로',
+                              // 화면에는 제일 추천하는 경로 한 장만 남으므로 순위 번호를
+                              // 쓰지 않는다. "3순위" 는 나머지 두 개가 보일 때만 뜻이 있다.
+                              : '가장 추천하는 경로',
                           style: const TextStyle(
                             fontWeight: FontWeight.w900,
                             color: DdubiColors.navy,
@@ -917,144 +959,6 @@ class _SavedRouteTile extends StatelessWidget {
     if (modes.contains('SUBWAY')) return Icons.directions_subway_rounded;
     if (modes.contains('BUS')) return Icons.directions_bus_rounded;
     return Icons.directions_walk_rounded;
-  }
-}
-
-class _RecommendationEvidenceCard extends StatelessWidget {
-  const _RecommendationEvidenceCard({
-    required this.api,
-    required this.overview,
-  });
-
-  final RecommendationApi api;
-  final RecommendationOverview? overview;
-
-  @override
-  Widget build(BuildContext context) {
-    final recommendationId = overview?.recommendationId;
-    if (recommendationId == null) {
-      return _evidence(
-        context,
-        source: overview?.source,
-        reasonCodes: overview?.reasonCodes ?? const [],
-        preview: overview?.preview,
-      );
-    }
-    return FutureBuilder<RecommendationExplanation>(
-      future: api.getExplanation(recommendationId),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _evidence(
-            context,
-            source: overview?.source,
-            reasonCodes: overview?.reasonCodes ?? const [],
-            preview: overview?.preview,
-            note: '상세 추천 근거를 불러오지 못했어요.',
-          );
-        }
-        final explanation = snapshot.data;
-        return _evidence(
-          context,
-          source: explanation?.source ?? overview?.source,
-          reasonCodes:
-              explanation?.reasonCodes ?? overview?.reasonCodes ?? const [],
-          preview: explanation?.preview ?? overview?.preview,
-          checkedAt: explanation?.dataCheckedAt,
-          loading: !snapshot.hasData,
-        );
-      },
-    );
-  }
-
-  Widget _evidence(
-    BuildContext context, {
-    String? source,
-    required List<String> reasonCodes,
-    bool? preview,
-    DateTime? checkedAt,
-    bool loading = false,
-    String? note,
-  }) => InfoCard(
-    color: const Color(0xFFF4F8FF),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const StatusBadge(
-          '추천 근거',
-          tone: DdubiColors.blue,
-          icon: Icons.lightbulb_outline,
-        ),
-        const SizedBox(height: 10),
-        if (loading)
-          const LinearProgressIndicator()
-        else ...[
-          Text(_sourceDescription(source)),
-          if (preview == true) ...[
-            const SizedBox(height: 6),
-            const Text(
-              '현재 결과는 검증용이며 일정에 자동 적용되지 않아요.',
-              style: TextStyle(color: Color(0xFF64708B)),
-            ),
-          ],
-          if (reasonCodes.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            for (final reason in reasonCodes.take(3))
-              Text('• ${_reasonDescription(reason)}'),
-          ],
-          if (checkedAt != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              '${checkedAt.hour.toString().padLeft(2, '0')}:${checkedAt.minute.toString().padLeft(2, '0')} 기준',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-          if (note != null) ...[
-            const SizedBox(height: 8),
-            Text(note, style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ],
-      ],
-    ),
-  );
-
-  static String _sourceDescription(String? source) => switch (source) {
-    'API_ONLY' => '현재 경로 API의 예상 소요시간을 기준으로 계산했어요.',
-    'ML_PREVIEW' => '버스 구간 예측을 포함해 계산했어요.',
-    'SUBWAY_PREVIEW' => '지하철 시간표를 포함해 계산했어요.',
-    'MIXED_PREVIEW' => '경로 API와 교통 예측 정보를 함께 사용했어요.',
-    'HISTORICAL_REFERENCE' || 'MIXED_HISTORICAL_REFERENCE' =>
-      '일부 버스 구간에 과거 평균 소요시간을 사용한 참고 추정이에요. 실시간 또는 ML 예측값이 아니에요.',
-    'BUS_REFERENCE' =>
-      '버스 구간에 미리 계산한 기준 소요시간을 사용한 참고 추정이에요. 실시간 또는 ML 예측값이 아니에요.',
-    _ => '계산에 사용된 정보가 확인되지 않았어요. 최신 평가의 제한 사항을 확인해 주세요.',
-  };
-
-  static String _reasonDescription(String code) {
-    final historical = historicalReferenceReasonLabel(code);
-    if (historical != null) return historical;
-    if (code.contains('HISTORICAL_REFERENCE_APPLIED')) {
-      return '버스 구간에 과거 평균 소요시간을 적용했어요.';
-    }
-    if (code.contains('HISTORICAL_REFERENCE_WEATHER_UNKNOWN')) {
-      return '과거 평균에는 현재 날씨가 반영되지 않았어요.';
-    }
-    if (code.contains('HISTORICAL_REFERENCE_DATA_VERSION') ||
-        code.contains('HISTORICAL_REFERENCE_SAMPLE_KIND')) {
-      return '사용한 과거 자료의 출처가 기록돼 있어요.';
-    }
-    if (code.contains('HISTORICAL_REFERENCE_')) {
-      return '과거 자료 적용 조건이 맞지 않아 기본 경로시간을 유지했어요.';
-    }
-    if (code == 'VALIDATION_ONLY') return '검증 단계의 결과예요.';
-    if (code.contains('ML_NOT_CONFIGURED')) return '일부 구간은 경로 API 시간을 사용했어요.';
-    if (code.contains('BUS_WAIT_MISSING')) return '버스 대기시간 정보가 부족해요.';
-    if (code.contains('SUBWAY_TIMETABLE_NOT_CONFIGURED')) {
-      return '지하철 시간표 정보가 부족해요.';
-    }
-    if (code.startsWith('ROAD_POTENTIAL_IMPACT:')) {
-      return '예상 이동 구간에 도로 영향 가능성이 있어요.';
-    }
-    return '일부 교통정보를 확인하지 못했어요.';
   }
 }
 

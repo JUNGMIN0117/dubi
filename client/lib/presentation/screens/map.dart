@@ -8,6 +8,7 @@ import '../../core/maps/kakao_map_config.dart';
 import '../../core/theme.dart';
 import '../../domain/models.dart';
 import '../../domain/route_evaluated_numbers.dart';
+import '../../domain/route_map_lines.dart';
 import '../../services/recommendation_api.dart';
 import '../schedule_evaluation_card.dart' show durationSourceLabel;
 import '../widgets.dart';
@@ -416,6 +417,7 @@ class _SavedRouteDetailPanel extends StatelessWidget {
               repository: repository,
               route: route,
               segments: detail.segments,
+              evaluated: evaluated,
             ),
           ),
         ),
@@ -668,9 +670,10 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
     final pixelRatio = View.of(context).devicePixelRatio;
     final projected = <_ProjectedRouteSegment>[];
     try {
-      for (final segment in widget.routeMap.segments) {
+      // 좌표가 없는 구간(대개 도보)은 앞뒤를 잇는 직선으로 채워 선이 끊기지 않게 한다.
+      for (final line in routeMapLines(widget.routeMap)) {
         final rawPoints = await Future.wait(
-          segment.coordinates.map(
+          line.points.map(
             (coordinate) => controller.toScreenPoint(
               position: LatLng(
                 latitude: coordinate.latitude,
@@ -684,7 +687,11 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
             .map((point) => point / pixelRatio)
             .toList(growable: false);
         projected.add(
-          _ProjectedRouteSegment(mode: segment.mode, points: points),
+          _ProjectedRouteSegment(
+            mode: line.mode,
+            points: points,
+            approximate: line.approximate,
+          ),
         );
       }
       if (mounted && generation == _projectionGeneration) {
@@ -832,11 +839,18 @@ class _SavedRoutePolylinePainter extends CustomPainter {
     // 임시 방식으로도 그렸는데, 실제 지도 타일과 맞지 않아 경로가 강 위 같은 엉뚱한 곳에
     // 그려졌다. 투영 전에는 아무것도 그리지 않고 지도만 보여준다.
     for (final segment in projectedSegments) {
-      _drawSegment(canvas, segment.mode, segment.points);
+      _drawSegment(canvas, segment.mode, segment.points, segment.approximate);
     }
   }
 
-  void _drawSegment(Canvas canvas, String mode, List<Offset> points) {
+  /// 실제 좌표가 없어 앞뒤를 이은 선은 점선으로 그린다. 도보도 늘 점선이다 —
+  /// 실선은 "이 길로 간다", 점선은 "이쯤을 지난다" 는 뜻으로 구별한다.
+  void _drawSegment(
+    Canvas canvas,
+    String mode,
+    List<Offset> points,
+    bool approximate,
+  ) {
     if (points.length < 2) return;
     final paint = Paint()
       ..color = _modeColor(mode)
@@ -844,7 +858,7 @@ class _SavedRoutePolylinePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
-    if (mode == 'WALK') {
+    if (mode == 'WALK' || approximate) {
       for (var index = 0; index < points.length - 1; index++) {
         final start = points[index];
         final end = points[index + 1];
@@ -875,10 +889,17 @@ class _SavedRoutePolylinePainter extends CustomPainter {
 }
 
 class _ProjectedRouteSegment {
-  const _ProjectedRouteSegment({required this.mode, required this.points});
+  const _ProjectedRouteSegment({
+    required this.mode,
+    required this.points,
+    this.approximate = false,
+  });
 
   final String mode;
   final List<Offset> points;
+
+  /// 저장된 좌표가 아니라 앞뒤 구간을 이어 만든 직선인가.
+  final bool approximate;
 }
 
 class _RouteMapView extends StatefulWidget {

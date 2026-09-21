@@ -146,4 +146,66 @@ class KakaoWalkingRouteClientTest {
             server.verify();
         }
     }
+
+    @Test
+    void walkingPathIsReturnedForMapDrawing() {
+        enabled();
+        server.expect(anything())
+                .andRespond(
+                        withSuccess(
+                                """
+                {"status":"OK","route":{"properties":{"totalTime":300,"totalDistance":400},
+                "legs":[{"steps":[
+                  {"properties":{"distance":93},"path":{"points":[[127.111197,37.394775],[127.111197,37.394748]]}},
+                  {"properties":{"distance":40},"path":{"points":[[127.111197,37.394748],[127.111483,37.394745]]}}
+                ]}]}}
+                """,
+                                MediaType.APPLICATION_JSON));
+        var result = client().route(request);
+        // step 경계에서 겹치는 같은 좌표는 한 번만 남는다.
+        assertThat(result.path()).hasSize(3);
+        assertThat(result.path().get(0)).isEqualTo(new Coordinate(127.111197, 37.394775));
+        assertThat(result.path().get(2)).isEqualTo(new Coordinate(127.111483, 37.394745));
+        server.verify();
+    }
+
+    @Test
+    void brokenCoordinatesDropTheWholeLineButKeepTheTime() {
+        enabled();
+        for (String points :
+                java.util.List.of(
+                        "[[0,0],[127.1,37.5]]",
+                        "[[200.0,37.5],[127.1,37.5]]",
+                        "[[127.1]]",
+                        "[[127.1,37.5]]")) {
+            server.reset();
+            server.expect(anything())
+                    .andRespond(
+                            withSuccess(
+                                    "{\"status\":\"OK\",\"route\":{\"properties\":{\"totalTime\":300,\"totalDistance\":400},"
+                                            + "\"legs\":[{\"steps\":[{\"properties\":{\"distance\":93},\"path\":{\"points\":"
+                                            + points
+                                            + "}}]}]}}",
+                                    MediaType.APPLICATION_JSON));
+            var result = client().route(request);
+            // 좌표가 이상해도 시간은 그대로 쓴다. 선만 그리지 않는다.
+            assertThat(result.seconds()).isEqualTo(300);
+            assertThat(result.path()).isEmpty();
+            server.verify();
+        }
+    }
+
+    @Test
+    void responseWithoutPathStillSucceeds() {
+        enabled();
+        server.expect(anything())
+                .andRespond(
+                        withSuccess(
+                                "{\"status\":\"OK\",\"route\":{\"properties\":{\"totalTime\":300,\"totalDistance\":400},\"legs\":[{\"steps\":[{\"properties\":{\"distance\":93}}]}]}}",
+                                MediaType.APPLICATION_JSON));
+        var result = client().route(request);
+        assertThat(result.seconds()).isEqualTo(300);
+        assertThat(result.path()).isEmpty();
+        server.verify();
+    }
 }

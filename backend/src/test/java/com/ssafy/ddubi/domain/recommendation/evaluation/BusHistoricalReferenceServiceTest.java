@@ -347,8 +347,9 @@ class BusHistoricalReferenceServiceTest {
                         now,
                         now,
                         now.plusSeconds(1000));
-        assertEquals(now.plusSeconds(90), result.fastest().estimatedArrivalAt());
-        assertEquals("BUS_REFERENCE", result.candidates().get(0).quality());
+        // 두 edge의 역사 기준값 45초씩에 provider가 step으로 분해하지 못한 10초를 보존한다.
+        assertEquals(now.plusSeconds(100), result.fastest().estimatedArrivalAt());
+        assertEquals("MIXED_PREVIEW", result.candidates().get(0).quality());
         assertEquals(0, result.candidates().get(0).mlSteps());
         assertEquals("BUS_HISTORICAL_REFERENCE", result.fastest().steps().get(0).source());
         assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_APPLIED"));
@@ -389,7 +390,8 @@ class BusHistoricalReferenceServiceTest {
                         session);
         verify(ml, never()).predict(any());
         assertEquals("BUS_HISTORICAL_REFERENCE", result.fastest().steps().get(0).source());
-        assertEquals(now.plusSeconds(90), result.fastest().estimatedArrivalAt());
+        // ML 예산 소진 fallback에서도 provider 미분류 10초를 버리지 않는다.
+        assertEquals(now.plusSeconds(100), result.fastest().estimatedArrivalAt());
         assertTrue(result.fastest().reasons().contains("step-1:ML_BUDGET_EXHAUSTED"));
         assertTrue(result.fastest().reasons().contains("step-1:HISTORICAL_REFERENCE_APPLIED"));
         assertFalse(result.budgetExhausted()); // 보조 ML 실패와 전체 후보 탐색 실패를 구별한다.

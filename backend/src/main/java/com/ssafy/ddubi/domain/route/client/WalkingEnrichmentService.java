@@ -136,6 +136,27 @@ public class WalkingEnrichmentService {
 
     public record Prepared(List<RouteCandidate> candidates, Evidence evidence) {}
 
+    /**
+     * 일정에 고정 저장할 도보 결과의 수명을 일정 종료시각까지 맞춘다. 카카오 응답 직후의 짧은 유효시간은 응답 검증용이지, 정적인 도보 구간을 매분 다시 호출하라는 의미가
+     * 아니다. 실제 카카오 시간이 한 구간에도 적용되지 않았다면 실패 결과에 임의 유효기간을 붙이지 않는다.
+     */
+    public Prepared retainUntil(Prepared prepared, Instant scheduleEndsAt) {
+        Objects.requireNonNull(prepared);
+        Objects.requireNonNull(scheduleEndsAt);
+        Evidence current = prepared.evidence();
+        boolean applied =
+                current.legs().stream()
+                        .anyMatch(leg -> "KAKAO_WALKING_API".equals(leg.durationSource()));
+        Evidence retained =
+                new Evidence(
+                        current.legs(),
+                        current.fallbackReasons(),
+                        current.apiCalls(),
+                        applied ? scheduleEndsAt : null,
+                        current.candidateFallbackReasons());
+        return new Prepared(prepared.candidates(), retained);
+    }
+
     /** 후보 재검색이 일어나도 동일 좌표 요청 결과를 공유한다. calls는 제한값이 아니라 실제 외부 호출 횟수 진단값이다. */
     public static final class Session {
         private final Map<WalkingRouteClient.Request, WalkingRouteClient.Evidence> cache =

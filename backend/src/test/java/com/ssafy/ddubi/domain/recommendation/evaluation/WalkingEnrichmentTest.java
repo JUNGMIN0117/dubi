@@ -266,6 +266,23 @@ class WalkingEnrichmentTest {
     }
 
     @Test
+    void scheduledWalkingResultRemainsValidUntilScheduleEnds() {
+        var service =
+                service(
+                        r ->
+                                new WalkingRouteClient.Evidence(
+                                        120L, now.plusSeconds(60), "fixture", null));
+        var prepared =
+                service.prepare(List.of(route(0)), origin, destination, now, points("BUS_STOP"));
+        Instant scheduleEndsAt = now.plus(Duration.ofHours(24));
+
+        var retained = service.retainUntil(prepared, scheduleEndsAt);
+
+        assertThat(retained.evidence().validUntil()).isEqualTo(scheduleEndsAt);
+        assertThat(retained.candidates()).isEqualTo(prepared.candidates());
+    }
+
+    @Test
     void missingCoordinateMeaningCannotCrashOrCallProvider() {
         var output =
                 service(

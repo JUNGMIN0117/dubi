@@ -72,7 +72,7 @@ class WalkingEnrichmentTest {
     }
 
     WalkingEnrichmentService service(WalkingRouteClient client) {
-        return new WalkingEnrichmentService(client, new ObjectMapper(), true, 4, 20, "");
+        return new WalkingEnrichmentService(client, new ObjectMapper(), true, 20, "");
     }
 
     @Test
@@ -303,7 +303,7 @@ class WalkingEnrichmentTest {
     }
 
     @Test
-    void candidateRefreshSharesBudgetAndCachedResponses() {
+    void candidateRefreshCachesResponsesWithoutCallLimit() {
         var seen = new ArrayList<WalkingRouteClient.Request>();
         var service =
                 new WalkingEnrichmentService(
@@ -327,8 +327,9 @@ class WalkingEnrichmentTest {
         var changed =
                 service.prepare(
                         List.of(route(0)), destination, origin, now, points("BUS_STOP"), session);
-        assertThat(seen).hasSize(2);
-        assertThat(changed.evidence().fallbackReasons()).contains("WALK_CALL_BUDGET_EXHAUSTED");
+        assertThat(seen).hasSize(4);
+        assertThat(changed.evidence().fallbackReasons()).isEmpty();
+        assertThat(changed.evidence().apiCalls()).isEqualTo(4);
     }
 
     @Test

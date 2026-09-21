@@ -79,7 +79,6 @@ DT는 `redis-keys.yaml`, `events/*.schema.json`, 기존 transit/time-table 계�
 | `ddubi.recommendation.auto-notify-enabled` | false | 자동 알림 |
 | `ddubi.recommendation.shadow-preview-notify-enabled` | false | 검증용 알림 허용. 켜면 `[검증용]` 본문 |
 | `ddubi.walking.enabled` | false | 공식 카카오맵 도보 사용. 키/좌표/비용 검증까지 통과해야 적용 |
-| `ddubi.walking.max-calls` | 4 | 일정 평가 전체 호출 예산, 최대 32. 후보 재검색도 같은 session/cache 사용 |
 | `ddubi.walking.endpoint-max-meters` | 0 | 0이면 검증 비활성. corpus로 합의한 값만 설정 |
 | `ddubi.walking.master-coordinate-path` | 빈 값 | DT transit-coordinate-v1 객체 또는 이전 MasterPoint 배열. 32 MiB 상한 |
 | `ddubi.bus-waiting.decomposition-verified` | false | 이동/대기 비용 분해 검증 후 켬 |
@@ -152,7 +151,7 @@ MR !146 (`d9a2bac` 기준)의 GitLab 병합 검사는 draft 외 충돌이 없었
 
 `GET https://dapi.kakao.com/v2/routing/walk`에 `start_x/start_y/end_x/end_y`, `input_coord=output_coord=WGS84`, `route_mode=SHORTEST`를 전송한다. 기존 `KAKAO_REST_API_KEY`를 KakaoAK 헤더로 재사용한다. 과거 계획서의 affiliate endpoint와 service/priority/default_speed는 사용하지 않는다.
 
-추가 설정은 `ddubi.walking.timeout-millis=1500`(연결/읽기 각각), `cache-seconds=60`(BE 정책 TTL, provider 보장 아님)이다. `DDUBI_WALKING_ENABLED`, `DDUBI_WALKING_ENDPOINT_MAX_METERS`, `DDUBI_WALKING_MASTER_COORDINATE_PATH` 환경변수로 켠다. 승인되지 않은 거리 임계값을 코드에서 자동 선택하지 않는다. 좌표 반올림 없는 session cache를 사용하며 재검색도 호출 예산 4회를 공유한다.
+추가 설정은 `ddubi.walking.timeout-millis=1500`(연결/읽기 각각), `cache-seconds=60`(BE 정책 TTL, provider 보장 아님)이다. `DDUBI_WALKING_ENABLED`, `DDUBI_WALKING_ENDPOINT_MAX_METERS`, `DDUBI_WALKING_MASTER_COORDINATE_PATH` 환경변수로 켠다. 승인되지 않은 거리 임계값을 코드에서 자동 선택하지 않는다. 좌표 반올림 없는 session cache로 같은 평가의 동일 요청은 재사용하며, 후보 수에 따른 호출 횟수 상한은 두지 않는다. 외부 429·timeout·오류는 기존 WALK fallback 사유로 보존한다.
 
 403·429·timeout·5xx·비정상 status·빈/깨진 응답은 기존 WALK로 돌아간다. 429는 Retry-After(초/HTTP date)까지 이후 호출을 생략하고 즉시 재시도하지 않는다. `ddubi.walking.requests{result}`와 actuator `kakaoWalkingRouteClient` health 상세에 상태를 제공한다. 선택적 도보 장애가 전체 대중교통 readiness를 내리지 않는다. 실제 유료 API 호출과 운영 활성화는 이 변경의 테스트에 포함하지 않았다.
 

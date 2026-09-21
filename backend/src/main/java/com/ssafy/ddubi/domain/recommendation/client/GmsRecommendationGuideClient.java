@@ -25,6 +25,9 @@ public class GmsRecommendationGuideClient {
     private final RestClient rest;
     private final String endpoint;
 
+    // 생성자가 둘이라 스프링이 어느 쪽을 쓸지 모른다. 표시가 없으면 기본 생성자를 찾다가
+    // 컨텍스트 자체가 뜨지 않는다. 운영 주입은 이 생성자다.
+    @org.springframework.beans.factory.annotation.Autowired
     public GmsRecommendationGuideClient(
             RestClient.Builder builder,
             RecommendationGuideProperties properties,

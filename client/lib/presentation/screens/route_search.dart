@@ -32,7 +32,6 @@ class RouteResultsScreen extends StatelessWidget {
     webSubtitle: '도착 시간과 이동 조건을 기준으로 가장 알맞은 경로를 안내해요.',
     index: go == null ? null : 1,
     onNav: go,
-    actions: const [IconButton(onPressed: null, icon: Icon(Icons.refresh))],
     child: FutureBuilder<RouteEvaluationResult>(
       future: condition == null
           ? repository.routes().then(RouteEvaluationResult.candidates)

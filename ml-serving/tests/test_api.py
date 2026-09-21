@@ -1,7 +1,7 @@
 """데이터 없는 서비스를 정상으로 오인하거나 배치 입력이 조용히 변형되는 장애를 방어한다."""
 
-import json
 import hashlib
+import json
 import os
 import sys
 from pathlib import Path

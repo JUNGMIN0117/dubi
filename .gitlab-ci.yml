@@ -202,6 +202,7 @@ backend-test:
     - changes:
         - backend/**/*
         - docs/ddubi_erd_v2.sql          # 스키마 원천. V1__init.sql 과 항상 같아야 하므로 바뀌면 테스트를 돌린다
+        - .gitlab-ci.yml                  # 백엔드 테스트 환경·명령 자체를 바꾸면 해당 잡으로 새 규칙을 검증한다
 
 # 클라이언트(Flutter) 정적 분석 + 단위 테스트. 팀장(FE 담당) 요청: client 변경 시 자동, 빌드는 수동.
 # 이미지는 클라이언트가 기준으로 삼는 Flutter 3.47.2 (pubspec.lock: Flutter >=3.44, Dart >=3.13.2).

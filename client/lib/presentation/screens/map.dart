@@ -354,9 +354,13 @@ class _SavedRouteDetailPanel extends StatelessWidget {
   final RouteOption route;
   final DdubiRepository repository;
 
-  /// 목록에서 보이던 순번. 없으면 순위 칸을 아예 그리지 않는다 — 서버 rankNo 는 소요시간
-  /// 기준 캐시라 사용자에게 보여줄 번호가 아니다(목록 "1순위" ↔ 상세 "20순위" 문제).
+  /// 목록에서 보이던 순번. 목록과 상세가 같은 번호를 쓰게 하려고 그대로 받아 온다.
+  /// 없으면 상세 응답의 displayRank 를 쓰고, 그것도 없으면 순위 칸을 그리지 않는다 —
+  /// 내부 순위(rankNo)는 소요시간 기준 캐시라 사용자에게 보여줄 번호가 아니다.
   final int? displayRank;
+
+  /// 화면에 보여줄 순위. 목록에서 온 값이 먼저다.
+  int? get _visibleRank => displayRank ?? detail.displayRank;
 
   /// 목록에서 보여준 소요시간(분). 없을 때만 경로 API 원본을 쓴다.
   final int? evaluatedDurationMin;
@@ -374,8 +378,8 @@ class _SavedRouteDetailPanel extends StatelessWidget {
         Row(
           children: [
             Expanded(child: _metric('예상 시간', _durationLabel)),
-            if (displayRank != null)
-              Expanded(child: _metric('경로 순위', '$displayRank순위')),
+            if (_visibleRank != null)
+              Expanded(child: _metric('경로 순위', '$_visibleRank순위')),
             Expanded(child: _metric('이동 구간', '${detail.segments.length}개')),
           ],
         ),

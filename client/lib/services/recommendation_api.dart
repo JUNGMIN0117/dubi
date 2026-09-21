@@ -106,6 +106,7 @@ class SavedRouteSummary {
   const SavedRouteSummary({
     required this.routeId,
     required this.rankNo,
+    this.displayRank,
     required this.selected,
     required this.baseDurationMin,
     required this.fromName,
@@ -115,7 +116,15 @@ class SavedRouteSummary {
   });
 
   final String routeId;
+
+  /// 경로 제공자의 원본 순위 또는 내부 저장 순위. 사용자에게 보여주는 번호가 아니다 —
+  /// 선택된 추천의 rankNo 가 20 일 수 있다(소요시간 기준이라 그렇다).
   final int rankNo;
+
+  /// 서버가 정한 화면 표시용 순위. 선택된 경로가 1 이다. 없으면(구버전 응답) 화면 순번을
+  /// 앱이 직접 매긴다.
+  final int? displayRank;
+
   final bool selected;
   final int baseDurationMin;
   final String? fromName;
@@ -127,6 +136,7 @@ class SavedRouteSummary {
       SavedRouteSummary(
         routeId: json['routeId'].toString(),
         rankNo: (json['rankNo'] as num?)?.toInt() ?? 0,
+        displayRank: (json['displayRank'] as num?)?.toInt(),
         selected: json['selected'] == true,
         baseDurationMin: (json['baseDurationMin'] as num?)?.toInt() ?? 0,
         fromName: json['fromName']?.toString(),
@@ -199,6 +209,7 @@ class SavedRouteDetail {
     required this.routeId,
     required this.scheduleId,
     required this.rankNo,
+    this.displayRank,
     required this.selected,
     required this.baseDurationMin,
     required this.segments,
@@ -208,6 +219,10 @@ class SavedRouteDetail {
   final String routeId;
   final String scheduleId;
   final int rankNo;
+
+  /// 서버가 정한 화면 표시용 순위. 목록과 같은 값이어야 한다.
+  final int? displayRank;
+
   final bool selected;
   final int baseDurationMin;
   final String? providerPathId;
@@ -218,6 +233,7 @@ class SavedRouteDetail {
         routeId: json['routeId'].toString(),
         scheduleId: json['scheduleId'].toString(),
         rankNo: (json['rankNo'] as num?)?.toInt() ?? 0,
+        displayRank: (json['displayRank'] as num?)?.toInt(),
         selected: json['selected'] == true,
         baseDurationMin: (json['baseDurationMin'] as num?)?.toInt() ?? 0,
         providerPathId: json['providerPathId']?.toString(),
@@ -552,8 +568,15 @@ class RecommendationApi {
   static Map<String, dynamic> _stringKeyed(Map<dynamic, dynamic> value) =>
       value.map((key, item) => MapEntry(key.toString(), item));
 
+  /// 서버 시각 문자열을 읽는다. 읽자마자 지역 시각으로 맞춘다.
+  ///
+  /// 지금 계약은 두 갈래다 — 화면에 보이는 일정 시각(plannedDepartAt, arriveBy,
+  /// proposedDepartAt 등)은 시간대 표기가 없는 KST 이고, 운영·만료 시각(computedAt,
+  /// validUntil 등)은 UTC(`...Z`) 다. 여기서 한 번 맞춰 두면 뒤에서 쓰는 곳마다 따로
+  /// 신경 쓰지 않아도 되고, 캐시에 남은 예전 UTC 응답도 제대로 보인다.
+  /// 시간대 표기가 없는 값에 toLocal 을 불러도 값은 바뀌지 않는다.
   static DateTime? _dateTime(Object? value) =>
-      DateTime.tryParse(value?.toString() ?? '');
+      DateTime.tryParse(value?.toString() ?? '')?.toLocal();
 
   static List<String> _strings(Object? value) => value is List
       ? value.map((item) => item.toString()).toList(growable: false)

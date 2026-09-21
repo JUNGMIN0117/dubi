@@ -65,8 +65,38 @@ class SavedPlace extends PlaceLocation {
   );
 }
 
+/// 장소 검색 한 페이지.
+///
+/// 서버가 수도권과 부산 결과를 섞어서 내려주므로 순서를 앱에서 다시 정렬하면 안 된다.
+/// 한 페이지가 한 지역이라고 가정해서도 안 된다. 다음 페이지가 있는지는 [hasNext] 로만
+/// 판단한다 — 받은 개수가 요청한 size 보다 적다고 마지막 페이지인 것은 아니다.
+class PlaceSearchPage {
+  const PlaceSearchPage({
+    required this.items,
+    required this.hasNext,
+    required this.totalElements,
+  });
+
+  final List<PlaceLocation> items;
+  final bool hasNext;
+  final int totalElements;
+
+  static const PlaceSearchPage empty = PlaceSearchPage(
+    items: [],
+    hasNext: false,
+    totalElements: 0,
+  );
+}
+
 abstract interface class PlaceSearchService {
   Future<List<PlaceLocation>> search(
+    String query, {
+    int page = 0,
+    int size = 10,
+  });
+
+  /// 페이지 정보까지 함께 받는 검색. 목록 화면은 이쪽을 쓴다.
+  Future<PlaceSearchPage> searchPage(
     String query, {
     int page = 0,
     int size = 10,
@@ -419,7 +449,6 @@ class UserProfile {
     required this.nickname,
     required this.notifyLeadMin,
     required this.alarmEnabled,
-    required this.transportPrefs,
     this.provider,
   });
 
@@ -428,7 +457,6 @@ class UserProfile {
   final String nickname;
   final int notifyLeadMin;
   final bool alarmEnabled;
-  final List<Map<String, String>> transportPrefs;
   final String? provider;
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
@@ -437,14 +465,6 @@ class UserProfile {
     nickname: json['nickname'] as String? ?? '',
     notifyLeadMin: (json['notifyLeadMin'] as num?)?.toInt() ?? 20,
     alarmEnabled: json['alarmEnabled'] as bool? ?? true,
-    transportPrefs: (json['transportPrefs'] as List? ?? const [])
-        .whereType<Map>()
-        .map(
-          (item) => item.map(
-            (key, value) => MapEntry(key.toString(), value.toString()),
-          ),
-        )
-        .toList(growable: false),
     provider: json['provider']?.toString(),
   );
 }

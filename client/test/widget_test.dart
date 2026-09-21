@@ -1140,6 +1140,17 @@ class _FakePlaceSearchService implements PlaceSearchService {
         lng: 127.014,
       ),
   ];
+
+  @override
+  Future<PlaceSearchPage> searchPage(
+    String query, {
+    int page = 0,
+    int size = 10,
+  }) async => PlaceSearchPage(
+    items: await search(query, page: page, size: size),
+    hasNext: false,
+    totalElements: 1,
+  );
 }
 
 class _FakeRecommendationApi extends RecommendationApi {

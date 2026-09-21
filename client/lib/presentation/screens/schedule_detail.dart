@@ -758,12 +758,13 @@ class _SavedRouteList extends StatelessWidget {
             child: Text('아직 평가된 추천 경로가 없어요.'),
           )
         else ...[
-          // 화면 순번은 1부터 다시 매긴다. 중복을 묶은 뒤 서버 순위(1,2,6,8,10)를 그대로
-          // 보여주면 사용자에게는 번호가 건너뛴 것처럼 보인다. 서버 순위는 개발자 진단에 남는다.
+          // 순번은 서버가 준 displayRank 를 그대로 쓴다. 없으면(구버전 응답) 1부터
+          // 앱이 매긴다. 어느 쪽이든 상세 화면에 같은 값을 넘겨 두 화면이 어긋나지 않게 한다.
+          // 내부 순위(rankNo)는 소요시간 기준 캐시라 사용자 화면에 쓰지 않는다.
           for (var i = 0; i < routes.length; i++) ...[
             _SavedRouteTile(
               route: routes[i],
-              displayRank: i + 1,
+              displayRank: routes[i].displayRank ?? i + 1,
               estimate: _estimateFor(routes[i].routeId),
               onTap: onSelected,
             ),

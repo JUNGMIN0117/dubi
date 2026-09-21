@@ -75,10 +75,17 @@ public class ScheduleRepeatController {
     }
 
     @Operation(summary = "반복 일정 중지",
-            description = "비활성화만 한다 — 이미 만들어진 인스턴스는 남는다. REPEAT-005")
+            description = "기본은 비활성화만 한다 — 이미 만들어진 인스턴스는 남는다. "
+                    + "cancelFutureInstances=true 면 아직 시작하지 않은 미래 인스턴스를 CANCELED 로 바꾼다"
+                    + "(개별 수정한 일정은 남긴다). REPEAT-005")
     @DeleteMapping("/{repeatId}")
-    public ResponseEntity<Void> deactivate(@LoginUserId Long userId, @PathVariable Long repeatId) {
-        repeatService.deactivate(userId, repeatId);
+    public ResponseEntity<Void> deactivate(
+            @LoginUserId Long userId,
+            @PathVariable Long repeatId,
+            // 기본 false 를 바꾸지 말 것. 기존 앱은 이 값을 보내지 않는다 —
+            // true 가 기본이면 "중지" 만 누른 사용자의 미래 일정이 통째로 사라진다.
+            @RequestParam(defaultValue = "false") boolean cancelFutureInstances) {
+        repeatService.deactivate(userId, repeatId, cancelFutureInstances);
         return ResponseEntity.noContent().build();
     }
 }

@@ -263,6 +263,8 @@ public class WalkingEnrichmentService {
                 Role role = roles.get(step.sequence());
                 long seconds = step.durationSeconds();
                 String source = "PUBLIC_TRANSIT_STEP";
+                // 지도용 좌표. 도보 API 가 실제 걷는 길을 주면 그것으로 바꾼다.
+                List<Coordinate> path = step.geometry();
                 EndpointEvidence endpoint = null;
                 String fallback = null;
                 if (role == Role.ACCESS_WALK || role == Role.EGRESS_WALK) {
@@ -324,6 +326,9 @@ public class WalkingEnrichmentService {
                                     && found.validUntil().isAfter(asOf)) {
                                 seconds = found.seconds();
                                 source = "KAKAO_WALKING_API";
+                                // 시간과 같은 응답에서 온 좌표만 쓴다. 지도에 그려지는 선과
+                                // 화면에 적히는 시간이 서로 다른 조회 결과이면 안 된다.
+                                if (!found.path().isEmpty()) path = found.path();
                                 if (validUntil == null || found.validUntil().isBefore(validUntil))
                                     validUntil = found.validUntil();
                                 for (var point : coordinates)
@@ -362,7 +367,7 @@ public class WalkingEnrichmentService {
                                 seconds,
                                 step.stopNames(),
                                 step.vehicles(),
-                                step.geometry(),
+                                path,
                                 step.mapping()));
                 // 동일 카카오 후보에서 전개한 버스 대안도 서로 다른 증거 key를 유지한다.
                 metadata.add(

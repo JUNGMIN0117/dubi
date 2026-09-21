@@ -121,6 +121,7 @@ class Schedule {
     this.importance = ScheduleImportance.high,
     this.considerLastTrip = false,
     this.repeatLabel,
+    this.repeatId,
     this.updatedAt,
     this.status = ScheduleStatus.upcoming,
   });
@@ -135,10 +136,19 @@ class Schedule {
   final ScheduleImportance importance;
   final bool considerLastTrip;
   final String? repeatLabel;
+
+  /// 이 일정을 만든 반복 규칙의 id. 서버가 늘 함께 내려주는데 앱이 읽지 않아서, 화면은
+  /// 이 일정이 반복에서 나온 것인지 전혀 모르고 있었다. 하나를 지워도 다음 주에 또
+  /// 생기는 이유를 사용자가 알 수 없었다.
+  final String? repeatId;
+
   final DateTime? updatedAt;
   final ScheduleStatus status;
 
   bool get isCanceled => status == ScheduleStatus.canceled;
+
+  /// 반복 규칙에서 만들어진 일정인지. 화면에 "반복" 표시를 달 때 쓴다.
+  bool get isRepeating => repeatId != null && repeatId!.isNotEmpty;
 
   /// 목록·홈에 보여줄 일정만 남긴다. 취소된 일정은 서버에 남아 있어도 화면에서는 제외한다.
   static List<Schedule> visible(Iterable<Schedule> schedules) =>
@@ -173,6 +183,7 @@ class Schedule {
     ),
     importance: ScheduleImportance.fromApi(json['importance'] as String?),
     considerLastTrip: json['considerLastTrip'] as bool? ?? false,
+    repeatId: json['repeatId']?.toString(),
     updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? ''),
     status: ScheduleStatus.fromApi(json['status']?.toString()),
   );
@@ -212,6 +223,7 @@ class Schedule {
     importance: importance ?? this.importance,
     considerLastTrip: considerLastTrip ?? this.considerLastTrip,
     repeatLabel: repeatLabel,
+    repeatId: repeatId,
     updatedAt: updatedAt ?? this.updatedAt,
     status: status,
   );

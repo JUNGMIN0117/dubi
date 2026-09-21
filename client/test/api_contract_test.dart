@@ -299,6 +299,28 @@ void main() {
     expect(schedule.updatedAt, DateTime(2026, 9, 3, 9, 14, 22, 123, 456));
   });
 
+  test('일정 응답의 repeatId 를 읽어 반복 여부를 안다', () {
+    final plain = Schedule.fromJson({
+      'id': 1,
+      'title': '단발 일정',
+      'origin': {'name': '출발', 'lat': 37.5, 'lng': 127.0},
+      'destination': {'name': '도착', 'lat': 37.6, 'lng': 127.1},
+      'arriveBy': '2026-09-21T18:00:00',
+    });
+    expect(plain.isRepeating, isFalse);
+
+    final repeated = Schedule.fromJson({
+      'id': 2,
+      'repeatId': 7,
+      'title': '출근',
+      'origin': {'name': '집', 'lat': 37.5, 'lng': 127.0},
+      'destination': {'name': '회사', 'lat': 37.6, 'lng': 127.1},
+      'arriveBy': '2026-09-21T09:00:00',
+    });
+    expect(repeated.repeatId, '7');
+    expect(repeated.isRepeating, isTrue);
+  });
+
   test('반복 일정 요청을 백엔드 rrule과 장소 좌표 계약으로 변환한다', () {
     final request = RepeatScheduleRule(
       id: 'local-id',

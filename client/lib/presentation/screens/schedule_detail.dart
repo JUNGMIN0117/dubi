@@ -301,6 +301,29 @@ class ScheduleDetailScreen extends StatelessWidget {
                 ],
               ),
             ),
+            // 반복에서 만들어진 일정이면 먼저 알린다. 수정·삭제가 이 일정 하나에만
+            // 적용된다는 점을 모르면 "지웠는데 또 생긴다" 로 느낀다.
+            if (schedule.isRepeating) ...[
+              const SizedBox(height: 12),
+              const InfoCard(
+                key: Key('scheduleRepeatNotice'),
+                child: Row(
+                  children: [
+                    Icon(Icons.event_repeat, size: 18, color: DdubiColors.blue),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '반복 일정에서 만들어진 일정이에요. 여기서 고치거나 지우면 이 날짜 하나에만 적용돼요.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF52677B),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [

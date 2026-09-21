@@ -226,6 +226,32 @@ keys:
       arrivalTrainType: 'raw.btrainStt 원문(일반/급행 등). 시간표의 검증된 열차 종류와 비교한다.'
       sourceGeneratedAt: 'raw.recptnDt 원문. 누락은 null/생략이며 collectedAt으로 채우지 않는다.'
 
+  subwayArrivalsByStationSnapshot:
+    pattern: "transit:snapshot:subway-arrivals:{providerLineId}:{providerStationId}"
+    type: string
+    ttlSeconds: 1080
+    owner: spark
+    schemaVersion: subway-snapshot-v1
+    contract: subway-snapshots.md
+    description: >-
+      Backend가 KEYS/SCAN 없이 호선·역 한 키를 GET하여 현재 도착 열차 목록을 읽는 JSON Snapshot.
+      열차별 validUntil(occurredAt+120초)이 실제 사용 가능 시간이며 1080초 TTL은 진단용 보관 상한이다.
+      Spark micro-batch가 한 수집 회차를 나누어도 Redis에서 trainId별 최신 항목을 원자 병합한다.
+      키가 없거나 항목이 stale이면 운행 없음이 아니라 UNKNOWN으로 처리한다.
+
+  subwayPositionsByLineSnapshot:
+    pattern: "transit:snapshot:subway-positions:{providerLineId}"
+    type: string
+    ttlSeconds: 10800
+    owner: spark
+    schemaVersion: subway-snapshot-v1
+    contract: subway-snapshots.md
+    description: >-
+      Backend가 KEYS/SCAN 없이 호선 한 키를 GET하여 현재 열차 위치 목록을 읽는 JSON Snapshot.
+      열차별 validUntil(occurredAt+120초)이 실제 사용 가능 시간이며 10800초 TTL은 진단용 보관 상한이다.
+      부분 batch는 기존의 아직 유효한 열차를 지우지 않고 trainId별 최신 항목과 병합한다.
+      providerLineId·providerStationId는 서울 API ID이며 canonical 역·구간 ID로 간주하지 않는다.
+
   trafficFlowLatest:
     pattern: "traffic:latest:flow:{providerLinkId}"
     ttlSeconds: 900

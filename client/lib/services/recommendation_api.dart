@@ -30,10 +30,17 @@ class RecommendationOverview {
   final List<String> reasonCodes;
 
   bool get hasEstimate => departureAt != null && eta != null;
-  bool get historical =>
-      source == 'HISTORICAL_REFERENCE' ||
-      source == 'MIXED_HISTORICAL_REFERENCE' ||
-      source == 'BUS_REFERENCE';
+
+  /// 과거 평균으로 계산한 결과인지. 실시간이 아니므로 화면에서 "참고 추정" 으로 말한다.
+  ///
+  /// 서버가 쓰는 이름이 여럿이다(2026-09-21 운영 응답 확인). 하나라도 빠지면 과거 평균
+  /// 결과가 "최신 추천" 으로 잘못 표시된다.
+  bool get historical => const {
+    'HISTORICAL_REFERENCE',
+    'MIXED_HISTORICAL_REFERENCE',
+    'BUS_REFERENCE',
+    'BUS_HISTORICAL_REFERENCE',
+  }.contains(source);
 
   RouteOption toRouteOption(Schedule schedule) => RouteOption(
     kind: historical ? RouteKind.candidate : RouteKind.recommended,
@@ -66,12 +73,15 @@ class RecommendationOverview {
 
   static String _sourceLabel(String? source) => switch (source) {
     'API_ONLY' => '경로 API 시간 기준',
-    'ML_PREVIEW' => '버스 예측 포함',
+    'ML_PREVIEW' => '버스 예측 포함 · 시험 중',
+    'ML_PRODUCTION' => '버스 예측 포함',
     'SUBWAY_PREVIEW' => '지하철 시간표 포함',
     'MIXED_PREVIEW' => '복합 교통 데이터 기준',
     'HISTORICAL_REFERENCE' ||
     'MIXED_HISTORICAL_REFERENCE' => '과거 버스 평균 포함 · 실시간 아님',
-    'BUS_REFERENCE' => '버스 기준시간 포함 · 실시간 아님',
+    'BUS_REFERENCE' || 'BUS_HISTORICAL_REFERENCE' => '버스 기준시간 포함 · 실시간 아님',
+    'FALLBACK' => '경로 API 시간으로 대체',
+    'UNAVAILABLE' => '교통정보를 확인하지 못함',
     _ => '최신 평가 결과',
   };
 }

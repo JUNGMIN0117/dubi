@@ -38,7 +38,7 @@ public record RepeatResponse(
                 repeat.getUntilDate(),
                 LocationResponse.from(repeat.getOrigin()),
                 LocationResponse.from(repeat.getDestination()),
-                repeat.getImportance(),
+                repeat.getImportance().exposed(),
                 repeat.isConsiderLastTrip(),
                 repeat.isActive(),
                 nextOccurrenceAt,

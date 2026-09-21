@@ -26,9 +26,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * 중요도 2단계 (B7).
  *
  * <h3>DB 는 건드리지 않는다</h3>
- * {@code CRITICAL} 은 ENUM 에 그대로 남아 있고 기존 행도 그대로다. 지우려면 되돌릴 수 없는
- * {@code UPDATE} 가 필요해서 사용자 승인 대상이다. 그때까지 경계에서 흡수한다 — 들어올 때
- * HIGH 로 접고, 나갈 때 HIGH 로 보여 준다. 이 테스트가 그 두 방향을 고정한다.
+ *
+ * {@code CRITICAL} 은 ENUM 에 그대로 남아 있고 기존 행도 그대로다. 지우려면 되돌릴 수 없는 {@code UPDATE} 가 필요해서 사용자 승인 대상이다.
+ * 그때까지 경계에서 흡수한다 — 들어올 때 HIGH 로 접고, 나갈 때 HIGH 로 보여 준다. 이 테스트가 그 두 방향을 고정한다.
  */
 class ImportanceTwoLevelsIntegrationTest extends IntegrationTestSupport {
 
@@ -84,9 +84,7 @@ class ImportanceTwoLevelsIntegrationTest extends IntegrationTestSupport {
     void criticalIsAcceptedAndStoredAsHigh() {
         Long scheduleId = createSchedule(Importance.CRITICAL);
 
-        assertThat(storedImportance(scheduleId))
-                .as("새 CRITICAL 행이 더 생기면 안 된다")
-                .isEqualTo("HIGH");
+        assertThat(storedImportance(scheduleId)).as("새 CRITICAL 행이 더 생기면 안 된다").isEqualTo("HIGH");
         assertThat(scheduleService.get(ownerId, scheduleId).importance())
                 .isEqualTo(Importance.HIGH);
     }
@@ -122,15 +120,14 @@ class ImportanceTwoLevelsIntegrationTest extends IntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * 2단계로 줄이기 전에 "매우 높음" 으로 저장된 일정이 사라지거나 오류를 내지 않아야 한다.
-     * DB 를 직접 고쳐 그 상황을 만든다 — 애플리케이션 경로로는 더 이상 만들 수 없다.
+     * 2단계로 줄이기 전에 "매우 높음" 으로 저장된 일정이 사라지거나 오류를 내지 않아야 한다. DB 를 직접 고쳐 그 상황을 만든다 — 애플리케이션 경로로는 더 이상
+     * 만들 수 없다.
      */
     @Test
     @DisplayName("이미 저장된 CRITICAL 행은 중요(HIGH)로 보인다")
     void legacyCriticalRowIsExposedAsHigh() {
         Long scheduleId = createSchedule(Importance.HIGH);
-        jdbcTemplate.update(
-                "UPDATE schedule SET importance = 'CRITICAL' WHERE id = ?", scheduleId);
+        jdbcTemplate.update("UPDATE schedule SET importance = 'CRITICAL' WHERE id = ?", scheduleId);
 
         assertThat(storedImportance(scheduleId)).as("DB 값은 그대로 둔다").isEqualTo("CRITICAL");
         assertThat(scheduleService.get(ownerId, scheduleId).importance())
@@ -181,9 +178,9 @@ class ImportanceTwoLevelsIntegrationTest extends IntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * 중요도는 저장·표시용일 뿐이다. {@code Job} 이 값을 실어 나르지만 읽는 코드가 없고,
-     * {@code ddubi.recommendation.percentile.*} 도 읽는 코드가 없다. 여기가 깨지면 누군가
-     * 중요도에 계산 로직을 붙인 것이므로, ML 백분위 커버리지 검증(D3)부터 확인해야 한다.
+     * 중요도는 저장·표시용일 뿐이다. {@code Job} 이 값을 실어 나르지만 읽는 코드가 없고, {@code
+     * ddubi.recommendation.percentile.*} 도 읽는 코드가 없다. 여기가 깨지면 누군가 중요도에 계산 로직을 붙인 것이므로, ML 백분위 커버리지
+     * 검증(D3)부터 확인해야 한다.
      */
     @Test
     @DisplayName("중요도를 바꿔도 출발 예정시각은 달라지지 않는다")

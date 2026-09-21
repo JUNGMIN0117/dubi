@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from build_timetable import build, seconds, KST
+
 from audit_kakao_times import audit
+from build_timetable import KST, assign_version, build, seconds
+from build_train_crosswalk import apply_crosswalk, build_crosswalk
 
 
 class TimetableTest(unittest.TestCase):
@@ -62,6 +64,84 @@ class TimetableTest(unittest.TestCase):
             report = audit([path])
             self.assertEqual(report['zeroResidual'], 1)
             self.assertFalse(report['decompositionVerified'])
+
+
+class TrainCrosswalkTest(unittest.TestCase):
+    def timetable(self, duplicate_candidate=False):
+        calls = [
+            dict(stationId=station, providerStationId=provider, arrivalAt=when, departureAt=when, stops=True)
+            for station, provider, when in [
+                ('A', 'PA', '2026-09-11T09:00:00+09:00'),
+                ('B', 'PB', '2026-09-11T09:02:00+09:00'),
+                ('C', 'PC', '2026-09-11T09:04:00+09:00'),
+            ]
+        ]
+        trips = [dict(key='trip-1', lineId='2', providerLineId='1002', direction='IN', trainId=None,
+                      arrivalDirection=None, positionDirection=None, arrivalDestination=None,
+                      positionDestination=None, trainType=None, serviceDate='2026-09-11', calls=calls)]
+        if duplicate_candidate:
+            trips.append(dict(trips[0], key='trip-2', calls=[dict(call) for call in calls]))
+        data = dict(masterDataVersion='test-master', source='synthetic-test-only',
+                    publishedAt='2026-09-10T00:00:00+09:00', validFrom='2026-09-11T00:00:00+09:00',
+                    validUntil='2026-09-12T06:00:00+09:00', trips=trips, limitations=[])
+        assign_version(data)
+        return data
+
+    def observations(self):
+        return dict(schemaVersion='subway-train-observations-v1', observations=[
+            dict(eventType='subway.arrival', eventId='arrival-A', providerLineId='1002',
+                 providerTrainId='T1', providerStationId='PA', matchedAt='2026-09-11T09:00:30+09:00',
+                 direction='내선', destination='성수', trainType='일반'),
+            dict(eventType='subway.position', eventId='position-B', providerLineId='1002',
+                 providerTrainId='T1', providerStationId='PB', matchedAt='2026-09-11T09:02:30+09:00',
+                 direction='0', destination='성수'),
+            dict(eventType='subway.arrival', eventId='arrival-C', providerLineId='1002',
+                 providerTrainId='T1', providerStationId='PC', matchedAt='2026-09-11T09:04:30+09:00',
+                 direction='내선', destination='성수', trainType='일반'),
+        ])
+
+    def make_crosswalk(self, timetable=None, observations=None):
+        return build_crosswalk(timetable or self.timetable(), observations or self.observations(),
+                               '2026-09-11T10:00:00+09:00', evidence_sha256='0' * 64)
+
+    def test_unique_station_sequence_and_time_is_exact_and_can_be_applied(self):
+        timetable = self.timetable()
+        crosswalk, report = self.make_crosswalk(timetable)
+        entry = crosswalk['entries'][0]
+        self.assertEqual(entry['matchStatus'], 'EXACT')
+        self.assertEqual(entry['staticTripKey'], 'trip-1')
+        self.assertEqual(entry['scheduleOffsetSeconds'], 30)
+        self.assertEqual(report['statusCounts'], {'EXACT': 1})
+        self.assertEqual(apply_crosswalk(timetable, crosswalk), 1)
+        self.assertEqual(timetable['trips'][0]['trainId'], 'T1')
+        self.assertEqual(timetable['trips'][0]['arrivalDirection'], '내선')
+        self.assertEqual(timetable['trips'][0]['positionDirection'], '0')
+
+    def test_multiple_schedule_candidates_remain_ambiguous(self):
+        crosswalk, report = self.make_crosswalk(self.timetable(duplicate_candidate=True))
+        entry = crosswalk['entries'][0]
+        self.assertEqual(entry['matchStatus'], 'AMBIGUOUS')
+        self.assertEqual(entry['candidateTripKeys'], ['trip-1', 'trip-2'])
+        self.assertEqual(report['exactCoverage'], 0.0)
+
+    def test_missing_position_or_too_few_stations_remains_unmapped(self):
+        observations = self.observations()
+        observations['observations'] = [record for record in observations['observations']
+                                        if record['eventType'] == 'subway.arrival']
+        crosswalk, _ = self.make_crosswalk(observations=observations)
+        self.assertEqual(crosswalk['entries'][0]['matchStatus'], 'UNMAPPED')
+        self.assertEqual(crosswalk['entries'][0]['reason'], 'ARRIVAL_AND_POSITION_EVIDENCE_REQUIRED')
+
+    def test_crosswalk_rejects_timetable_version_and_exact_duplicate(self):
+        timetable = self.timetable()
+        crosswalk, _ = self.make_crosswalk(timetable)
+        invalid_version = dict(crosswalk, timetableVersion='other')
+        with self.assertRaisesRegex(ValueError, 'TIMETABLE_VERSION_MISMATCH'):
+            apply_crosswalk(timetable, invalid_version)
+        duplicate = dict(crosswalk)
+        duplicate['entries'] = [dict(crosswalk['entries'][0]), dict(crosswalk['entries'][0])]
+        with self.assertRaisesRegex(ValueError, 'EXACT_DUPLICATE'):
+            apply_crosswalk(self.timetable(), duplicate)
 
 
 if __name__ == '__main__':

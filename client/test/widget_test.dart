@@ -776,10 +776,8 @@ void main() {
     expect(find.byKey(const Key('webRouteResultsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webRouteResultsGrid')), findsOneWidget);
     expect(find.byKey(const Key('mobileRouteResultsLayout')), findsNothing);
-    expect(
-      find.byType(RouteCard),
-      findsNWidgets(MockDdubiRepository.routeData.length),
-    );
+    // 후보가 여러 개여도 화면에는 제일 추천하는 경로 한 장만 남는다.
+    expect(find.byType(RouteCard), findsOneWidget);
   });
 
   testWidgets('전체 지도는 Web에서 지도와 상세 정보를 좌우로 표시한다', (tester) async {

@@ -266,6 +266,7 @@ class RepeatScheduleRule {
     required this.origin,
     required this.destination,
     required this.time,
+    this.departTime,
     required this.startDate,
     required this.weekdays,
     this.untilDate,
@@ -278,7 +279,16 @@ class RepeatScheduleRule {
   final String title;
   final PlaceLocation origin;
   final PlaceLocation destination;
+
+  /// 도착 목표 시각 "HH:mm". 서버 필드 이름은 localTime 이다 — 이름과 달리 도착 시각이다.
   final String time;
+
+  /// 출발 예정 시각 "HH:mm". 서버 필드는 departTime.
+  ///
+  /// null 이면 출발시각이 도입되기 전에 만든 규칙이다. 서버는 값을 지어내지 않으므로,
+  /// 사용자가 직접 넣기 전까지 그 규칙이 찍어낸 일정은 추천 계산이 돌지 않는다.
+  final String? departTime;
+
   final DateTime startDate;
   final Set<int> weekdays;
   final DateTime? untilDate;
@@ -289,6 +299,9 @@ class RepeatScheduleRule {
   String get place => destination.name;
   String get departurePlace => origin.name;
 
+  /// 출발시각이 아직 없는 구버전 규칙인지. 목록·수정 화면에서 안내를 띄울 때 쓴다.
+  bool get needsDepartTime => departTime == null || departTime!.isEmpty;
+
   Map<String, dynamic> toCreateRequestJson() {
     const byDay = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
     final orderedDays = weekdays.toList()..sort();
@@ -297,6 +310,10 @@ class RepeatScheduleRule {
       'origin': origin.toRequestJson(),
       'destination': destination.toRequestJson(),
       'localTime': time,
+      // 서버는 초 없는 "09:00" 을 그대로 받는다(@JsonFormat 미적용, 2026-09-21 확인).
+      // 생성 때는 필수라 값이 없으면 보내지 않고 화면에서 먼저 막는다.
+      if (departTime != null && departTime!.isNotEmpty)
+        'departTime': departTime,
       'startDate': _dateOnly(startDate),
       'rrule':
           'FREQ=WEEKLY;BYDAY=${orderedDays.map((day) => byDay[day - 1]).join(',')}',
@@ -331,6 +348,9 @@ class RepeatScheduleRule {
         ),
       ),
       time: _hourMinute(json['localTime'] as String?),
+      departTime: json['departTime'] == null
+          ? null
+          : _hourMinute(json['departTime'] as String?),
       startDate: DateTime.parse(json['startDate'] as String),
       untilDate: DateTime.tryParse(json['endDate'] as String? ?? ''),
       weekdays: {

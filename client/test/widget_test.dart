@@ -776,10 +776,8 @@ void main() {
     expect(find.byKey(const Key('webRouteResultsLayout')), findsOneWidget);
     expect(find.byKey(const Key('webRouteResultsGrid')), findsOneWidget);
     expect(find.byKey(const Key('mobileRouteResultsLayout')), findsNothing);
-    expect(
-      find.byType(RouteCard),
-      findsNWidgets(MockDdubiRepository.routeData.length),
-    );
+    // 후보가 여러 개여도 화면에는 제일 추천하는 경로 한 장만 남는다.
+    expect(find.byType(RouteCard), findsOneWidget);
   });
 
   testWidgets('전체 지도는 Web에서 지도와 상세 정보를 좌우로 표시한다', (tester) async {
@@ -899,12 +897,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('accountPasswordDialog')), findsNothing);
 
+    // 아침 브리핑 카드가 생기면서 설정 화면이 길어졌다. 한 번에 끌어서는 문의 버튼까지
+    // 닿지 않아 두 번 나눠 내린다.
+    await tester.drag(
+      find.byKey(const Key('mobileSettingsLayout')),
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('mobileSettingsLayout')),
       const Offset(0, -500),
     );
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('helpInquiryButton')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('helpInquiryButton')));
     await tester.pumpAndSettle();
     expect(find.text('무엇을 도와드릴까요?'), findsOneWidget);

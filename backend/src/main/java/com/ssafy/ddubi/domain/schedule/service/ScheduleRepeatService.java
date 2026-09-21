@@ -84,7 +84,7 @@ public class ScheduleRepeatService {
                                 .considerLastTrip(Boolean.TRUE.equals(request.considerLastTrip()))
                                 .build());
 
-        int generated = materialize(repeat, LocalDateTime.now());
+        int generated = materialize(repeat, BusinessTime.now());
         log.info("반복 일정 생성 — repeatId={}, 인스턴스 {}건", repeat.getId(), generated);
         return new RepeatCreateResponse(repeat.getId(), generated, nextOccurrenceAt(repeat));
     }
@@ -167,7 +167,7 @@ public class ScheduleRepeatService {
 
         int regenerated = 0;
         if (request.affectsInstances()) {
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = BusinessTime.now();
             // 규칙 5: customized=true 인스턴스는 사용자가 손댄 것 — 지우지도 다시 만들지도 않는다.
             int deleted = scheduleRepository.deleteRegenerableInstances(repeatId, now);
             regenerated = materialize(repeat, now);
@@ -243,7 +243,7 @@ public class ScheduleRepeatService {
         if (!repeat.isActive()) {
             return null;
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = BusinessTime.now();
         WeeklyRepeatRule rule = WeeklyRepeatRule.fromCsv(repeat.getDaysOfWeek());
         LocalDate from =
                 repeat.getStartDate().isAfter(now.toLocalDate())

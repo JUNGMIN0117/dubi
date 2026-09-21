@@ -48,7 +48,7 @@ public record ScheduleResponse(
                 LocationResponse.from(schedule.getOrigin()),
                 LocationResponse.from(schedule.getDestination()),
                 schedule.getArriveBy(),
-                schedule.getImportance(),
+                schedule.getImportance().exposed(),
                 schedule.isConsiderLastTrip(),
                 schedule.isCustomized(),
                 schedule.getStatus(),

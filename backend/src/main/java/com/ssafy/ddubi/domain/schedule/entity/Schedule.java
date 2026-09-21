@@ -132,7 +132,7 @@ public class Schedule extends BaseTimeEntity {
         this.origin = origin;
         this.destination = destination;
         this.arriveBy = arriveBy;
-        this.importance = importance == null ? Importance.NORMAL : importance;
+        this.importance = Importance.stored(importance);
         this.considerLastTrip = considerLastTrip;
         this.customized = false;
         this.status = ScheduleStatus.UPCOMING;
@@ -204,7 +204,7 @@ public class Schedule extends BaseTimeEntity {
     }
 
     public void changeImportance(Importance importance) {
-        this.importance = importance; inputRevision++;
+        this.importance = Importance.stored(importance); inputRevision++;
     }
 
     public void changeConsiderLastTrip(boolean considerLastTrip) {

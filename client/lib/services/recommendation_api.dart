@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../core/constants/api_paths.dart';
 import '../domain/models.dart';
+import '../domain/recommendation_guide.dart';
 import '../domain/schedule_evaluation.dart';
 
 class RecommendationOverview {
@@ -437,28 +438,30 @@ class RecommendationApi {
         b['totalDurationSeconds'] as num,
       ),
     );
-    return items.map((item) {
-      final durationMinutes =
-          ((item['totalDurationSeconds'] as num).toDouble() / 60).ceil();
-      final fare = item['fare'] is Map ? item['fare'] as Map : const {};
-      final minimumFare = (fare['minimumWon'] as num?)?.toInt();
-      final maximumFare = (fare['maximumWon'] as num?)?.toInt();
-      return RouteOption(
-        kind: RouteKind.candidate,
-        label: '원본 경로 기준 · 가장 빠른 후보',
-        transport: switch (item['type']) {
-          'BUS' => '버스',
-          'SUBWAY' => '지하철',
-          _ => '버스 + 지하철',
-        },
-        departure: '평가 필요',
-        arrival: '평가 필요',
-        margin: '환승 ${(item['transfers'] as num?)?.toInt() ?? 0}회',
-        detail:
-            '약 $durationMinutes분 · ${(item['totalDistanceMeters'] as num).toInt()}m',
-        fare: _fare(minimumFare, maximumFare),
-      );
-    }).toList(growable: false);
+    return items
+        .map((item) {
+          final durationMinutes =
+              ((item['totalDurationSeconds'] as num).toDouble() / 60).ceil();
+          final fare = item['fare'] is Map ? item['fare'] as Map : const {};
+          final minimumFare = (fare['minimumWon'] as num?)?.toInt();
+          final maximumFare = (fare['maximumWon'] as num?)?.toInt();
+          return RouteOption(
+            kind: RouteKind.candidate,
+            label: '원본 경로 기준 · 가장 빠른 후보',
+            transport: switch (item['type']) {
+              'BUS' => '버스',
+              'SUBWAY' => '지하철',
+              _ => '버스 + 지하철',
+            },
+            departure: '평가 필요',
+            arrival: '평가 필요',
+            margin: '환승 ${(item['transfers'] as num?)?.toInt() ?? 0}회',
+            detail:
+                '약 $durationMinutes분 · ${(item['totalDistanceMeters'] as num).toInt()}m',
+            fare: _fare(minimumFare, maximumFare),
+          );
+        })
+        .toList(growable: false);
   }
 
   /// 같은 이유로 여기서도 지역 시각으로 맞춘다. 지금 인자는 일정 API 값(시간대 표기 없음)
@@ -498,6 +501,27 @@ class RecommendationApi {
     String scheduleId,
   ) =>
       _dio.get<Map<String, dynamic>>(ApiPaths.latestRecommendation(scheduleId));
+
+  /// 추천 카드 안내를 가져온다.
+  ///
+  /// 최신 추천이 READY 일 때만 부르고, `evaluationId` 가 바뀐 경우에만 다시 부른다.
+  /// 계산이 아직 안 끝났으면 서버가 409 로 답하는데, 그때는 오류가 아니라 "계산 중" 이므로
+  /// null 을 돌려주고 화면은 기존 계산 중 안내를 그대로 둔다.
+  Future<RecommendationGuide?> getLatestGuide(String scheduleId) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        ApiPaths.latestRecommendationGuide(scheduleId),
+      );
+      final data = response.data?['data'];
+      if (response.data?['success'] != true || data is! Map) return null;
+      return RecommendationGuide.fromJson(_stringKeyed(data));
+    } on DioException catch (error) {
+      final status = error.response?.statusCode;
+      // 409 = 아직 계산 중, 404 = 안내가 아직 없음. 둘 다 오류로 다루지 않는다.
+      if (status == 409 || status == 404) return null;
+      rethrow;
+    }
+  }
 
   Future<Response<Map<String, dynamic>>> getRecommendationExplanation(
     String recommendationId,

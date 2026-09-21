@@ -44,6 +44,10 @@ public enum Importance {
     /**
      * DB 에 저장할 값. null 은 NORMAL 로, CRITICAL 은 HIGH 로 접는다.
      *
+     * <p><b>미지정 기본값은 NORMAL 이다</b> — 프론트와 합의(2026-09-21). 앱은 {@code models.dart} 에서 오랫동안 {@code
+     * high} 를 기본으로 보내고 있었는데, 그러면 아무것도 고르지 않은 일정이 전부 "중요" 가 되어 그 표시가 의미를 잃는다. 중요는 사용자가 일부러 고르는 값이다.
+     * 앱 기본값도 normal 로 맞추기로 했다. <b>앱과 다르다는 이유로 이 기본값을 HIGH 로 되돌리지 말 것.</b>
+     *
      * @param value 사용자가 보낸 값(null 가능)
      */
     public static Importance stored(Importance value) {

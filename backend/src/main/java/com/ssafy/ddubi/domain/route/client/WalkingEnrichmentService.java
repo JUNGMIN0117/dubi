@@ -236,7 +236,8 @@ public class WalkingEnrichmentService {
                 boolean accessMissing = !originalRoles.containsValue(Role.ACCESS_WALK);
                 boolean egressMissing = !originalRoles.containsValue(Role.EGRESS_WALK);
                 if (enabled) {
-                    if (accessMissing)
+                    if (accessMissing) {
+                        var firstRide = transit.get(0);
                         inputSteps.add(
                                 0,
                                 syntheticWalk(
@@ -244,15 +245,22 @@ public class WalkingEnrichmentService {
                                                         .mapToInt(RouteSegment::sequence)
                                                         .min()
                                                         .orElse(1)
-                                                - 1));
-                    if (egressMissing)
+                                                - 1,
+                                        "출발지",
+                                        endpointName(firstRide.fromName(), "첫 승차 지점")));
+                    }
+                    if (egressMissing) {
+                        var lastRide = transit.get(transit.size() - 1);
                         inputSteps.add(
                                 syntheticWalk(
                                         route.segments().stream()
                                                         .mapToInt(RouteSegment::sequence)
                                                         .max()
                                                         .orElse(0)
-                                                + 1));
+                                                + 1,
+                                        endpointName(lastRide.toName(), "마지막 하차 지점"),
+                                        "도착지"));
+                    }
                 } else if (accessMissing || egressMissing) {
                     routeReasons.add("WALK_DISABLED");
                 }
@@ -404,21 +412,30 @@ public class WalkingEnrichmentService {
                         candidateReasons));
     }
 
-    private static RouteSegment syntheticWalk(int sequence) {
+    /**
+     * 원본 대중교통 후보에 빠진 양 끝 도보를 저장 가능한 구간으로 만든다. 도보 API가 성공하면 이 구간도
+     * {@code route_segment}에 영속화되므로, DB의 NOT NULL 계약에 맞춰 출발·도착 이름을 생성 시점부터 보존한다.
+     */
+    private static RouteSegment syntheticWalk(int sequence, String fromName, String toName) {
         return new RouteSegment(
                 sequence,
                 TransportMode.WALK,
                 null,
                 "EVALUATION_ENDPOINT_WALK",
                 null,
-                null,
-                null,
+                fromName,
+                toName,
                 0,
                 0,
                 List.of(),
                 List.of(),
                 List.of(),
                 null);
+    }
+
+    /** 제공자 응답에 정류장명이 없더라도 합성 도보의 DB 계약과 사용자 경로 설명을 함께 지킨다. */
+    private static String endpointName(String providerName, String fallback) {
+        return providerName == null || providerName.isBlank() ? fallback : providerName;
     }
 
     private static WalkingEndpointResolver.Endpoint providerEndpoint(

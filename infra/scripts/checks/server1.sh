@@ -68,7 +68,14 @@ l=$(cat ~/.check-server2.last 2>/dev/null); m=$(age_min $(date -d "$l" +%s 2>/de
 w=$(grep -c . ~/check-server2.log 2>/dev/null); w=${w:-0}; [ "$w" -eq 0 ] && r PASS 크론 "서버2 감시 로그" "실패 기록 없음" || r WARN 크론 "서버2 감시 로그" "${w}줄: $(tail -n1 ~/check-server2.log | cut -c1-80)"
 b=$(tail -n1 ~/backups/hdfs-name/backup.log 2>/dev/null); if echo "$b" | grep -q OK && ! echo "$b" | grep -q WARN; then r PASS 백업 "네임노드 백업" "$(echo "$b" | cut -c1-19) OK"; else r WARN 백업 "네임노드 백업" "${b:-로그 없음}"; fi
 
-# 7. 자원
+# 7. 저장소 작업 트리. 서버 코드는 항상 깃과 같아야 한다. 수정된 추적 파일이 있으면 누군가 서버에서 파일을 직접 고친 것이고,
+# stash 가 있으면 배포 준비 스크립트(pre-deploy.sh)가 그런 변경을 치워 둔 흔적이다. 둘 다 "무엇을 왜 고쳤나" 확인 뒤 정리한다.
+# 미추적 파일은 세지 않는다(운영 자료 폴더가 미추적으로 있는 것이 정상). 절차: docs/runbooks/deploy-rollback.md 첫 절.
+mod=$(cd ~/S15P21E202 && git status --porcelain --untracked-files=no 2>/dev/null | wc -l); st=$(cd ~/S15P21E202 && git stash list 2>/dev/null | wc -l)
+[ "$mod" -eq 0 ] && r PASS 저장소 "수정된 추적 파일" "0개" || r WARN 저장소 "수정된 추적 파일" "${mod}개 (서버에서 직접 고친 파일, git status 로 확인)"
+[ "$st" -eq 0 ] && r PASS 저장소 "stash" "0개" || r WARN 저장소 "stash" "${st}개 (배포 준비가 치워 둔 서버 변경, git stash list 로 확인)"
+
+# 8. 자원
 d=$(df --output=pcent / | tail -1 | tr -dc 0-9); mem=$(free | awk '/Mem:/{printf "%d", $3*100/$2}')
 [ "$d" -lt 80 ] && r PASS 자원 "서버1 디스크" "${d}%" || r WARN 자원 "서버1 디스크" "${d}%"
 [ "$mem" -lt 90 ] && r PASS 자원 "서버1 메모리" "${mem}%" || r WARN 자원 "서버1 메모리" "${mem}%"

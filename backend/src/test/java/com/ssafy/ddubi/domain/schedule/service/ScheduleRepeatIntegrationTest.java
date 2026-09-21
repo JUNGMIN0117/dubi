@@ -42,7 +42,9 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     @Autowired private UserRepository userRepository;
     @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
-    @Autowired private com.ssafy.ddubi.domain.recommendation.service.ScheduleEvaluationStore evaluationStore;
+
+    @Autowired
+    private com.ssafy.ddubi.domain.recommendation.service.ScheduleEvaluationStore evaluationStore;
 
     private Long ownerId;
 
@@ -234,9 +236,8 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * 규칙에 넣은 출발시각이 인스턴스까지 내려가야 한다. 여기가 비면
-     * {@code ScheduleEvaluationStore} 가 DEPARTURE_REQUIRED 로 끝내고, 자동 재계산 대상
-     * 조회도 {@code planned_depart_at IS NOT NULL} 로 걸러내 버린다.
+     * 규칙에 넣은 출발시각이 인스턴스까지 내려가야 한다. 여기가 비면 {@code ScheduleEvaluationStore} 가 DEPARTURE_REQUIRED 로
+     * 끝내고, 자동 재계산 대상 조회도 {@code planned_depart_at IS NOT NULL} 로 걸러내 버린다.
      */
     @Test
     @DisplayName("규칙의 출발시각이 인스턴스마다 채워진다")
@@ -259,8 +260,8 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     }
 
     /**
-     * B3 가 고친 증상 그 자체. 예전에는 반복으로 만든 일정을 열면 앱이 "출발 예정시각이
-     * 없어요" 를 띄웠다 — {@code latest()} 가 DEPARTURE_REQUIRED 로 끝냈기 때문이다.
+     * B3 가 고친 증상 그 자체. 예전에는 반복으로 만든 일정을 열면 앱이 "출발 예정시각이 없어요" 를 띄웠다 — {@code latest()} 가
+     * DEPARTURE_REQUIRED 로 끝냈기 때문이다.
      */
     @Test
     @DisplayName("반복으로 만든 일정이 DEPARTURE_REQUIRED 로 막히지 않는다")
@@ -275,9 +276,8 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     }
 
     /**
-     * 빌더로 plannedDepartAt 을 직접 넣으면 plan_source 가 LEGACY_UNKNOWN 으로 남는다.
-     * 이 값은 사용자가 규칙에 직접 넣은 것이므로 출처가 USER_INPUT 이어야 한다 — V9 가
-     * 출처 추적을 넣은 이유가 "과거 계획의 입력 출처를 추측하지 않는다" 이다.
+     * 빌더로 plannedDepartAt 을 직접 넣으면 plan_source 가 LEGACY_UNKNOWN 으로 남는다. 이 값은 사용자가 규칙에 직접 넣은 것이므로
+     * 출처가 USER_INPUT 이어야 한다 — V9 가 출처 추적을 넣은 이유가 "과거 계획의 입력 출처를 추측하지 않는다" 이다.
      */
     @Test
     @DisplayName("출발시각의 출처를 USER_INPUT 으로 기록한다")
@@ -293,10 +293,7 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
                         });
     }
 
-    /**
-     * "00:30 도착 / 23:50 출발" 은 같은 날 23:50 이 아니다. 그대로 두면 출발이 도착보다
-     * 뒤가 되어 계산이 말이 안 된다.
-     */
+    /** "00:30 도착 / 23:50 출발" 은 같은 날 23:50 이 아니다. 그대로 두면 출발이 도착보다 뒤가 되어 계산이 말이 안 된다. */
     @Test
     @DisplayName("출발이 도착보다 늦으면 전날로 잡는다 — 자정을 넘는 일정")
     void departBeforeMidnightBelongsToPreviousDay() {
@@ -328,8 +325,8 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     }
 
     /**
-     * 출발시각 도입 이전 규칙은 depart_time 이 NULL 이다. 서버가 도착 시각에서 역산해
-     * 채우지 않는다 — 사용자가 정하지 않은 출발 시각으로 알림을 보내면 근거를 댈 수 없다.
+     * 출발시각 도입 이전 규칙은 depart_time 이 NULL 이다. 서버가 도착 시각에서 역산해 채우지 않는다 — 사용자가 정하지 않은 출발 시각으로 알림을 보내면
+     * 근거를 댈 수 없다.
      */
     @Test
     @DisplayName("구버전 규칙(출발시각 없음)은 서버가 값을 지어내지 않는다")
@@ -385,8 +382,8 @@ class ScheduleRepeatIntegrationTest extends IntegrationTestSupport {
     }
 
     /**
-     * 앱은 초 없이 {@code "09:00"} 으로 보낸다. LocalTime 에 {@code @JsonFormat} 을 붙이면
-     * 그 형식이 깨지므로 붙이지 않는다 — 이 테스트가 그 약속을 고정한다.
+     * 앱은 초 없이 {@code "09:00"} 으로 보낸다. LocalTime 에 {@code @JsonFormat} 을 붙이면 그 형식이 깨지므로 붙이지 않는다 — 이
+     * 테스트가 그 약속을 고정한다.
      */
     @Test
     @DisplayName("앱이 보내는 \"09:00\" 형식을 그대로 읽는다")

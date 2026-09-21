@@ -132,7 +132,7 @@ public class ScheduleRepeat extends BaseTimeEntity {
         this.untilDate = untilDate;
         this.origin = origin;
         this.destination = destination;
-        this.importance = importance == null ? Importance.NORMAL : importance;
+        this.importance = Importance.stored(importance);
         this.considerLastTrip = considerLastTrip;
         this.active = true;
     }
@@ -185,7 +185,7 @@ public class ScheduleRepeat extends BaseTimeEntity {
     }
 
     public void changeImportance(Importance importance) {
-        this.importance = importance;
+        this.importance = Importance.stored(importance);
     }
 
     public void changeConsiderLastTrip(boolean considerLastTrip) {

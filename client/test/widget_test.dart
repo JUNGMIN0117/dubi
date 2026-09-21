@@ -510,12 +510,12 @@ void main() {
       origin: MockDdubiRepository.home,
       destination: const PlaceLocation(name: '서울병원', lat: 37.492, lng: 127.014),
       arriveBy: DateTime(2026, 9, 10, 19),
-      importance: ScheduleImportance.critical,
+      importance: ScheduleImportance.high,
       considerLastTrip: true,
       updatedAt: updatedAt,
     );
 
-    expect(schedule.toCreateRequestJson()['importance'], 'CRITICAL');
+    expect(schedule.toCreateRequestJson()['importance'], 'HIGH');
     expect(schedule.toCreateRequestJson()['considerLastTrip'], isTrue);
     expect(
       (schedule.toCreateRequestJson()['destination'] as Map)['lat'],

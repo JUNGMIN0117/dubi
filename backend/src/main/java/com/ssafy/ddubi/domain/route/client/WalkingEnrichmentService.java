@@ -12,14 +12,13 @@ import org.springframework.stereotype.Service;
 
 /**
  * 접근·이탈 WALK를 검증된 제휴 결과로 교체한다. 환승 WALK와 provider 총시간은 중복 가산하지 않는다. 카카오 경로 끝점 또는 검증된 공식 좌표를 사용하고 출처를
- * 구별한다. API 또는 좌표 검증이 실패하면 기존 WALK 시간과 실패 근거를 반환한다. 총시간은 구간 합으로 다시 만든다. 캐시는 한 평가 안에서만 유지하고 좌표
- * 반올림/장기 TTL은 실측 전 적용하지 않는다.
+ * 구별한다. API 또는 좌표 검증이 실패하면 기존 WALK 시간과 실패 근거를 반환한다. 총시간은 구간 합으로 다시 만든다. 동일 좌표 요청은 한 평가 안에서 캐시하지만 후보
+ * 수에 따른 인위적인 호출 횟수 제한은 두지 않는다. 외부 제공자의 timeout·429·오류는 클라이언트 경계에서 실패 근거로 보존한다.
  */
 @Service
 public class WalkingEnrichmentService {
     private final WalkingRouteClient client;
     private final boolean enabled;
-    private final int budget;
     private final double maxMeters;
     private final List<WalkingEndpointResolver.MasterPoint> points;
     private final WalkingCoordinateArtifact artifact;
@@ -30,10 +29,23 @@ public class WalkingEnrichmentService {
             WalkingRouteClient client,
             ObjectMapper json,
             boolean enabled,
-            int budget,
             double maxMeters,
             String path) {
-        this(client, json, enabled, budget, maxMeters, path, false);
+        this(client, json, enabled, maxMeters, path, false);
+    }
+
+    /**
+     * 이전 테스트·내부 호출부의 생성자 호환용이다. ignoredCallLimit 값은 더 이상 저장하거나 적용하지 않는다. 운영 설정에는 이 인자가 없으며 모든 신규 좌표
+     * 요청을 호출한다.
+     */
+    public WalkingEnrichmentService(
+            WalkingRouteClient client,
+            ObjectMapper json,
+            boolean enabled,
+            int ignoredCallLimit,
+            double maxMeters,
+            String path) {
+        this(client, json, enabled, maxMeters, path, false);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -41,15 +53,13 @@ public class WalkingEnrichmentService {
             WalkingRouteClient client,
             ObjectMapper json,
             @Value("${ddubi.walking.enabled:true}") boolean enabled,
-            @Value("${ddubi.walking.max-calls:10}") int budget,
             @Value("${ddubi.walking.endpoint-max-meters:0}") double maxMeters,
             @Value("${ddubi.walking.master-coordinate-path:}") String path,
             @Value("${ddubi.walking.provider-endpoints:true}") boolean providerEndpoints) {
-        if (budget < 0 || budget > 32 || maxMeters < 0 || !Double.isFinite(maxMeters))
+        if (maxMeters < 0 || !Double.isFinite(maxMeters))
             throw new IllegalArgumentException("도보 정책 범위 오류");
         this.client = client;
         this.enabled = enabled;
-        this.budget = budget;
         this.maxMeters = maxMeters;
         List<WalkingEndpointResolver.MasterPoint> loaded = List.of();
         WalkingCoordinateArtifact coordinateArtifact = null;
@@ -72,6 +82,18 @@ public class WalkingEnrichmentService {
         points = List.copyOf(loaded);
         artifact = coordinateArtifact;
         this.providerEndpoints = providerEndpoints;
+    }
+
+    /** provider 끝점 정책을 직접 주입하는 이전 테스트의 호환용이며 ignoredCallLimit은 적용하지 않는다. */
+    public WalkingEnrichmentService(
+            WalkingRouteClient client,
+            ObjectMapper json,
+            boolean enabled,
+            int ignoredCallLimit,
+            double maxMeters,
+            String path,
+            boolean providerEndpoints) {
+        this(client, json, enabled, maxMeters, path, providerEndpoints);
     }
 
     @com.fasterxml.jackson.annotation.JsonInclude(
@@ -114,7 +136,28 @@ public class WalkingEnrichmentService {
 
     public record Prepared(List<RouteCandidate> candidates, Evidence evidence) {}
 
-    /** 후보 재검색이 일어나도 한 일정 평가의 도보 예산과 동일 요청 결과는 공유한다. */
+    /**
+     * 일정에 고정 저장할 도보 결과의 수명을 일정 종료시각까지 맞춘다. 카카오 응답 직후의 짧은 유효시간은 응답 검증용이지, 정적인 도보 구간을 매분 다시 호출하라는 의미가
+     * 아니다. 실제 카카오 시간이 한 구간에도 적용되지 않았다면 실패 결과에 임의 유효기간을 붙이지 않는다.
+     */
+    public Prepared retainUntil(Prepared prepared, Instant scheduleEndsAt) {
+        Objects.requireNonNull(prepared);
+        Objects.requireNonNull(scheduleEndsAt);
+        Evidence current = prepared.evidence();
+        boolean applied =
+                current.legs().stream()
+                        .anyMatch(leg -> "KAKAO_WALKING_API".equals(leg.durationSource()));
+        Evidence retained =
+                new Evidence(
+                        current.legs(),
+                        current.fallbackReasons(),
+                        current.apiCalls(),
+                        applied ? scheduleEndsAt : null,
+                        current.candidateFallbackReasons());
+        return new Prepared(prepared.candidates(), retained);
+    }
+
+    /** 후보 재검색이 일어나도 동일 좌표 요청 결과를 공유한다. calls는 제한값이 아니라 실제 외부 호출 횟수 진단값이다. */
     public static final class Session {
         private final Map<WalkingRouteClient.Request, WalkingRouteClient.Evidence> cache =
                 new HashMap<>();
@@ -255,7 +298,7 @@ public class WalkingEnrichmentService {
                                             "SHORTEST",
                                             EndpointEvidence.POLICY_VERSION);
                             var found = cache.get(request);
-                            if (found == null && session.calls < budget) {
+                            if (found == null) {
                                 session.calls++;
                                 try {
                                     found = client.route(request);
@@ -289,11 +332,9 @@ public class WalkingEnrichmentService {
                                         validUntil = point.validUntil();
                             } else
                                 fallback =
-                                        found == null
-                                                ? "WALK_CALL_BUDGET_EXHAUSTED"
-                                                : found.reason() == null
-                                                        ? "WALK_INVALID_RESPONSE"
-                                                        : found.reason();
+                                        found.reason() == null
+                                                ? "WALK_INVALID_RESPONSE"
+                                                : found.reason();
                         } else fallback = resolved.evidence().reason();
                     }
                     if (fallback != null) {

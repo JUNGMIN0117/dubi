@@ -182,6 +182,11 @@ class WalkingEnrichmentTest {
             assertThat(actual.totalDurationSeconds()).isEqualTo(840);
             assertThat(actual.unassignedDurationSeconds()).isEqualTo(0);
             assertThat(actual.segments()).hasSize(3);
+            // 합성 도보도 route_segment에 저장되므로 양 끝 이름이 DB NOT NULL 계약을 만족해야 한다.
+            assertThat(actual.segments().get(0).fromName()).isEqualTo("출발지");
+            assertThat(actual.segments().get(0).toName()).isEqualTo("A");
+            assertThat(actual.segments().get(2).fromName()).isEqualTo("B");
+            assertThat(actual.segments().get(2).toName()).isEqualTo("도착지");
             assertThat(actual.totalDurationSeconds())
                     .isEqualTo(
                             actual.unassignedDurationSeconds()

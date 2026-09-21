@@ -1,5 +1,13 @@
 enum RouteKind { candidate, recommended, fastest, safest }
 
+/// 일정 중요도. 화면에는 "일반 / 중요" 두 단계로 보여준다.
+///
+/// [critical] 은 서버가 더 이상 내려주지 않는다(2026-09-21 두 단계로 정리). 예전 앱이
+/// 보낸 값이나 남아 있는 캐시를 읽다 깨지지 않게 파싱용으로만 남겨 두고, 선택지에는
+/// 넣지 않는다.
+///
+/// 참고: 이 값은 추천 계산·감시 주기·알림 어디에도 쓰이지 않는다. 저장하고 보여주는
+/// 값이다(서버 확인 2026-09-21). ML 백분위 검증이 끝나면 다시 쓰일 수 있다.
 enum ScheduleImportance {
   normal('NORMAL'),
   high('HIGH'),
@@ -8,6 +16,16 @@ enum ScheduleImportance {
   const ScheduleImportance(this.apiValue);
 
   final String apiValue;
+
+  /// 화면 선택지에 쓸 단계. critical 은 빠진다.
+  static const List<ScheduleImportance> choices = [normal, high];
+
+  /// 화면에 보여줄 이름.
+  String get label => switch (this) {
+    ScheduleImportance.normal => '일반',
+    // 예전 "절대 지각 불가" 도 이제 "중요" 로 보여준다.
+    ScheduleImportance.high || ScheduleImportance.critical => '중요',
+  };
 
   static ScheduleImportance fromApi(String? value) => values.firstWhere(
     (importance) => importance.apiValue == value,
@@ -148,7 +166,7 @@ class Schedule {
     required this.destination,
     required this.arriveBy,
     this.plannedDepartAt,
-    this.importance = ScheduleImportance.high,
+    this.importance = ScheduleImportance.normal,
     this.considerLastTrip = false,
     this.repeatLabel,
     this.repeatId,
@@ -270,7 +288,7 @@ class RepeatScheduleRule {
     required this.startDate,
     required this.weekdays,
     this.untilDate,
-    this.importance = ScheduleImportance.high,
+    this.importance = ScheduleImportance.normal,
     this.considerLastTrip = false,
     this.active = true,
   });

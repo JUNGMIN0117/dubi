@@ -422,36 +422,43 @@ class RecommendationApi {
     if (response.data?['success'] != true || candidates is! List) {
       throw const FormatException('경로 검색 응답 형식을 확인할 수 없습니다.');
     }
-    return candidates.indexed
-        .map((entry) {
-          final index = entry.$1;
-          final raw = entry.$2;
-          if (raw is! Map) {
-            throw const FormatException('경로 후보 응답 형식이 올바르지 않습니다.');
-          }
-          final item = raw.map((key, value) => MapEntry(key.toString(), value));
-          final durationMinutes =
-              ((item['totalDurationSeconds'] as num).toDouble() / 60).ceil();
-          final fare = item['fare'] is Map ? item['fare'] as Map : const {};
-          final minimumFare = (fare['minimumWon'] as num?)?.toInt();
-          final maximumFare = (fare['maximumWon'] as num?)?.toInt();
-          return RouteOption(
-            kind: RouteKind.candidate,
-            label: '경로 ${index + 1} · 단순 후보',
-            transport: switch (item['type']) {
-              'BUS' => '버스',
-              'SUBWAY' => '지하철',
-              _ => '버스 + 지하철',
-            },
-            departure: '평가 필요',
-            arrival: '평가 필요',
-            margin: '환승 ${(item['transfers'] as num?)?.toInt() ?? 0}회',
-            detail:
-                '약 $durationMinutes분 · ${(item['totalDistanceMeters'] as num).toInt()}m',
-            fare: _fare(minimumFare, maximumFare),
-          );
-        })
-        .toList(growable: false);
+    // 카카오 배열 순서는 빠른 순이 아니다. 평가 전에는 비교할 우리 값이 없으므로
+    // 경로 API 가 말한 전체 시간이 짧은 순으로만 세운다. 이 순서는 우리 계산이 아니며
+    // 화면도 그렇게 밝힌다.
+    final items = <Map<String, dynamic>>[];
+    for (final raw in candidates) {
+      if (raw is! Map) {
+        throw const FormatException('경로 후보 응답 형식이 올바르지 않습니다.');
+      }
+      items.add(raw.map((key, value) => MapEntry(key.toString(), value)));
+    }
+    items.sort(
+      (a, b) => (a['totalDurationSeconds'] as num).compareTo(
+        b['totalDurationSeconds'] as num,
+      ),
+    );
+    return items.map((item) {
+      final durationMinutes =
+          ((item['totalDurationSeconds'] as num).toDouble() / 60).ceil();
+      final fare = item['fare'] is Map ? item['fare'] as Map : const {};
+      final minimumFare = (fare['minimumWon'] as num?)?.toInt();
+      final maximumFare = (fare['maximumWon'] as num?)?.toInt();
+      return RouteOption(
+        kind: RouteKind.candidate,
+        label: '원본 경로 기준 · 가장 빠른 후보',
+        transport: switch (item['type']) {
+          'BUS' => '버스',
+          'SUBWAY' => '지하철',
+          _ => '버스 + 지하철',
+        },
+        departure: '평가 필요',
+        arrival: '평가 필요',
+        margin: '환승 ${(item['transfers'] as num?)?.toInt() ?? 0}회',
+        detail:
+            '약 $durationMinutes분 · ${(item['totalDistanceMeters'] as num).toInt()}m',
+        fare: _fare(minimumFare, maximumFare),
+      );
+    }).toList(growable: false);
   }
 
   /// 같은 이유로 여기서도 지역 시각으로 맞춘다. 지금 인자는 일정 API 값(시간대 표기 없음)

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/app_providers.dart';
 import '../../core/theme.dart';
 import '../../domain/models.dart';
+import '../../domain/route_evaluated_numbers.dart';
 import '../micro_animations.dart';
 import '../widgets.dart';
 import '../schedule_evaluation_card.dart';
@@ -126,6 +127,7 @@ class MovingScreen extends StatefulWidget {
     required this.repository,
     this.route,
     this.segments = const [],
+    this.evaluated = RouteEvaluatedNumbers.empty,
   });
 
   final DdubiRepository repository;
@@ -134,6 +136,9 @@ class MovingScreen extends StatefulWidget {
 
   /// 저장된 경로의 실제 이동 구간. 비어 있으면 구간 안내를 생략한다.
   final List<SavedRouteSegment> segments;
+
+  /// 이번 평가가 계산한 구간 시간. 앞 화면과 같은 숫자를 쓰려고 그대로 받아 온다.
+  final RouteEvaluatedNumbers evaluated;
 
   @override
   State<MovingScreen> createState() => _MovingScreenState();
@@ -172,6 +177,10 @@ class _MovingScreenState extends State<MovingScreen> {
     _ => Icons.place_outlined,
   };
 
+  /// 평가된 구간 시간이 있으면 그 값을 쓴다. 앞 화면과 다른 숫자를 보여주지 않는다.
+  int _stepMinutes(SavedRouteSegment step) =>
+      widget.evaluated.minutesOf(step.seq) ?? step.baseDurationMin;
+
   Widget _stepTile(SavedRouteSegment step, {required bool first}) => InfoCard(
     child: ListTile(
       contentPadding: EdgeInsets.zero,
@@ -188,8 +197,8 @@ class _MovingScreenState extends State<MovingScreen> {
       ),
       subtitle: Text(
         step.fromName == null || step.fromName!.isEmpty
-            ? '약 ${step.baseDurationMin}분'
-            : '${step.fromName} 출발 · 약 ${step.baseDurationMin}분',
+            ? '약 ${_stepMinutes(step)}분'
+            : '${step.fromName} 출발 · 약 ${_stepMinutes(step)}분',
       ),
     ),
   );

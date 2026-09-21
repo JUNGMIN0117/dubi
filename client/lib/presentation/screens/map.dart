@@ -7,7 +7,9 @@ import 'package:kakao_maps_flutter/kakao_maps_flutter.dart';
 import '../../core/maps/kakao_map_config.dart';
 import '../../core/theme.dart';
 import '../../domain/models.dart';
+import '../../domain/route_evaluated_numbers.dart';
 import '../../services/recommendation_api.dart';
+import '../schedule_evaluation_card.dart' show durationSourceLabel;
 import '../widgets.dart';
 import '../../core/diagnostics/app_log.dart';
 import 'journey.dart';
@@ -25,7 +27,7 @@ class RouteMapScreen extends StatefulWidget {
     this.destinationLabel,
     this.initialRouteDeviation = false,
     this.displayRank,
-    this.evaluatedDurationMin,
+    this.evaluated = RouteEvaluatedNumbers.empty,
   });
 
   final DdubiRepository repository;
@@ -42,9 +44,9 @@ class RouteMapScreen extends StatefulWidget {
   /// 보이던 문제를 막으려고 목록에서 본 번호를 그대로 받아 쓴다.
   final int? displayRank;
 
-  /// 목록에서 보여준 소요시간(분). 서버 평가 결과가 있으면 경로 API 원본이 아니라 이 값을
-  /// 쓴다. 목록과 상세가 다른 숫자를 보여주지 않게 한다.
-  final int? evaluatedDurationMin;
+  /// 목록에서 쓴 것과 같은 평가 결과. 전체 시간과 구간별 시간·출처가 함께 들어 있다.
+  /// 목록·상세·지도가 한 곳에서 온 같은 숫자를 보여주게 하려고 통째로 넘겨받는다.
+  final RouteEvaluatedNumbers evaluated;
 
   @override
   State<RouteMapScreen> createState() => _RouteMapScreenState();
@@ -77,7 +79,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           api: widget.api!,
           summary: widget.savedRoute!,
           displayRank: widget.displayRank,
-          evaluatedDurationMin: widget.evaluatedDurationMin,
+          evaluated: widget.evaluated,
           route:
               widget.selectedRoute ??
               widget.savedRoute!.toRouteOption(
@@ -87,7 +89,11 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                   origin: const PlaceLocation(name: '', lat: 0, lng: 0),
                   destination: const PlaceLocation(name: '', lat: 0, lng: 0),
                   arriveBy: DateTime.now().add(
-                    Duration(minutes: widget.savedRoute!.baseDurationMin),
+                    Duration(
+                      minutes:
+                          widget.evaluated.totalMinutes ??
+                          widget.savedRoute!.baseDurationMin,
+                    ),
                   ),
                 ),
               ),
@@ -207,7 +213,7 @@ class _SavedRouteApiScreen extends StatefulWidget {
     required this.departureLabel,
     required this.destinationLabel,
     this.displayRank,
-    this.evaluatedDurationMin,
+    this.evaluated = RouteEvaluatedNumbers.empty,
   });
 
   final RecommendationApi api;
@@ -217,7 +223,7 @@ class _SavedRouteApiScreen extends StatefulWidget {
   final String departureLabel;
   final String destinationLabel;
   final int? displayRank;
-  final int? evaluatedDurationMin;
+  final RouteEvaluatedNumbers evaluated;
 
   @override
   State<_SavedRouteApiScreen> createState() => _SavedRouteApiScreenState();
@@ -294,7 +300,7 @@ class _SavedRouteApiScreenState extends State<_SavedRouteApiScreen> {
               route: widget.route,
               repository: widget.repository,
               displayRank: widget.displayRank,
-              evaluatedDurationMin: widget.evaluatedDurationMin,
+              evaluated: widget.evaluated,
             );
             if (constraints.maxWidth >= 760) {
               return Padding(
@@ -346,7 +352,7 @@ class _SavedRouteDetailPanel extends StatelessWidget {
     required this.route,
     required this.repository,
     this.displayRank,
-    this.evaluatedDurationMin,
+    this.evaluated = RouteEvaluatedNumbers.empty,
   });
 
   final SavedRouteSummary summary;
@@ -362,12 +368,16 @@ class _SavedRouteDetailPanel extends StatelessWidget {
   /// 화면에 보여줄 순위. 목록에서 온 값이 먼저다.
   int? get _visibleRank => displayRank ?? detail.displayRank;
 
-  /// 목록에서 보여준 소요시간(분). 없을 때만 경로 API 원본을 쓴다.
-  final int? evaluatedDurationMin;
+  /// 목록에서 쓴 것과 같은 평가 결과. 없을 때만 경로 API 원본을 쓴다.
+  final RouteEvaluatedNumbers evaluated;
 
   /// 목록 카드와 같은 숫자를 보여준다.
   String get _durationLabel =>
-      '약 ${evaluatedDurationMin ?? detail.baseDurationMin}분';
+      '약 ${evaluated.totalMinutes ?? detail.baseDurationMin}분';
+
+  /// 이 숫자가 어디서 왔는지 한 줄. 사용자가 "왜 앱마다 시간이 다르지"를 묻지 않게 한다.
+  String get _durationOrigin =>
+      evaluated.totalMinutes == null ? '원본 경로 기준' : '이동 예측 기준';
 
   @override
   Widget build(BuildContext context) => InfoCard(
@@ -377,7 +387,9 @@ class _SavedRouteDetailPanel extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: _metric('예상 시간', _durationLabel)),
+            Expanded(
+              child: _metric('예상 시간', _durationLabel, origin: _durationOrigin),
+            ),
             if (_visibleRank != null)
               Expanded(child: _metric('경로 순위', '$_visibleRank순위')),
             Expanded(child: _metric('이동 구간', '${detail.segments.length}개')),
@@ -394,7 +406,7 @@ class _SavedRouteDetailPanel extends StatelessWidget {
           const Text('표시할 이동 구간이 없어요.')
         else
           for (final segment in detail.segments)
-            _SavedRouteSegmentTile(segment: segment),
+            _SavedRouteSegmentTile(segment: segment, evaluated: evaluated),
         const SizedBox(height: 12),
         PrimaryButton(
           '이동 안내 시작',
@@ -411,7 +423,7 @@ class _SavedRouteDetailPanel extends StatelessWidget {
     ),
   );
 
-  Widget _metric(String label, String value) => Column(
+  Widget _metric(String label, String value, {String? origin}) => Column(
     children: [
       Text(
         label,
@@ -426,14 +438,41 @@ class _SavedRouteDetailPanel extends StatelessWidget {
           color: DdubiColors.navy,
         ),
       ),
+      if (origin != null) ...[
+        const SizedBox(height: 2),
+        Text(
+          origin,
+          key: const Key('savedRouteDurationOrigin'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 10, color: Color(0xFF7A8B9B)),
+        ),
+      ],
     ],
   );
 }
 
 class _SavedRouteSegmentTile extends StatelessWidget {
-  const _SavedRouteSegmentTile({required this.segment});
+  const _SavedRouteSegmentTile({
+    required this.segment,
+    this.evaluated = RouteEvaluatedNumbers.empty,
+  });
 
   final SavedRouteSegment segment;
+
+  /// 이번 평가가 이 구간에 실제로 적용한 시간과 출처. 없으면 경로 API 원본을 쓴다.
+  final RouteEvaluatedNumbers evaluated;
+
+  /// 구간 한 줄에 쓰는 "약 N분 · 출처" 문구.
+  ///
+  /// 평가값과 원본을 섞지 않는다. 한 구간의 시간과 그 옆의 출처는 반드시 같은 곳에서 온다.
+  String get _durationLine {
+    final minutes = evaluated.minutesOf(segment.seq);
+    if (minutes == null) return '약 ${segment.baseDurationMin}분 · 원본 경로 기준';
+    final source = evaluated.sourceOf(segment.seq);
+    return source == null
+        ? '약 $minutes분'
+        : '약 $minutes분 · ${durationSourceLabel(source)}';
+  }
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -474,7 +513,7 @@ class _SavedRouteSegmentTile extends StatelessWidget {
                 style: const TextStyle(color: Color(0xFF52677B)),
               ),
               Text(
-                '약 ${segment.baseDurationMin}분',
+                _durationLine,
                 style: const TextStyle(fontSize: 12, color: Color(0xFF7A8B9B)),
               ),
             ],

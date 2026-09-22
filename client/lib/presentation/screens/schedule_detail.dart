@@ -464,7 +464,10 @@ class ScheduleDetailScreen extends StatelessWidget {
               const SizedBox(height: 16),
               // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
               // 칸을 넷으로 나눴다. 조회 API 가 붙기 전에는 네 칸 모두 "확인 안 됨"이다.
-              TravelConditionsCard(scheduleId: schedule.id),
+              TravelConditionsCard(
+                scheduleId: schedule.id,
+                service: recommendationApi,
+              ),
               const SizedBox(height: 14),
               if (repository is ScheduleEvaluationRepository)
                 // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.

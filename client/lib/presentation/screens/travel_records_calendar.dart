@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import '../../domain/models.dart';
@@ -102,52 +103,60 @@ class _RecordCard extends StatelessWidget {
       _ => const Color(0xFF6E8193),
     };
     final actual = item.actualArrival;
-    return InfoCard(
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                    color: DdubiColors.navy,
+    // 누르면 그 일정의 상세로 간다. 끝난 일정 상세가 출발·도착 기록과 당시 안내를 보여준다.
+    return InkWell(
+      key: Key('recordCard-${item.reportDetailId}'),
+      borderRadius: BorderRadius.circular(12),
+      onTap: item.scheduleId.isEmpty
+          ? null
+          : () => context.push('/schedules/${item.scheduleId}'),
+      child: InfoCard(
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      color: DdubiColors.navy,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  // 실제 도착이 없으면 시각을 만들어 넣지 않는다. 판정도 그래서 "판정 없음" 이다.
-                  actual == null
-                      ? '도착 목표 ${formatClockCompact(item.arriveBy)} · 도착 시각 없음'
-                      : '도착 목표 ${formatClockCompact(item.arriveBy)} · 실제 ${formatClockCompact(actual)}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF6E8193),
+                  const SizedBox(height: 4),
+                  Text(
+                    // 실제 도착이 없으면 시각을 만들어 넣지 않는다. 판정도 그래서 "판정 없음" 이다.
+                    actual == null
+                        ? '도착 목표 ${formatClockCompact(item.arriveBy)} · 도착 시각 없음'
+                        : '도착 목표 ${formatClockCompact(item.arriveBy)} · 실제 ${formatClockCompact(actual)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF6E8193),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: tone.withValues(alpha: .12),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              result,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: tone,
+                ],
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                result,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: tone,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

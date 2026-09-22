@@ -30,7 +30,8 @@ class GmsRecommendationGuideClientTest {
                         "/api.openai.com/v1/responses",
                         "synthetic-key",
                         "gpt-5.5-pro",
-                        1000);
+                        1000,
+                        200);
         String content =
                 json.writeValueAsString(
                         java.util.Map.of(
@@ -85,7 +86,8 @@ class GmsRecommendationGuideClientTest {
                         "/api.openai.com/v1/responses",
                         "",
                         "gpt-5.5-pro",
-                        1000);
+                        1000,
+                        200);
         assertThat(
                         new GmsRecommendationGuideClient(
                                         builder.baseUrl(disabled.baseUrl()).build(), disabled, json)

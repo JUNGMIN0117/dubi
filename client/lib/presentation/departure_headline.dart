@@ -126,16 +126,36 @@ class DepartureHeadlineContent {
         spareMinutes: _spareMinutes(evaluation, arrival),
       );
     }
+    // 출발 시각이 지났는데 아직 출발을 알리지 않았다. "나가세요" 를 그대로 두면 이미 지난 시각을
+    // 권하는 꼴이다. 서버는 새 정보가 들어오면 지금 기준으로 다시 계산한다.
+    if (evaluation.departureMissed && depart != null && arrival != null) {
+      return DepartureHeadlineContent(
+        title: '${formatClock(depart)} 출발 시각이 지났어요.',
+        detail:
+            '아래에서 다시 계산하면 지금 기준 출발 시각을 알려드려요. 이미 나섰다면 이동 안내에서 출발했어요를 눌러 주세요.',
+        tone: DepartureHeadlineTone.attention,
+        departAt: depart,
+        arriveAt: arrival,
+        spareMinutes: _spareMinutes(evaluation, arrival),
+        label: '출발 시각이 지났어요',
+        clockSuffix: '이 지났어요',
+      );
+    }
     if (evaluation.canAcceptAt(now) && depart != null && arrival != null) {
       final spare = _spareMinutes(evaluation, arrival);
       if (spare != null && spare < 0) return _late(depart, arrival, spare);
+      final timing = _timing(now, depart);
       return DepartureHeadlineContent(
-        title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착',
+        title: timing.decorate(
+          '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착',
+        ),
         detail: _marginDetail(evaluation, arrival),
         tone: DepartureHeadlineTone.ready,
         departAt: depart,
         arriveAt: arrival,
         spareMinutes: spare,
+        label: timing.label,
+        clockSuffix: timing.clockSuffix,
       );
     }
     if (evaluation.canShowHistoricalEstimateAt(now) &&
@@ -156,17 +176,22 @@ class DepartureHeadlineContent {
       // 참고값이라도 늦는다는 사실은 같은 무게로 말한다. 파란 참고색 뒤에 숨기면 놓친다.
       if (spare != null && spare < 0) return _late(depart, arrival, spare);
       final reason = evaluationShortfallReason(evaluation);
+      final timing = _timing(now, depart);
       return DepartureHeadlineContent(
         departAt: depart,
         arriveAt: arrival,
         spareMinutes: spare,
-        title: '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착 예상',
+        title: timing.decorate(
+          '${formatClock(depart)}에 나가면 ${formatClock(arrival)} 도착 예상',
+        ),
         detail: evaluation.guidance.isProviderEstimate
             ? '기본 경로 기준 예상이에요. 실시간 정보가 들어오면 더 정확해져요.'
             : reason == null
             ? '아직 확정 전 참고값이에요.'
             : '아직 확정 전 참고값이에요. $reason',
         tone: DepartureHeadlineTone.reference,
+        label: timing.label,
+        clockSuffix: timing.clockSuffix,
       );
     }
     return DepartureHeadlineContent(
@@ -174,6 +199,56 @@ class DepartureHeadlineContent {
       detail: _shortfallDetail(evaluation),
       tone: DepartureHeadlineTone.attention,
     );
+  }
+
+  /// 출발까지 남은 시간에 따라 말을 바꾼다.
+  ///
+  /// 출발이 몇 시간 뒤여도 "08:10에 나가세요" 라고만 쓰면 당장 나가라는 말처럼 읽힌다
+  /// (2026-09-22 제보). 시각은 그대로 두고 말머리와 꼬리만 바꾼다.
+  ///
+  /// ```
+  /// 1시간 넘게 남음   추천 출발 시각 · 아직 여유 있어요   HH:MM 에 나가면 돼요   · 아직 N시간 M분 남았어요
+  /// 10분~1시간       추천 출발 시각                    HH:MM 에 나가세요
+  /// 10분 안          곧 출발이에요                     HH:MM 에 나가세요       · N분 뒤 나가야 해요
+  /// 지남             출발 시각이 지났어요               HH:MM 이 지났어요       · N분 지났어요
+  /// ```
+  @visibleForTesting
+  static DepartureTiming timing(DateTime now, DateTime depart) =>
+      _timing(now, depart);
+
+  static DepartureTiming _timing(DateTime now, DateTime depart) {
+    final left = depart.difference(now);
+    final minutes = left.inMinutes;
+    if (minutes > 60) {
+      return DepartureTiming(
+        label: '추천 출발 시각 · 아직 여유 있어요',
+        clockSuffix: '에 나가면 돼요',
+        tail: '아직 ${_leftLabel(left)} 남았어요',
+      );
+    }
+    if (minutes > 10) {
+      return const DepartureTiming(label: '추천 출발 시각', clockSuffix: '에 나가세요');
+    }
+    if (minutes >= 0) {
+      return DepartureTiming(
+        label: '곧 출발이에요',
+        clockSuffix: '에 나가세요',
+        tail: minutes <= 1 ? '지금 나가야 해요' : '$minutes분 뒤 나가야 해요',
+      );
+    }
+    return DepartureTiming(
+      label: '출발 시각이 지났어요',
+      clockSuffix: '이 지났어요',
+      tail: '${-minutes}분 지났어요',
+    );
+  }
+
+  /// "2시간 15분" / "45분" 처럼. 시간이 0이면 시간을 쓰지 않는다.
+  static String _leftLabel(Duration left) {
+    final hours = left.inHours;
+    final minutes = left.inMinutes % 60;
+    if (hours == 0) return '$minutes분';
+    return minutes == 0 ? '$hours시간' : '$hours시간 $minutes분';
   }
 
   /// 출발한 뒤의 결론.
@@ -658,4 +733,21 @@ class HeadlinePalette {
     accent: DdubiColors.orange,
     icon: Icons.info_outline_rounded,
   );
+}
+
+/// 남은 시간에 따른 말머리·꼬리. [DepartureHeadlineContent] 가 그대로 받아 쓴다.
+class DepartureTiming {
+  const DepartureTiming({
+    required this.label,
+    required this.clockSuffix,
+    this.tail,
+  });
+
+  final String label;
+  final String clockSuffix;
+
+  /// 제목 뒤에 " · " 로 붙는 말. 없으면 제목을 그대로 둔다.
+  final String? tail;
+
+  String decorate(String title) => tail == null ? title : '$title · $tail';
 }

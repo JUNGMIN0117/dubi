@@ -618,7 +618,14 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
           ],
         );
       }
-      await _showEntireRoute();
+      // 선은 카메라와 상관없이 먼저 그린다.
+      //
+      // 예전에는 카메라 이동이 끝난 뒤에 그렸는데, moveCamera 를 기다리는 부분이
+      // 끝나지 않아 그 뒤가 아예 실행되지 않았다. 지도 쪽 onCameraMoveEnd 는 제대로
+      // 오는데도 그랬다(2026-09-22 기기 로그로 확인). 지도가 직접 그리는 선은 카메라가
+      // 어디를 보고 있든 상관없으므로 기다릴 이유가 없다.
+      await _drawRouteLines();
+      unawaited(_showEntireRoute());
     } catch (error) {
       AppLog.debug('Saved route map setup failed: $error');
     }
@@ -652,7 +659,6 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
           isConsecutive: false,
         ),
       );
-      await _drawRouteLines();
     } catch (error) {
       AppLog.debug('Saved route camera move failed: $error');
     }

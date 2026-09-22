@@ -14,6 +14,8 @@ class CanonicalSegmentIdFactoryTest {
         assertThat(factory.createBus("SEOUL_BUS","1","10","11")).isEqualTo("BUS:1:10:11");
         assertThat(factory.createBus("GBIS","1","10","11")).isEqualTo("BUS:GBIS.1:GBIS.10:GBIS.11")
                 .isNotEqualTo(factory.createBus("INCHEON_PUBLIC_CSV","1","10","11"));
+        assertThat(factory.createBus("BUSAN_GTFS","R1","S1","S2"))
+                .isEqualTo("BUS:BUSAN_GTFS.R1:BUSAN_GTFS.S1:BUSAN_GTFS.S2");
         assertThatThrownBy(()->factory.createBus("GBIS","1".repeat(50),"10","11")).isInstanceOf(IllegalArgumentException.class);
     }
 

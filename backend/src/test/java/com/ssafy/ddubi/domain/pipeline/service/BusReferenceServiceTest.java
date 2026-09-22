@@ -1,6 +1,7 @@
 package com.ssafy.ddubi.domain.pipeline.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.ddubi.domain.recommendation.evaluation.BusTravelTimeFormula;
 import com.ssafy.ddubi.global.exception.BusinessException;
 import java.time.LocalDate;
 import java.util.List;
@@ -27,6 +28,19 @@ class BusReferenceServiceTest {
     @Test void rejectsNonAdjacentOccurrence() { assertThrows(BusinessException.class,()->BusReferenceService.validate(row(60,3,"HOURLY_SOURCE_MEAN"))); }
     @Test void rejectsInventedPercentileKind() { assertThrows(BusinessException.class,()->BusReferenceService.validate(row(60,2,"P95"))); }
     @Test void rejectsInvalidSeconds() { for(double v:new double[]{0,-1,Double.NaN,Double.POSITIVE_INFINITY}) assertThrows(BusinessException.class,()->BusReferenceService.validate(row(v,2,"HOURLY_SOURCE_MEAN"))); }
+    @Test void validatesBackendFormulaAgainstStoredDiagnosticMean() {
+        var input = new BusTravelTimeFormula.Input(BusTravelTimeFormula.SEOUL_HALF_LIFE,
+                250.0,2.0,null,null,null,null,null);
+        var valid = new BusReferenceService.Row("master-v1","SEOUL_BUS","r","a","b",1,2,2,8,
+                "HOURLY_SOURCE_MEAN",125.0,3,3,LocalDate.of(2026,8,1),LocalDate.of(2026,8,17),
+                "a".repeat(64),input);
+        var mismatched = new BusReferenceService.Row("master-v1","SEOUL_BUS","r","a","b",1,2,2,8,
+                "HOURLY_SOURCE_MEAN",126.0,3,3,LocalDate.of(2026,8,1),LocalDate.of(2026,8,17),
+                "a".repeat(64),input);
+
+        assertDoesNotThrow(() -> BusReferenceService.validate(valid));
+        assertThrows(BusinessException.class, () -> BusReferenceService.validate(mismatched));
+    }
     @Test void invalidUploadCannotWrite() {
         var db=mock(JdbcTemplate.class);var service=new BusReferenceService(db,new ObjectMapper().findAndRegisterModules());
         assertThrows(BusinessException.class,()->service.upload("v",0,new BusReferenceService.Upload(List.of(row(0,2,"HOURLY_SOURCE_MEAN")))));

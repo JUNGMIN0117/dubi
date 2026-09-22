@@ -61,4 +61,20 @@ class MetropolitanBusMatcherTest {
         var r=route("1","100",List.of(stop("a","출발정류소",1,a),stop("b","중간정류소",1,b)));
         assertThatThrownBy(()->new MetropolitanBusMatcher(master(List.of(r)))).isInstanceOf(IllegalArgumentException.class);
     }
+
+    /** 부산 GTFS 패턴도 같은 공간·정류장 순서 검증을 통과한 뒤에만 canonical edge가 된다. */
+    @Test void busanPatternMapsToNamespacedCanonicalEdges() {
+        var stops=List.of(
+                new Stop("BUSAN_GTFS","BS1","출발정류소",1,null,null,a.longitude(),a.latitude(),null,"KTDB_GTFS_202503"),
+                new Stop("BUSAN_GTFS","BS2","중간정류소",2,null,null,b.longitude(),b.latitude(),null,"KTDB_GTFS_202503"),
+                new Stop("BUSAN_GTFS","BS3","도착정류소",3,null,null,c.longitude(),c.latitude(),null,"KTDB_GTFS_202503"));
+        var route=new Route("BUSAN_GTFS","BR1.P12345678","100","부산광역시",stops,Map.of());
+        var mapping=new MetropolitanBusMatcher(master(List.of(route)))
+                .match(req(List.of("100"),List.of(a,b,c)),date).get(0);
+        assertThat(mapping.geometryStatus()).isEqualTo("VERIFIED");
+        var path=BusCanonicalPath.of("TEST",MetropolitanBusMatcher.POLICY,"100",mapping.candidates().get(0));
+        assertThat(path.edges()).extracting(MappedTransitSegment::segmentId).containsExactly(
+                "BUS:BUSAN_GTFS.BR1.P12345678:BUSAN_GTFS.BS1:BUSAN_GTFS.BS2",
+                "BUS:BUSAN_GTFS.BR1.P12345678:BUSAN_GTFS.BS2:BUSAN_GTFS.BS3");
+    }
 }

@@ -146,6 +146,65 @@ class BusHistoricalReferenceServiceTest {
         assertEquals("GTFS_SCHEDULE_FORMULA", result.sampleKind());
     }
 
+    @Test
+    void formulaInputIsRecalculatedByBackendInsteadOfTrustingCachedMean() {
+        var s = service();
+        when(publicReferences.lookup(eq("v1"), any()))
+                .thenAnswer(
+                        call -> {
+                            var q = (BusReferenceService.Query) call.getArgument(1);
+                            var formula =
+                                    new BusTravelTimeFormula.Input(
+                                            BusTravelTimeFormula.METROPOLITAN_GTFS,
+                                            null,
+                                            null,
+                                            null,
+                                            0L,
+                                            80.0,
+                                            1.25,
+                                            null);
+                            var row =
+                                    new BusReferenceService.Row(
+                                            q.masterVersion(),
+                                            q.namespace(),
+                                            q.routeId(),
+                                            q.fromStopId(),
+                                            q.toStopId(),
+                                            q.fromOrder(),
+                                            q.toOrder(),
+                                            q.dow(),
+                                            q.hourSlot(),
+                                            "GTFS_SCHEDULE_FORMULA",
+                                            99.0,
+                                            5,
+                                            0,
+                                            LocalDate.of(2025, 3, 1),
+                                            LocalDate.of(2030, 12, 31),
+                                            "b".repeat(64),
+                                            formula);
+                            return Map.of(
+                                    "status",
+                                    "STAGED_REFERENCE_NOT_APPROVED",
+                                    "rows",
+                                    List.of(row),
+                                    "truncated",
+                                    false);
+                        });
+
+        var result =
+                s.estimate(
+                        gbisEdges(),
+                        "master",
+                        now,
+                        0,
+                        now,
+                        new BusHistoricalReferenceService.Session(),
+                        System.nanoTime() + Duration.ofSeconds(20).toNanos());
+
+        assertEquals(100, result.seconds());
+        assertEquals("GTFS_FORMULA_APPLIED", result.reason());
+    }
+
     BusHistoricalReferenceService.Estimate estimate(
             BusHistoricalReferenceService s, Instant entered, int count, long uncertainty) {
         return s.estimate(

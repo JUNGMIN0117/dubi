@@ -148,9 +148,12 @@ void main() {
 
     await pumpCard(tester, dio);
 
+    // 사유가 없으면 사유 자리를 만들지 않는다. 서버가 준 결론만 크게 보여준다.
     expect(find.byKey(const Key('guideRecommendationReason')), findsNothing);
     expect(find.byKey(const Key('guideChangeType')), findsNothing);
-    expect(find.byKey(const Key('guideHeadline')), findsOneWidget);
+    expect(find.byKey(const Key('guideFallbackLine')), findsOneWidget);
+    // 같은 문장을 아래 상자에서 되풀이하지 않는다.
+    expect(find.byKey(const Key('guideHeadline')), findsNothing);
   });
 
   testWidgets('계산이 바뀌고 조회가 실패하면 지난 안내를 지운다', (tester) async {
@@ -168,7 +171,9 @@ void main() {
 
     // 지난 계산의 출발시각이 남아 있으면 안 된다.
     expect(find.text('08:00 출발 · 08:46 도착 예정'), findsNothing);
-    expect(find.byKey(const Key('recommendationGuideRetry')), findsOneWidget);
+    // 카드는 남는다 — 안에 버튼이 함께 있어서 사라지면 누를 자리까지 없어진다.
+    expect(find.byKey(const Key('recommendationGuideCard')), findsOneWidget);
+    expect(find.byKey(const Key('guideRetryButton')), findsOneWidget);
   });
 
   testWidgets('다시 불러오기를 누르면 한 번 더 조회한다', (tester) async {
@@ -181,6 +186,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('두 번째에 성공했어요.'), findsOneWidget);
-    expect(find.byKey(const Key('recommendationGuideRetry')), findsNothing);
+    expect(find.byKey(const Key('guideRetryButton')), findsNothing);
   });
 }

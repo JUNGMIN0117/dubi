@@ -182,6 +182,7 @@ class DepartureHeadline extends StatelessWidget {
     super.key,
     required this.evaluation,
     this.compact = false,
+    this.emphasized = false,
     this.onTap,
   });
 
@@ -189,6 +190,11 @@ class DepartureHeadline extends StatelessWidget {
 
   /// 홈처럼 좁은 자리에서는 글자를 줄이고 보조 문구를 한 줄로 유지한다.
   final bool compact;
+
+  /// 일정 상세 맨 위에서 쓰는 강조 모양. 글자를 키우고 "추천 출발 시각" 말머리를 붙인다.
+  ///
+  /// 색은 평소와 같은 것을 쓴다. 강조한다고 진한 바탕을 깔면 이 화면만 다른 앱처럼 보인다.
+  final bool emphasized;
   final VoidCallback? onTap;
 
   @override
@@ -198,25 +204,42 @@ class DepartureHeadline extends StatelessWidget {
     final body = Padding(
       padding: EdgeInsets.fromLTRB(
         16,
-        compact ? 13 : 16,
+        compact ? 13 : (emphasized ? 18 : 16),
         16,
-        compact ? 13 : 16,
+        compact ? 13 : (emphasized ? 18 : 16),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(palette.icon, size: compact ? 20 : 22, color: palette.accent),
+          Icon(
+            palette.icon,
+            size: compact ? 20 : (emphasized ? 26 : 22),
+            color: palette.accent,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (emphasized) ...[
+                  Text(
+                    '추천 출발 시각',
+                    key: const Key('departureHeadlineLabel'),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
+                      color: palette.accent,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                ],
                 Text(
                   content.title,
                   key: const Key('departureHeadlineTitle'),
                   style: TextStyle(
-                    fontSize: compact ? 16 : 19,
-                    height: 1.3,
+                    fontSize: compact ? 16 : (emphasized ? 24 : 19),
+                    height: 1.25,
                     fontWeight: FontWeight.w900,
                     color: DdubiColors.navy,
                   ),
@@ -253,8 +276,8 @@ class DepartureHeadline extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: palette.background,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: palette.border),
+        borderRadius: BorderRadius.circular(emphasized ? 20 : 18),
+        border: Border.all(color: palette.border, width: emphasized ? 1.6 : 1),
       ),
       clipBehavior: Clip.antiAlias,
       child: onTap == null

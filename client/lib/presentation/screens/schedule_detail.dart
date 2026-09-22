@@ -181,7 +181,9 @@ class ScheduleDetailScreen extends StatelessWidget {
     bool routesUnavailable = false,
   }) {
     return AppPage(
-      title: '일정 상세',
+      // 맨 위 일정 정보 카드를 없앤 자리다. 제목이 사라지면 어느 일정인지 알 수 없어
+      // 상단 바가 일정 이름을 든다.
+      title: schedule.title,
       child: RefreshIndicator(
         onRefresh: () async => reload?.call(),
         child: EvaluationHeadlineScope(
@@ -191,85 +193,77 @@ class ScheduleDetailScreen extends StatelessWidget {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
             children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0xFFD5E6FA)),
-                ),
+              // 없앤 일정 정보 카드에서 꼭 필요한 것만 한 줄로 남긴다. 언제 어디로 가는
+              // 일정인지 모르면 아래 추천이 무엇에 대한 것인지 알 수 없다.
+              Padding(
+                key: const Key('scheduleDetailSubtitle'),
+                padding: const EdgeInsets.only(bottom: 12),
                 child: Row(
                   children: [
-                    Container(
-                      width: 58,
-                      height: 58,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE9F1FF),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: const Icon(
-                        Icons.work_rounded,
-                        color: Color(0xFF3C73DD),
-                        size: 30,
+                    const Icon(
+                      Icons.schedule_rounded,
+                      size: 15,
+                      color: Color(0xFF5C6B7F),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '${formatFullDate(schedule.date)} ${schedule.time} 도착',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF4A5B70),
                       ),
                     ),
-                    const SizedBox(width: 13),
+                    const SizedBox(width: 10),
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 15,
+                      color: Color(0xFF5C6B7F),
+                    ),
+                    const SizedBox(width: 3),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            schedule.title,
-                            style: const TextStyle(
-                              fontSize: 19,
-                              fontWeight: FontWeight.w900,
-                              color: DdubiColors.navy,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            '${formatFullDate(schedule.date)}  ${schedule.time}',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF415A89),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.location_on_outlined,
-                                size: 16,
-                                color: Color(0xFF516A98),
-                              ),
-                              const SizedBox(width: 3),
-                              Expanded(
-                                child: Text(
-                                  schedule.place,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF516A98),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                      child: Text(
+                        schedule.place,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: Color(0xFF4A5B70),
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
-              // 사용자가 가장 먼저 알고 싶은 "몇 시에 나가면 되는지"를 맨 위에 둔다.
-              if (repository is ScheduleEvaluationRepository) ...[
+              // 이미 다녀왔거나 취소한 일정에 "몇 시에 나가세요" 를 띄우지 않는다.
+              // 대신 무엇이 끝났는지만 알린다.
+              if (ScheduleStatusBadge.shows(schedule.status)) ...[
+                InfoCard(
+                  key: const Key('scheduleFinishedNotice'),
+                  child: Row(
+                    children: [
+                      ScheduleStatusBadge(schedule.status),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          schedule.isCanceled
+                              ? '취소한 일정이에요. 출발 안내는 하지 않아요.'
+                              : '도착을 기록한 일정이에요. 출발 안내는 끝났어요.',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF4A5B70),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ] else if (repository is ScheduleEvaluationRepository) ...[
                 ValueListenableBuilder<ScheduleEvaluationV2?>(
                   valueListenable: headline,
                   builder: (_, value, _) =>
-                      DepartureHeadline(evaluation: value),
+                      DepartureHeadline(evaluation: value, emphasized: true),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -433,15 +427,6 @@ class ScheduleDetailScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                // 계산 근거(내부 사유 코드) 대신 사용자가 행동할 수 있는 안내를 보여준다.
-                // 시간과 순서는 서버 계산값이고 앱은 받은 값을 그대로 쓴다.
-                if (recommendationApi != null)
-                  RecommendationGuideCard(
-                    api: recommendationApi!,
-                    scheduleId: schedule.id,
-                    headline: headline,
-                  ),
               ],
               const SizedBox(height: 16),
               _LiveSavedRouteList(
@@ -462,6 +447,22 @@ class ScheduleDetailScreen extends StatelessWidget {
                       ),
               ),
               const SizedBox(height: 16),
+              // 계산 근거(내부 사유 코드) 대신 사용자가 행동할 수 있는 안내를 보여준다.
+              // 시간과 순서는 서버 계산값이고 앱은 받은 값을 그대로 쓴다.
+              // 예전에는 이 카드가 경로 목록 위에 있었고, 옆에 내용 없는 "이 일정에 맞춰"
+              // 카드가 따로 있었다. 둘을 한 장으로 합치고 경로 목록 아래로 내렸다.
+              if (recommendationApi != null) ...[
+                RecommendationGuideCard(
+                  api: recommendationApi!,
+                  scheduleId: schedule.id,
+                  headline: headline,
+                  evaluationRepository:
+                      repository is ScheduleEvaluationRepository
+                      ? repository as ScheduleEvaluationRepository
+                      : null,
+                ),
+                const SizedBox(height: 16),
+              ],
               // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
               // 칸을 넷으로 나눴다. 조회 API 가 붙기 전에는 네 칸 모두 "확인 안 됨"이다.
               TravelConditionsCard(
@@ -477,6 +478,8 @@ class ScheduleDetailScreen extends StatelessWidget {
                     repository: repository as ScheduleEvaluationRepository,
                     scheduleId: schedule.id,
                     developerDiagnostics: diagnostics,
+                    // 같은 버튼이 위 안내 카드에 있다. 두 곳에 두면 서로 다른 단추로 읽힌다.
+                    showActions: false,
                     headline: headline,
                   ),
                 )

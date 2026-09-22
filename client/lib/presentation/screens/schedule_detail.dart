@@ -455,6 +455,7 @@ class ScheduleDetailScreen extends StatelessWidget {
                         routeRepository,
                         displayRank: displayRank,
                         evaluated: evaluated,
+                        estimatedArrivalAt: headline.value?.estimatedArrivalAt,
                       ),
               ),
               const SizedBox(height: 16),
@@ -613,6 +614,7 @@ class ScheduleDetailScreen extends StatelessWidget {
     DdubiRepository routeRepository, {
     int? displayRank,
     RouteEvaluatedNumbers evaluated = RouteEvaluatedNumbers.empty,
+    DateTime? estimatedArrivalAt,
   }) {
     if (savedRoute.routeId.trim().isEmpty) {
       ScaffoldMessenger.of(c).showSnackBar(
@@ -637,6 +639,7 @@ class ScheduleDetailScreen extends StatelessWidget {
         evaluated: evaluated,
         scheduleId: schedule.id,
         departedAlready: schedule.hasDeparted,
+        estimatedArrivalAt: estimatedArrivalAt,
       ),
     );
   }
@@ -696,6 +699,8 @@ class ScheduleDetailScreen extends StatelessWidget {
         evaluated: RouteEvaluatedNumbers.of(evaluation, savedRoute.routeId),
         scheduleId: schedule.id,
         departedAlready: schedule.hasDeparted,
+        // 이동 중 화면의 "예상 도착" 은 이 값에서 온다. 없으면 그 화면은 시각을 만들어내지 않는다.
+        estimatedArrivalAt: evaluation?.estimatedArrivalAt,
       ),
     );
   }

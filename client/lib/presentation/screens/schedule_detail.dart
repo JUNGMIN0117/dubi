@@ -16,6 +16,7 @@ import '../../domain/route_evaluated_numbers.dart';
 import '../../domain/saved_route_display.dart';
 import '../../domain/transit_reference.dart';
 import '../transit_reference_panel.dart';
+import '../travel_conditions_card.dart';
 import '../../core/diagnostics/developer_diagnostics.dart';
 import 'map.dart';
 import 'schedule_form.dart';
@@ -461,13 +462,9 @@ class ScheduleDetailScreen extends StatelessWidget {
                       ),
               ),
               const SizedBox(height: 16),
-              // 네 칸 모두 "확인 필요"만 나오던 자리다. 값이 붙기 전까지는 한 줄로만 알린다.
-              const InfoCard(
-                child: Text(
-                  '오늘의 이동 변수(혼잡도·도로 통제·지하철 지연)는 아직 확인되지 않았어요.',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
-                ),
-              ),
+              // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
+              // 칸을 넷으로 나눴다. 조회 API 가 붙기 전에는 네 칸 모두 "확인 안 됨"이다.
+              TravelConditionsCard(scheduleId: schedule.id),
               const SizedBox(height: 14),
               if (repository is ScheduleEvaluationRepository)
                 // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.
@@ -732,11 +729,17 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
 
   void _onEvaluation() {
     final value = widget.headline.value;
-    if (value != null && mounted && !_sameEstimates(value.candidateEstimates)) {
-      setState(() {
-        _estimates = value.candidateEstimates;
-        _evaluation = value;
-      });
+    if (value != null && mounted) {
+      // 후보의 경로·소요시간·제안 여부가 같아도 평가 자체는 바뀔 수 있다. 구간별 시간
+      // 출처, 실시간 원인, 계산 시각 같은 것들이다. 예전에는 후보가 같으면 평가 객체를
+      // 통째로 안 바꿔서 상세 카드와 지도에 낡은 구간 정보가 남았다(BE 지적, 2026-09-22).
+      final estimatesChanged = !_sameEstimates(value.candidateEstimates);
+      if (estimatesChanged || _isNewEvaluation(value)) {
+        setState(() {
+          _estimates = value.candidateEstimates;
+          _evaluation = value;
+        });
+      }
     }
     final computedAt = widget.headline.value?.computedAt;
     if (computedAt == null) return;
@@ -748,6 +751,16 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
       return;
     }
     _reload();
+  }
+
+  /// 들고 있는 것과 다른 계산인가. 계산 id 가 우선이고, 없으면 계산 시각으로 본다.
+  bool _isNewEvaluation(ScheduleEvaluationV2 next) {
+    final current = _evaluation;
+    if (current == null) return true;
+    if (next.evaluationId != null || current.evaluationId != null) {
+      return next.evaluationId != current.evaluationId;
+    }
+    return next.computedAt != current.computedAt;
   }
 
   bool _sameEstimates(List<EvaluationCandidateEstimate> next) {

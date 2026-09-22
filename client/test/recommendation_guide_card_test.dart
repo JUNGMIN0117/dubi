@@ -45,8 +45,11 @@ ScheduleEvaluationV2 _evaluation(String id) {
   return ScheduleEvaluationV2.fromJson(json);
 }
 
-/// 한 번의 조회에 무엇으로 답할지. null 이면 서버 오류(500).
+/// 한 번의 조회에 무엇으로 답할지. null 이면 서버 오류(500), [notReady] 면 계산 중(409).
 typedef _Reply = Map<String, dynamic>?;
+
+/// 서버가 "계산이 아직 안 끝났다" 고 답하는 경우. 실패(500)와 구분해야 한다.
+const Map<String, dynamic> notReady = {'__status': 409};
 
 /// 요청마다 정해진 답을 돌려주는 가짜 서버. 목록을 다 쓰면 마지막 답을 되풀이한다.
 Dio _dio(List<_Reply> replies) {
@@ -57,14 +60,14 @@ Dio _dio(List<_Reply> replies) {
         onRequest: (options, handler) {
           final reply = replies[call.clamp(0, replies.length - 1)];
           call++;
-          if (reply == null) {
+          if (reply == null || reply['__status'] is int) {
             // 예외를 직접 던지면 요청이 끝나지 않는다. 반드시 reject 로 알린다.
             handler.reject(
               DioException(
                 requestOptions: options,
                 response: Response<dynamic>(
                   requestOptions: options,
-                  statusCode: 500,
+                  statusCode: reply == null ? 500 : reply['__status'] as int,
                 ),
                 type: DioExceptionType.badResponse,
               ),
@@ -187,6 +190,29 @@ void main() {
     expect(find.byKey(const Key('recommendationGuideCard')), findsOneWidget);
     // 다시 부르는 자리도 그 줄 안에 함께 둔다.
     expect(find.byKey(const Key('guideRefreshStaleButton')), findsOneWidget);
+  });
+
+  /// 서버가 409(계산 중)로 답하면 실패가 아니라 "아직" 이다. 예전에는 둘을 같은 문구로 보여줘서,
+  /// 계산이 끝나기를 기다리는 동안 "못 불러왔어요" 가 계속 보였다(2026-09-22 제보).
+  testWidgets('계산이 아직이면 못 불러왔다고 하지 않고 준비 중이라고 말한다', (tester) async {
+    final dio = _dio([notReady]);
+
+    await pumpCard(tester, dio);
+
+    expect(find.text('계산이 끝나면 안내를 준비해요.'), findsOneWidget);
+    expect(find.byKey(const Key('guidePendingHint')), findsOneWidget);
+    expect(find.text('추천 안내를 아직 불러오지 못했어요.'), findsNothing);
+    // 눌러도 또 409 라 다시 불러오기 버튼은 두지 않는다. 새 평가가 오면 스스로 부른다.
+    expect(find.byKey(const Key('guideRetryButton')), findsNothing);
+  });
+
+  testWidgets('연결·서버 오류는 실패로 말하고 다시 불러오기를 둔다', (tester) async {
+    final dio = _dio([null]);
+
+    await pumpCard(tester, dio);
+
+    expect(find.text('추천 안내를 아직 불러오지 못했어요.'), findsOneWidget);
+    expect(find.byKey(const Key('guideRetryButton')), findsOneWidget);
   });
 
   testWidgets('다시 불러오기를 누르면 한 번 더 조회한다', (tester) async {

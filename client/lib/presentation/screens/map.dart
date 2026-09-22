@@ -557,9 +557,6 @@ class _SavedRouteMapView extends StatefulWidget {
 
 class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
   KakaoMapController? _controller;
-  StreamSubscription<CameraMoveEndEvent>? _cameraMoveSubscription;
-  List<_ProjectedRouteSegment> _projectedSegments = const [];
-  var _projectionGeneration = 0;
 
   LatLng get _center {
     final bounds = widget.routeMap.bounds;
@@ -581,11 +578,6 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
 
   Future<void> _onMapCreated(KakaoMapController controller) async {
     _controller = controller;
-    if (!kIsWeb) {
-      _cameraMoveSubscription = controller.onCameraMoveEndStream.listen(
-        (_) => _refreshProjectedSegments(),
-      );
-    }
     final points = widget.routeMap.coordinates;
     try {
       if (!kIsWeb) {
@@ -651,68 +643,60 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
           isConsecutive: false,
         ),
       );
-      await _refreshProjectedSegments();
+      await _drawRouteLines();
     } catch (error) {
       AppLog.debug('Saved route camera move failed: $error');
     }
   }
 
-  /// 지도 좌표를 화면 좌표로 바꿔 경로선을 그린다.
+  /// 경로선을 지도에 그린다.
   ///
-  /// 지도가 돌려주는 값은 기기 물리 픽셀이고 캔버스는 논리 픽셀을 쓴다. 화면 배율로 나누지
-  /// 않으면 선이 실제 위치에서 배율만큼 밀려 강 위 같은 엉뚱한 곳에 그려진다.
-  /// 지도를 움직이는 동안 먼저 시작한 계산이 뒤늦게 반영되면 선이 끊겨 보이므로, 세대 번호로
-  /// 가장 최근 계산만 반영한다.
-  Future<void> _refreshProjectedSegments() async {
+  /// 지도가 직접 그리므로 카메라가 어떻게 움직여도 선이 따라간다. 예전에는 좌표를 화면
+  /// 위치로 바꿔 지도 위에 얹어 그렸는데, 지도를 만지는 순간 그 위치가 맞지 않아 선을
+  /// 지웠다가 이동이 끝난 뒤 다시 그렸다. 사용자에게는 만질 때마다 깜빡이는 것으로
+  /// 보였다(2026-09-22 제보).
+  ///
+  /// 선 그리기는 저장소 안 사본 패키지에 더한 기능이다.
+  /// 사유: client/packages/kakao_maps_flutter/README.md
+  Future<void> _drawRouteLines() async {
     final controller = _controller;
     if (controller == null || kIsWeb) return;
-    final generation = ++_projectionGeneration;
-    final pixelRatio = View.of(context).devicePixelRatio;
-    final projected = <_ProjectedRouteSegment>[];
     try {
+      await controller.clearRouteLines();
+      var index = 0;
       // 좌표가 없는 구간(대개 도보)은 앞뒤를 잇는 직선으로 채워 선이 끊기지 않게 한다.
       for (final line in routeMapLines(widget.routeMap)) {
-        final rawPoints = await Future.wait(
-          line.points.map(
-            (coordinate) => controller.toScreenPoint(
-              position: LatLng(
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude,
-              ),
-            ),
-          ),
+        if (line.points.length < 2) {
+          index++;
+          continue;
+        }
+        final color = _modeColor(line.mode);
+        await controller.addRouteLine(
+          id: 'segment-$index',
+          points: line.points
+              .map(
+                (coordinate) => LatLng(
+                  latitude: coordinate.latitude,
+                  longitude: coordinate.longitude,
+                ),
+              )
+              .toList(growable: false),
+          // 좌표를 모르는 구간은 흐리게 그려 실제 경로와 구분한다. 추정임을 숨기지 않는다.
+          color: line.approximate || line.mode == 'WALK'
+              ? color.withValues(alpha: 0.55).toARGB32()
+              : color.toARGB32(),
+          width: line.mode == 'WALK' ? 5 : 7,
         );
-        final points = rawPoints
-            .whereType<Offset>()
-            .map((point) => point / pixelRatio)
-            .toList(growable: false);
-        projected.add(
-          _ProjectedRouteSegment(
-            mode: line.mode,
-            points: points,
-            approximate: line.approximate,
-          ),
-        );
+        index++;
       }
-      if (mounted && generation == _projectionGeneration) {
-        setState(() => _projectedSegments = projected);
-      }
-    } catch (error) {
-      AppLog.debug('Saved route coordinate projection failed: $error');
-    }
-  }
-
-  /// 지도를 만지는 순간 이전 화면 좌표는 더 이상 맞지 않는다. 지우고 이동이 끝나면 다시 그린다.
-  void _hideProjectedRoute(PointerDownEvent _) {
-    _projectionGeneration++;
-    if (_projectedSegments.isNotEmpty) {
-      setState(() => _projectedSegments = const []);
+    } on Object catch (error) {
+      // 선을 못 그려도 지도와 마커는 쓸 수 있다. 화면 전체를 실패로 만들지 않는다.
+      AppLog.debug('Saved route line drawing failed: $error');
     }
   }
 
   @override
   void dispose() {
-    _cameraMoveSubscription?.cancel();
     super.dispose();
   }
 
@@ -720,34 +704,23 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
   Widget build(BuildContext context) {
     final hasCoordinates = widget.routeMap.coordinates.isNotEmpty;
     return ClipRRect(
+      // 경로선은 이제 지도가 직접 그린다. 위젯 검사에서는 실제 지도가 뜨지 않으므로
+      // 선 자체를 확인할 수 없다. 대신 지도 자리가 붙었는지를 이 키로 확인한다.
+      key: const Key('savedRouteMap'),
       borderRadius: BorderRadius.circular(16),
       child: Stack(
         children: [
           Positioned.fill(
-            child: Listener(
-              onPointerDown: _hideProjectedRoute,
-              child: KakaoMapConfig.isReady
-                  ? KakaoMap(
-                      initialPosition: _center,
-                      initialLevel: kIsWeb ? 5 : 13,
-                      onMapCreated: _onMapCreated,
-                    )
-                  : const ColoredBox(color: Color(0xFFEAF2EC)),
-            ),
+            // 지도가 선을 직접 그리므로 손가락 이벤트를 가로챌 이유가 없다.
+            child: KakaoMapConfig.isReady
+                ? KakaoMap(
+                    initialPosition: _center,
+                    initialLevel: kIsWeb ? 5 : 13,
+                    onMapCreated: _onMapCreated,
+                  )
+                : const ColoredBox(color: Color(0xFFEAF2EC)),
           ),
-          if (hasCoordinates)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  key: const Key('savedRoutePolyline'),
-                  painter: _SavedRoutePolylinePainter(
-                    widget.routeMap,
-                    projectedSegments: _projectedSegments,
-                  ),
-                ),
-              ),
-            )
-          else
+          if (!hasCoordinates)
             const Center(
               child: Material(
                 color: Colors.white,
@@ -822,84 +795,6 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
       ),
     );
   }
-}
-
-class _SavedRoutePolylinePainter extends CustomPainter {
-  const _SavedRoutePolylinePainter(
-    this.routeMap, {
-    this.projectedSegments = const [],
-  });
-
-  final SavedRouteMap routeMap;
-  final List<_ProjectedRouteSegment> projectedSegments;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // 지도 투영으로 얻은 화면 좌표만 그린다. 예전에는 좌표 범위를 위젯 크기에 비례 배치하는
-    // 임시 방식으로도 그렸는데, 실제 지도 타일과 맞지 않아 경로가 강 위 같은 엉뚱한 곳에
-    // 그려졌다. 투영 전에는 아무것도 그리지 않고 지도만 보여준다.
-    for (final segment in projectedSegments) {
-      _drawSegment(canvas, segment.mode, segment.points, segment.approximate);
-    }
-  }
-
-  /// 실제 좌표가 없어 앞뒤를 이은 선은 점선으로 그린다. 도보도 늘 점선이다 —
-  /// 실선은 "이 길로 간다", 점선은 "이쯤을 지난다" 는 뜻으로 구별한다.
-  void _drawSegment(
-    Canvas canvas,
-    String mode,
-    List<Offset> points,
-    bool approximate,
-  ) {
-    if (points.length < 2) return;
-    final paint = Paint()
-      ..color = _modeColor(mode)
-      ..strokeWidth = mode == 'WALK' ? 5 : 7
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-    if (mode == 'WALK' || approximate) {
-      for (var index = 0; index < points.length - 1; index++) {
-        final start = points[index];
-        final end = points[index + 1];
-        final distance = (end - start).distance;
-        if (distance == 0) continue;
-        final direction = (end - start) / distance;
-        for (var offset = 0.0; offset < distance; offset += 12) {
-          canvas.drawLine(
-            start + direction * offset,
-            start + direction * (offset + 6).clamp(0, distance),
-            paint,
-          );
-        }
-      }
-    } else {
-      final path = Path()..moveTo(points.first.dx, points.first.dy);
-      for (final coordinate in points.skip(1)) {
-        path.lineTo(coordinate.dx, coordinate.dy);
-      }
-      canvas.drawPath(path, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SavedRoutePolylinePainter oldDelegate) =>
-      oldDelegate.routeMap != routeMap ||
-      oldDelegate.projectedSegments != projectedSegments;
-}
-
-class _ProjectedRouteSegment {
-  const _ProjectedRouteSegment({
-    required this.mode,
-    required this.points,
-    this.approximate = false,
-  });
-
-  final String mode;
-  final List<Offset> points;
-
-  /// 저장된 좌표가 아니라 앞뒤 구간을 이어 만든 직선인가.
-  final bool approximate;
 }
 
 class _RouteMapView extends StatefulWidget {

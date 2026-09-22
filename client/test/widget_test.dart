@@ -606,7 +606,9 @@ void main() {
 
     expect(find.byKey(const Key('mobileSavedRouteLayout')), findsOneWidget);
     expect(find.byKey(const Key('savedRouteDetail')), findsOneWidget);
-    expect(find.byKey(const Key('savedRoutePolyline')), findsOneWidget);
+    // 경로선은 지도가 직접 그린다(카카오 RouteLineLayer). 위젯 검사에는 실제 지도가
+    // 뜨지 않아 선을 확인할 수 없으므로 지도 자리가 붙었는지만 본다.
+    expect(find.byKey(const Key('savedRouteMap')), findsOneWidget);
     expect(find.textContaining('버스 146'), findsOneWidget);
     expect(find.text('서버 경로 좌표 · 2개 점'), findsOneWidget);
     expect(tester.takeException(), isNull);

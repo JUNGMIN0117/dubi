@@ -608,6 +608,10 @@ void main() {
 
     expect(find.byKey(const Key('mobileSavedRouteLayout')), findsOneWidget);
     expect(find.byKey(const Key('savedRouteDetail')), findsOneWidget);
+    // 지도가 직접 그리는 선은 위젯 검사에 뜨지 않으므로 지도 자리만 확인한다.
+    // 대체 그림(예전 방식)은 지도가 선을 못 그렸을 때만 붙는데, 검사 환경에는
+    // 실제 지도가 없어 늘 대체 쪽이다.
+    expect(find.byKey(const Key('savedRouteMap')), findsOneWidget);
     expect(find.byKey(const Key('savedRoutePolyline')), findsOneWidget);
     expect(find.textContaining('버스 146'), findsOneWidget);
     expect(find.text('서버 경로 좌표 · 2개 점'), findsOneWidget);

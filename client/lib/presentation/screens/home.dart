@@ -310,6 +310,9 @@ class _MobileHomeContentState extends State<_MobileHomeContent> {
   List<Schedule> _schedulesOn(DateTime day) {
     final source = _browsed ?? widget.schedules;
     return source
+        // 취소한 일정은 보이지 않아야 한다. 서버 목록 API 는 상태를 안 주면 취소분까지
+        // 돌려주므로 여기서 거른다. 홈 요약(오늘치)은 서버가 이미 걸러 준다.
+        .where((schedule) => !schedule.isCanceled)
         .where((schedule) => _dayOf(schedule.date) == day)
         .toList(growable: false)
       ..sort((a, b) => a.date.compareTo(b.date));
@@ -510,102 +513,120 @@ class _TodayScheduleCard extends StatelessWidget {
       Icons.fitness_center_rounded,
     ];
     final tone = tones[index % tones.length];
-    return Material(
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: DdubiColors.green.withValues(alpha: .22)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: Key('todaySchedule-${schedule.id}'),
-        onTap: () => openSchedule(
-          '/schedules/${schedule.id}',
-          extra: ScheduleDetailArguments(schedule: schedule),
+    return Opacity(
+      // 끝난 일정은 흐리게. 아직 남은 일정이 먼저 눈에 들어와야 한다.
+      opacity: ScheduleStatusBadge.opacityFor(schedule.status),
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: DdubiColors.green.withValues(alpha: .22)),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-          child: Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: Key('todaySchedule-${schedule.id}'),
+          // 끝난 일정은 흐리게. 아직 남은 일정이 먼저 눈에 들어와야 한다.
+          onTap: () => openSchedule(
+            '/schedules/${schedule.id}',
+            extra: ScheduleDetailArguments(schedule: schedule),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(
+              children: [
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: tone.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icons[index % icons.length], color: tone),
                 ),
-                child: Icon(icons[index % icons.length], color: tone),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      schedule.time,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF1B43A6),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      schedule.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                        color: DdubiColors.navy,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.location_on,
-                          size: 14,
-                          color: Color(0xFF8391A8),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        schedule.time,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF1B43A6),
                         ),
-                        const SizedBox(width: 3),
-                        Expanded(
-                          child: Text(
-                            schedule.place,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF718098),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              schedule.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                                color: DdubiColors.navy,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F8F2),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Text(
-                  '예정',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: DdubiColors.green,
+                          if (ScheduleStatusBadge.shows(schedule.status)) ...[
+                            const SizedBox(width: 6),
+                            ScheduleStatusBadge(schedule.status),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on,
+                            size: 14,
+                            color: Color(0xFF8391A8),
+                          ),
+                          const SizedBox(width: 3),
+                          Expanded(
+                            child: Text(
+                              schedule.place,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF718098),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.chevron_right_rounded, color: Color(0xFF1D3F8E)),
-            ],
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F8F2),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Text(
+                    '예정',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: DdubiColors.green,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Color(0xFF1D3F8E),
+                ),
+              ],
+            ),
           ),
         ),
       ),

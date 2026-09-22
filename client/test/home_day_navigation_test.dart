@@ -80,7 +80,12 @@ class _FakeScheduleRepository implements ScheduleRepository {
       const [];
 }
 
-Schedule _scheduleOn(DateTime when, String title) => Schedule(
+Schedule _scheduleOn(
+  DateTime when,
+  String title, {
+  ScheduleStatus status = ScheduleStatus.upcoming,
+}) => Schedule(
+  status: status,
   id: title,
   title: title,
   origin: const PlaceLocation(name: '집', lat: 37.5, lng: 127.0),
@@ -236,6 +241,56 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(summaryCalls, 2);
+  });
+
+  // 취소한 일정이 날짜를 옮기면 다시 나타났다. 서버 목록 API 는 상태를 안 주면
+  // 취소분까지 돌려주는데 앱이 거르지 않아서였다(2026-09-22 제보).
+  testWidgets('취소한 일정은 다른 날 목록에도 안 보인다', (tester) async {
+    _asPhone(tester);
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final day = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 9);
+    final repository = _FakeScheduleRepository([
+      _scheduleOn(day, '취소한 병원', status: ScheduleStatus.canceled),
+      _scheduleOn(day.add(const Duration(hours: 2)), '남아 있는 회의'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(homeApi: _homeApi(), scheduleRepository: repository),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('homeNextDay')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('취소한 병원'), findsNothing);
+    expect(find.text('남아 있는 회의'), findsOneWidget);
+  });
+
+  testWidgets('완료한 일정은 목록에 남고 완료 표시가 붙는다', (tester) async {
+    _asPhone(tester);
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final repository = _FakeScheduleRepository([
+      _scheduleOn(
+        DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 9),
+        '다녀온 회의',
+        status: ScheduleStatus.done,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(homeApi: _homeApi(), scheduleRepository: repository),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('homeNextDay')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('다녀온 회의'), findsOneWidget);
+    expect(find.byKey(const Key('scheduleDoneBadge')), findsOneWidget);
   });
 
   testWidgets('일정 저장소가 없으면 화살표는 꺼져 있다', (tester) async {

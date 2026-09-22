@@ -3,7 +3,9 @@ package com.ssafy.ddubi.domain.recommendation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -82,26 +84,27 @@ class RecommendationGuideServiceTest {
         ScheduleEvaluationV2 evaluation =
                 json.readValue(
                         """
-                        {
-                          "schemaVersion":"schedule-evaluation-v2",
-                          "evaluationId":"evaluation-1",
-                          "proposedDepartAt":"2026-09-21T08:10:00",
-                          "estimatedArrivalAt":"2026-09-21T08:52:00",
-                          "durationSeconds":2520,
-                          "fare":{"minimumWon":1550,"maximumWon":1650},
-                          "asOf":"2026-09-20T23:00:00Z",
-                          "validUntil":"2026-09-20T23:10:00Z",
-                          "causes":[],
-                          "segments":[
-                            {"candidateKey":"candidate-0","sequence":1,"mode":"WALK","routeLabel":null,"fromName":"집","toName":"강남역","durationSeconds":300},
-                            {"candidateKey":"candidate-0","sequence":2,"mode":"SUBWAY","routeLabel":"2호선","fromName":"강남역","toName":"잠실역","durationSeconds":1800}
-                          ],
-                          "candidateEstimates":[]
-                        }
-                        """,
+{
+  "schemaVersion":"schedule-evaluation-v2",
+  "evaluationId":"evaluation-1",
+  "proposedDepartAt":"2026-09-21T08:10:00",
+  "estimatedArrivalAt":"2026-09-21T08:52:00",
+  "durationSeconds":2520,
+  "fare":{"minimumWon":1550,"maximumWon":1650},
+  "asOf":"2026-09-20T23:00:00Z",
+  "validUntil":"2026-09-20T23:10:00Z",
+  "causes":[],
+  "segments":[
+    {"candidateKey":"candidate-0","sequence":1,"mode":"WALK","routeLabel":null,"fromName":"집","toName":"강남역","durationSeconds":300},
+    {"candidateKey":"candidate-0","sequence":2,"mode":"SUBWAY","routeLabel":"2호선","fromName":"강남역","toName":"잠실역","durationSeconds":1800}
+  ],
+  "candidateEstimates":[]
+}
+""",
                         ScheduleEvaluationV2.class);
         ScheduleEvaluationStore store = mock(ScheduleEvaluationStore.class);
-        when(store.latestReadyV2(7L, 3L)).thenReturn(evaluation);
+        when(store.latestOutcomeV2(7L, 3L))
+                .thenReturn(new ScheduleEvaluationStore.LatestOutcome(evaluation, false));
         GmsRecommendationGuideClient gms = mock(GmsRecommendationGuideClient.class);
         when(gms.generate(any()))
                 .thenReturn(
@@ -144,25 +147,26 @@ class RecommendationGuideServiceTest {
         ScheduleEvaluationV2 evaluation =
                 json.readValue(
                         """
-                        {
-                          "schemaVersion":"schedule-evaluation-v2",
-                          "evaluationId":"evaluation-multiple-causes",
-                          "proposedDepartAt":"2026-09-21T08:10:00",
-                          "estimatedArrivalAt":"2026-09-21T08:52:00",
-                          "durationSeconds":2520,
-                          "asOf":"2026-09-20T23:00:00Z",
-                          "validUntil":"2026-09-20T23:10:00Z",
-                          "causes":[
-                            {"eventId":"event-potential","source":"EVENT_SOURCE","segmentIds":["segment-1"],"effect":"DELAYED","confirmed":false},
-                            {"eventId":"event-confirmed","source":"TOPIS_CONFIRMED","segmentIds":["segment-2"],"effect":"BLOCKED","confirmed":true}
-                          ],
-                          "segments":[],
-                          "candidateEstimates":[]
-                        }
-                        """,
+{
+  "schemaVersion":"schedule-evaluation-v2",
+  "evaluationId":"evaluation-multiple-causes",
+  "proposedDepartAt":"2026-09-21T08:10:00",
+  "estimatedArrivalAt":"2026-09-21T08:52:00",
+  "durationSeconds":2520,
+  "asOf":"2026-09-20T23:00:00Z",
+  "validUntil":"2026-09-20T23:10:00Z",
+  "causes":[
+    {"eventId":"event-potential","source":"EVENT_SOURCE","segmentIds":["segment-1"],"effect":"DELAYED","confirmed":false},
+    {"eventId":"event-confirmed","source":"TOPIS_CONFIRMED","segmentIds":["segment-2"],"effect":"BLOCKED","confirmed":true}
+  ],
+  "segments":[],
+  "candidateEstimates":[]
+}
+""",
                         ScheduleEvaluationV2.class);
         ScheduleEvaluationStore store = mock(ScheduleEvaluationStore.class);
-        when(store.latestReadyV2(7L, 3L)).thenReturn(evaluation);
+        when(store.latestOutcomeV2(7L, 3L))
+                .thenReturn(new ScheduleEvaluationStore.LatestOutcome(evaluation, false));
         GmsRecommendationGuideClient gms = mock(GmsRecommendationGuideClient.class);
         when(gms.generate(any())).thenReturn(Optional.empty());
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
@@ -173,7 +177,8 @@ class RecommendationGuideServiceTest {
         when(values.multiGet(any()))
                 .thenReturn(
                         java.util.Arrays.asList(
-                                "{\"source\":\"EVENT_DETAIL\",\"contentText\":\"행사 영향 가능성\",\"validUntil\":\"2026-09-20T23:10:00Z\"}",
+                                "{\"source\":\"EVENT_DETAIL\",\"contentText\":\"행사 영향"
+                                    + " 가능성\",\"validUntil\":\"2026-09-20T23:10:00Z\"}",
                                 null,
                                 null,
                                 null,
@@ -198,5 +203,64 @@ class RecommendationGuideServiceTest {
         assertThat(result.delay().status()).isEqualTo("DISRUPTED");
         assertThat(result.delay().source()).isEqualTo("TOPIS_CONFIRMED");
         assertThat(result.delay().reason()).doesNotContain("행사 영향 가능성");
+    }
+
+    /**
+     * 출발한 뒤에도 출발할 때 본 안내를 다시 볼 수 있어야 한다(2026-09-22 제보).
+     *
+     * <p>멈춘 일정의 마지막 결과는 유효기간이 이미 지나 있다. 그 결과는 더 갱신되지 않으므로 "지났다" 를 "틀렸다" 로 다루지 않고 그대로 문장화한다. 그리고 매번
+     * GMS 를 다시 부르지 않게 고정 시간 동안 캐시한다.
+     */
+    @Test
+    void frozenOutcomeIsServedPastValidUntilAndCachedForAFixedTime() throws Exception {
+        ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+        ScheduleEvaluationV2 evaluation =
+                json.readValue(
+                        """
+                        {
+                          "schemaVersion":"schedule-evaluation-v2",
+                          "evaluationId":"evaluation-departed",
+                          "proposedDepartAt":"2026-09-21T08:10:00",
+                          "estimatedArrivalAt":"2026-09-21T08:52:00",
+                          "durationSeconds":2520,
+                          "asOf":"2026-09-20T23:00:00Z",
+                          "validUntil":"2026-09-20T23:10:00Z",
+                          "causes":[],
+                          "segments":[],
+                          "candidateEstimates":[]
+                        }
+                        """,
+                        ScheduleEvaluationV2.class);
+        ScheduleEvaluationStore store = mock(ScheduleEvaluationStore.class);
+        when(store.latestOutcomeV2(7L, 3L))
+                .thenReturn(new ScheduleEvaluationStore.LatestOutcome(evaluation, true));
+        GmsRecommendationGuideClient gms = mock(GmsRecommendationGuideClient.class);
+        when(gms.generate(any())).thenReturn(Optional.empty());
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        when(values.get(anyString())).thenReturn(null);
+        var properties =
+                new RecommendationGuideProperties(
+                        true,
+                        "https://gms.ssafy.io/gmsapi",
+                        "/api.openai.com/v1/responses",
+                        "synthetic",
+                        "gpt-5.5-pro",
+                        1000);
+        var service = new RecommendationGuideService(store, gms, properties, redis, json);
+
+        // 유효기간(23:10Z)이 한참 지난 시각에 물어도 거절하지 않는다.
+        var result = service.guide(7L, 3L, Instant.parse("2026-09-21T02:00:00Z"));
+
+        assertThat(result.departureAt()).isEqualTo(LocalDateTime.parse("2026-09-21T08:10:00"));
+        assertThat(result.estimatedArrivalAt())
+                .isEqualTo(LocalDateTime.parse("2026-09-21T08:52:00"));
+        verify(values)
+                .set(
+                        eq("recommendation:guide:7:evaluation-departed"),
+                        anyString(),
+                        eq(RecommendationGuideService.FROZEN_CACHE_TTL));
     }
 }

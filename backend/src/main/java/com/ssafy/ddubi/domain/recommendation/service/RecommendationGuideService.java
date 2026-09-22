@@ -53,8 +53,12 @@ public class RecommendationGuideService {
     }
 
     public RecommendationGuideResponse guide(long scheduleId, long userId, Instant now) {
-        ScheduleEvaluationV2 evaluation = store.latestReadyV2(scheduleId, userId);
-        if (evaluation.validUntil() == null || !evaluation.validUntil().isAfter(now))
+        var latest = store.latestOutcomeV2(scheduleId, userId);
+        ScheduleEvaluationV2 evaluation = latest.evaluation();
+        // 멈춘 일정의 마지막 결과는 유효기간을 따지지 않는다. 더 갱신되지 않는 결과라 "지났다" 가 곧 "틀렸다" 가 아니다 —
+        // 출발한 뒤에도 출발할 때 본 안내를 그대로 다시 보여 주는 것이 목적이다.
+        if (!latest.frozen()
+                && (evaluation.validUntil() == null || !evaluation.validUntil().isAfter(now)))
             throw new BusinessException(ErrorCode.STALE_RECOMMENDATION);
         String cacheKey = CACHE_PREFIX + scheduleId + ":" + evaluation.evaluationId();
         RecommendationGuideResponse cached = cached(cacheKey);
@@ -122,7 +126,7 @@ public class RecommendationGuideService {
                         evaluation.asOf(),
                         evaluation.validUntil(),
                         generated == null ? "TEMPLATE" : "GMS:" + properties.model());
-        cache(cacheKey, response, now);
+        cache(cacheKey, response, now, latest.frozen());
         return response;
     }
 
@@ -182,18 +186,23 @@ public class RecommendationGuideService {
         }
     }
 
-    private void cache(String key, RecommendationGuideResponse response, Instant now) {
+    /** 멈춘 일정의 안내를 캐시에 두는 시간. 유효기간이 이미 지난 결과라 그 값으로는 TTL 을 잡을 수 없다. 하루 안에 다시 볼 일이 대부분이다. */
+    static final Duration FROZEN_CACHE_TTL = Duration.ofHours(12);
+
+    private void cache(
+            String key, RecommendationGuideResponse response, Instant now, boolean frozen) {
         try {
-            Duration ttl = Duration.between(now, response.validUntil());
-            if (ttl.isNegative() || ttl.isZero()) return;
-            // 실시간 사실의 유효시각을 넘겨 AI 문장만 오래 남기지 않는다.
-            redis.opsForValue()
-                    .set(
-                            key,
-                            json.writeValueAsString(response),
-                            ttl.compareTo(Duration.ofMinutes(30)) > 0
-                                    ? Duration.ofMinutes(30)
-                                    : ttl);
+            Duration ttl;
+            if (frozen) {
+                // 더 갱신되지 않는 결과다. 매번 GMS 를 다시 부르지 않게 고정 시간 동안 둔다.
+                ttl = FROZEN_CACHE_TTL;
+            } else {
+                ttl = Duration.between(now, response.validUntil());
+                if (ttl.isNegative() || ttl.isZero()) return;
+                // 실시간 사실의 유효시각을 넘겨 AI 문장만 오래 남기지 않는다.
+                if (ttl.compareTo(Duration.ofMinutes(30)) > 0) ttl = Duration.ofMinutes(30);
+            }
+            redis.opsForValue().set(key, json.writeValueAsString(response), ttl);
         } catch (Exception ignored) {
             // 캐시 장애는 추천 계산이나 카드 조회 실패로 승격하지 않는다.
         }

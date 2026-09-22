@@ -29,6 +29,8 @@ class RouteMapScreen extends StatefulWidget {
     this.initialRouteDeviation = false,
     this.displayRank,
     this.evaluated = RouteEvaluatedNumbers.empty,
+    this.scheduleId,
+    this.departedAlready = false,
   });
 
   final DdubiRepository repository;
@@ -48,6 +50,13 @@ class RouteMapScreen extends StatefulWidget {
   /// 목록에서 쓴 것과 같은 평가 결과. 전체 시간과 구간별 시간·출처가 함께 들어 있다.
   /// 목록·상세·지도가 한 곳에서 온 같은 숫자를 보여주게 하려고 통째로 넘겨받는다.
   final RouteEvaluatedNumbers evaluated;
+
+  /// 이 경로가 속한 일정. "출발했어요" 를 서버에 알릴 때 필요하다. 경로 검색처럼 일정과
+  /// 이어지지 않은 화면에서는 없다.
+  final String? scheduleId;
+
+  /// 서버에 이미 출발이 기록된 일정인지. 이동 안내를 열자마자 "이동 중" 으로 시작한다.
+  final bool departedAlready;
 
   @override
   State<RouteMapScreen> createState() => _RouteMapScreenState();
@@ -81,6 +90,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           summary: widget.savedRoute!,
           displayRank: widget.displayRank,
           evaluated: widget.evaluated,
+          scheduleId: widget.scheduleId,
+          departedAlready: widget.departedAlready,
           route:
               widget.selectedRoute ??
               widget.savedRoute!.toRouteOption(
@@ -153,6 +164,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                         widget.destinationLabel ??
                         widget.condition?.destinationPlace ??
                         '도착지',
+                    scheduleId: widget.scheduleId,
+                    departedAlready: widget.departedAlready,
                   );
                   if (isWide) {
                     final layout = Padding(
@@ -215,6 +228,8 @@ class _SavedRouteApiScreen extends StatefulWidget {
     required this.destinationLabel,
     this.displayRank,
     this.evaluated = RouteEvaluatedNumbers.empty,
+    this.scheduleId,
+    this.departedAlready = false,
   });
 
   final RecommendationApi api;
@@ -225,6 +240,8 @@ class _SavedRouteApiScreen extends StatefulWidget {
   final String destinationLabel;
   final int? displayRank;
   final RouteEvaluatedNumbers evaluated;
+  final String? scheduleId;
+  final bool departedAlready;
 
   @override
   State<_SavedRouteApiScreen> createState() => _SavedRouteApiScreenState();
@@ -302,6 +319,8 @@ class _SavedRouteApiScreenState extends State<_SavedRouteApiScreen> {
               repository: widget.repository,
               displayRank: widget.displayRank,
               evaluated: widget.evaluated,
+              scheduleId: widget.scheduleId,
+              departedAlready: widget.departedAlready,
             );
             if (constraints.maxWidth >= 760) {
               return Padding(
@@ -354,6 +373,8 @@ class _SavedRouteDetailPanel extends StatelessWidget {
     required this.repository,
     this.displayRank,
     this.evaluated = RouteEvaluatedNumbers.empty,
+    this.scheduleId,
+    this.departedAlready = false,
   });
 
   final SavedRouteSummary summary;
@@ -371,6 +392,12 @@ class _SavedRouteDetailPanel extends StatelessWidget {
 
   /// 목록에서 쓴 것과 같은 평가 결과. 없을 때만 경로 API 원본을 쓴다.
   final RouteEvaluatedNumbers evaluated;
+
+  /// 이동 안내에서 출발을 알릴 일정.
+  final String? scheduleId;
+
+  /// 서버에 이미 출발이 기록됐는지.
+  final bool departedAlready;
 
   /// 목록 카드와 같은 숫자를 보여준다.
   String get _durationLabel =>
@@ -410,7 +437,7 @@ class _SavedRouteDetailPanel extends StatelessWidget {
             _SavedRouteSegmentTile(segment: segment, evaluated: evaluated),
         const SizedBox(height: 12),
         PrimaryButton(
-          '이동 안내 시작',
+          departedAlready ? '이동 안내 이어보기' : '이동 안내 시작',
           onPressed: () => openPage(
             context,
             MovingScreen(
@@ -418,6 +445,8 @@ class _SavedRouteDetailPanel extends StatelessWidget {
               route: route,
               segments: detail.segments,
               evaluated: evaluated,
+              scheduleId: scheduleId,
+              departedAlready: departedAlready,
             ),
           ),
         ),
@@ -1197,12 +1226,18 @@ class _RouteMapDetail extends StatelessWidget {
     required this.repository,
     required this.departureLabel,
     required this.destinationLabel,
+    this.scheduleId,
+    this.departedAlready = false,
   });
 
   final RouteOption route;
   final DdubiRepository repository;
   final String departureLabel;
   final String destinationLabel;
+
+  /// 이동 안내에서 출발을 알릴 일정. 경로 검색 결과에는 없다.
+  final String? scheduleId;
+  final bool departedAlready;
 
   @override
   Widget build(BuildContext context) => InfoCard(
@@ -1239,10 +1274,15 @@ class _RouteMapDetail extends StatelessWidget {
           ),
         ),
         PrimaryButton(
-          '이동 안내 시작',
+          departedAlready ? '이동 안내 이어보기' : '이동 안내 시작',
           onPressed: () => openPage(
             context,
-            MovingScreen(repository: repository, route: route),
+            MovingScreen(
+              repository: repository,
+              route: route,
+              scheduleId: scheduleId,
+              departedAlready: departedAlready,
+            ),
           ),
         ),
       ],

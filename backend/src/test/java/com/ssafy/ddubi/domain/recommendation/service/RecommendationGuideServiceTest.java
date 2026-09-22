@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.ddubi.domain.recommendation.client.GmsRecommendationGuideClient;
 import com.ssafy.ddubi.domain.recommendation.client.RecommendationGuideProperties;
 import com.ssafy.ddubi.domain.recommendation.evaluation.ScheduleEvaluationV2;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -119,6 +121,8 @@ class RecommendationGuideServiceTest {
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(values);
         when(values.get(anyString())).thenReturn(null);
+        // 이 계산 번호는 처음 묻는다.
+        when(values.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
         var properties =
                 new RecommendationGuideProperties(
                         true,
@@ -126,8 +130,7 @@ class RecommendationGuideServiceTest {
                         "/api.openai.com/v1/responses",
                         "synthetic",
                         "gpt-5.5-pro",
-                        1000,
-                        200);
+                        1000);
         var service = new RecommendationGuideService(store, gms, properties, redis, json);
 
         var result = service.guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
@@ -192,7 +195,9 @@ class RecommendationGuideServiceTest {
             GmsRecommendationGuideClient gms,
             ValueOperations<String, String> values) {}
 
-    private static Rig rig(ObjectMapper json, ScheduleEvaluationV2 evaluation, long callsToday) {
+    /** {@code alreadyAsked} 가 참이면 이 계산 번호로 이미 GMS 를 부른 뒤다 — 캐시는 비었어도 "물어봤다" 표시만 남은 상태. */
+    private static Rig rig(
+            ObjectMapper json, ScheduleEvaluationV2 evaluation, boolean alreadyAsked) {
         ScheduleEvaluationStore store = mock(ScheduleEvaluationStore.class);
         when(store.latestOutcomeV2(7L, 3L))
                 .thenReturn(new ScheduleEvaluationStore.LatestOutcome(evaluation, false));
@@ -207,7 +212,9 @@ class RecommendationGuideServiceTest {
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(values);
         when(values.get(anyString())).thenReturn(null);
-        when(values.increment(anyString())).thenReturn(callsToday);
+        when(values.setIfAbsent(anyString(), anyString(), any(Duration.class)))
+                .thenReturn(!alreadyAsked);
+        when(values.increment(anyString())).thenReturn(1L);
         var properties =
                 new RecommendationGuideProperties(
                         true,
@@ -215,8 +222,7 @@ class RecommendationGuideServiceTest {
                         "/api.openai.com/v1/responses",
                         "synthetic",
                         "gpt-5.4-nano",
-                        1000,
-                        200);
+                        1000);
         return new Rig(
                 new RecommendationGuideService(store, gms, properties, redis, json), gms, values);
     }
@@ -225,7 +231,7 @@ class RecommendationGuideServiceTest {
     @Test
     void unchangedRecommendationUsesTemplateWithoutCallingGms() throws Exception {
         ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-        var rig = rig(json, unchanged(json, "2026-09-20T23:10:00Z"), 1L);
+        var rig = rig(json, unchanged(json, "2026-09-20T23:10:00Z"), false);
 
         var result = rig.service().guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
 
@@ -235,11 +241,14 @@ class RecommendationGuideServiceTest {
         verify(rig.gms(), never()).generate(any());
     }
 
-    /** 상한을 넘긴 날은 무엇이 바뀌었든 부르지 않는다. 마지막 안전장치다. */
+    /**
+     * 같은 계산 번호에는 캐시가 비어 있어도 다시 묻지 않는다. 시간 초과로 답을 버렸거나 Redis 캐시가 사라진 뒤의 두 번째 조회가 이 모양이다 — 예전에는 그때마다
+     * 또 불렀다.
+     */
     @Test
-    void dailyCallLimitStopsGmsEvenWhenRouteChanged() throws Exception {
+    void sameEvaluationIsNeverAskedTwiceEvenWhenCacheIsGone() throws Exception {
         ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-        var rig = rig(json, changed(json, "2026-09-20T23:10:00Z"), 201L);
+        var rig = rig(json, changed(json, "2026-09-20T23:10:00Z"), true);
 
         var result = rig.service().guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
 
@@ -248,16 +257,36 @@ class RecommendationGuideServiceTest {
         verify(rig.gms(), never()).generate(any());
     }
 
-    /** 상한 안이면 부른다 — 위 검사와 짝을 이뤄 카운터가 실제로 판단에 쓰이는지 고정한다. */
+    /** 처음 묻는 계산이면 부른다. 그리고 "물어봤다" 표시는 부르기 전에 하루짜리로 남긴다 — 답이 안 와도 표시는 남아야 한다. */
     @Test
-    void routeChangeWithinLimitCallsGmsOnce() throws Exception {
+    void firstAskMarksEvaluationBeforeCallingGms() throws Exception {
         ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-        var rig = rig(json, changed(json, "2026-09-20T23:10:00Z"), 200L);
+        var rig = rig(json, changed(json, "2026-09-20T23:10:00Z"), false);
 
         var result = rig.service().guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
 
         assertThat(result.generatedBy()).isEqualTo("GMS:gpt-5.4-nano");
-        verify(rig.gms()).generate(any());
+        var order = inOrder(rig.values(), rig.gms());
+        order.verify(rig.values())
+                .setIfAbsent(
+                        eq("recommendation:guide:asked:7:evaluation-changed"),
+                        anyString(),
+                        eq(RecommendationGuideService.ASKED_TTL));
+        order.verify(rig.gms()).generate(any());
+    }
+
+    /** 표시를 남길 수 없으면(Redis 장애) 부르지 않는다. 표시 없이 부르면 다음 조회가 또 부르고, 그때는 캐시도 없다. */
+    @Test
+    void gmsIsNotCalledWhenAskedMarkerCannotBeStored() throws Exception {
+        ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+        var rig = rig(json, changed(json, "2026-09-20T23:10:00Z"), false);
+        when(rig.values().setIfAbsent(anyString(), anyString(), any(Duration.class)))
+                .thenThrow(new IllegalStateException("redis down"));
+
+        var result = rig.service().guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
+
+        assertThat(result.generatedBy()).isEqualTo("TEMPLATE");
+        verify(rig.gms(), never()).generate(any());
     }
 
     /**
@@ -267,7 +296,7 @@ class RecommendationGuideServiceTest {
     @Test
     void resultIsCachedForAtLeastFiveMinutesEvenNearExpiry() throws Exception {
         ObjectMapper json = new ObjectMapper().findAndRegisterModules();
-        var rig = rig(json, unchanged(json, "2026-09-20T23:01:30Z"), 1L);
+        var rig = rig(json, unchanged(json, "2026-09-20T23:01:30Z"), false);
 
         rig.service().guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
 
@@ -332,8 +361,7 @@ class RecommendationGuideServiceTest {
                         "/api.openai.com/v1/responses",
                         "synthetic",
                         "gpt-5.5-pro",
-                        1000,
-                        200);
+                        1000);
         var service = new RecommendationGuideService(store, gms, properties, redis, json);
 
         var result = service.guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
@@ -386,8 +414,7 @@ class RecommendationGuideServiceTest {
                         "/api.openai.com/v1/responses",
                         "synthetic",
                         "gpt-5.5-pro",
-                        1000,
-                        200);
+                        1000);
         var service = new RecommendationGuideService(store, gms, properties, redis, json);
 
         // 유효기간(23:10Z)이 한참 지난 시각에 물어도 거절하지 않는다.

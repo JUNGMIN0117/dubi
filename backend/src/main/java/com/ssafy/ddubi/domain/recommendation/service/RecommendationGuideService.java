@@ -34,8 +34,10 @@ import org.springframework.stereotype.Service;
  *
  * <ul>
  *   <li>바뀐 것이 있을 때만 부른다 — 경로가 달라졌거나 출발시각이 달라졌거나 지연 원인이 있을 때. "그대로 유지" 는 서버 문장으로 충분하다.
- *   <li>같은 계산 번호에는 한 번만 부른다 — 이미 만드는 중이면 기다리지 않고 서버 문장을 준다.
- *   <li>하루 호출 상한을 둔다 — 넘으면 그날은 서버 문장만 쓴다.
+ *   <li>같은 계산 번호에는 한 번만 부른다 — 부르기 <b>전에</b> Redis 에 "물어봤다" 표시를 하루 남긴다. 시간 초과로 답을 못 받았든, 캐시가 사라졌든,
+ *       서버가 다시 떴든 같은 계산에 다시 묻지 않는다. 지금 만드는 중이면(같은 서버 안) 기다리지 않고 서버 문장을 준다.
+ *   <li>하루 상한은 두지 않는다 — GMS 크레딧은 다른 기능도 함께 쓰므로 여기서 숫자로 막으면 정상 안내까지 끊긴다. 대신 위 두 규칙으로 새는 길 자체를 막고, 오늘
+ *       호출 수는 Redis 카운터로만 센다(사람이 볼 용도).
  *   <li>결과는 실패든 성공이든 최소 5 분은 캐시한다 — 만료가 임박했다고 캐시를 건너뛰면 다음 조회가 또 부른다.
  * </ul>
  */
@@ -44,6 +46,11 @@ public class RecommendationGuideService {
     private static final Logger log = LoggerFactory.getLogger(RecommendationGuideService.class);
     private static final String CACHE_PREFIX = "recommendation:guide:";
     private static final String CALLS_PREFIX = CACHE_PREFIX + "gms-calls:";
+    private static final String ASKED_PREFIX = CACHE_PREFIX + "asked:";
+
+    /** "이 계산 번호는 이미 물어봤다" 표시를 남기는 시간. 계산 번호는 재계산마다 새로 생기니 하루면 충분히 길다. */
+    static final Duration ASKED_TTL = Duration.ofDays(1);
+
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     /** 지금 GMS 문장을 만드는 중인 캐시 키. 같은 계산에 두 요청이 겹치면 뒤의 것은 부르지 않는다. */
@@ -85,6 +92,7 @@ public class RecommendationGuideService {
                 && (evaluation.validUntil() == null || !evaluation.validUntil().isAfter(now)))
             throw new BusinessException(ErrorCode.STALE_RECOMMENDATION);
         String cacheKey = CACHE_PREFIX + scheduleId + ":" + evaluation.evaluationId();
+        String askedKey = ASKED_PREFIX + scheduleId + ":" + evaluation.evaluationId();
         RecommendationGuideResponse cached = cached(cacheKey);
         if (cached != null) return cached;
 
@@ -124,7 +132,7 @@ public class RecommendationGuideService {
         try {
             if (worthAsking(change, delay)
                     && (owner = generating.add(cacheKey))
-                    && withinDailyBudget(now)) generated = gms.generate(facts).orElse(null);
+                    && firstAsk(askedKey, now)) generated = gms.generate(facts).orElse(null);
         } finally {
             if (owner) generating.remove(cacheKey);
         }
@@ -177,25 +185,31 @@ public class RecommendationGuideService {
     }
 
     /**
-     * 오늘(KST) GMS 호출 수를 하나 올리고 상한 안인지 본다. 카운터는 Redis 에 두어 서버가 다시 떠도 이어진다.
+     * 이 계산 번호로 GMS 를 처음 부르는지 확인하고, 처음이면 "물어봤다" 표시를 <b>먼저</b> 남긴다. 표시가 이미 있으면 부르지 않는다.
      *
-     * <p>Redis 를 읽지 못하면 부른다. 카운터 장애로 안내 품질을 떨어뜨리지 않되, 상한을 넘긴 순간은 로그로 남겨 사람이 알 수 있게 한다.
+     * <p>표시를 남기지 못하면(Redis 장애·응답 없음) 부르지 않는다. 표시 없이 부르면 다음 조회가 또 부를 수 있고, Redis 가 죽었으면 캐시도 없어 조회마다
+     * 새 호출이 된다 — 바로 그 길이 2026-09-22 사고의 모양이다. 그 순간은 서버 문장으로 답하고 로그만 남긴다.
      */
-    private boolean withinDailyBudget(Instant now) {
+    private boolean firstAsk(String askedKey, Instant now) {
+        try {
+            Boolean first = redis.opsForValue().setIfAbsent(askedKey, now.toString(), ASKED_TTL);
+            if (!Boolean.TRUE.equals(first)) return false;
+            countCall(now);
+            return true;
+        } catch (Exception e) {
+            log.warn("GMS 호출 표시를 남기지 못해 이번에는 부르지 않는다: {}", e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /** 오늘(KST) 실제로 나간 GMS 호출 수. 막는 데 쓰지 않고, 사람이 크레딧 흐름을 확인할 때만 본다. */
+    private void countCall(Instant now) {
         try {
             String key = CALLS_PREFIX + LocalDateTime.ofInstant(now, KST).toLocalDate();
             Long calls = redis.opsForValue().increment(key);
-            if (calls == null) return true;
-            if (calls == 1) redis.expire(key, Duration.ofDays(2));
-            if (calls > properties.dailyCallLimit()) {
-                if (calls == properties.dailyCallLimit() + 1)
-                    log.warn(
-                            "GMS 일일 호출 상한 도달: {}회. 오늘은 서버 기본 문장만 쓴다.", properties.dailyCallLimit());
-                return false;
-            }
-            return true;
+            if (calls != null && calls == 1) redis.expire(key, Duration.ofDays(2));
         } catch (Exception ignored) {
-            return true;
+            // 카운터는 참고용이다. 실패해도 안내를 막지 않는다.
         }
     }
 

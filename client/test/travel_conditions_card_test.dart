@@ -82,9 +82,7 @@ void main() {
     await pumpCard(
       tester,
       service: _StubService(
-        const TravelConditions(
-          weather: TravelConditionItem.value('20.9℃'),
-        ),
+        const TravelConditions(weather: TravelConditionItem.value('20.9℃')),
       ),
     );
 

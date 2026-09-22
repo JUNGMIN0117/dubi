@@ -249,8 +249,7 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
   /// 유형별 색. 바꾸라는 제안은 눈에 띄게, 유지는 차분하게.
   static (Color, Color) _changeColors(String changeType) =>
       switch (changeType) {
-        'ROUTE_CHANGED' ||
-        'DEPARTURE_TIME_CHANGED' => (
+        'ROUTE_CHANGED' || 'DEPARTURE_TIME_CHANGED' => (
           const Color(0xFFFFF3E6),
           const Color(0xFFB45309),
         ),

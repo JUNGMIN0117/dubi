@@ -80,7 +80,9 @@ class TravelConditionItem {
           : TravelConditionItem.value(value);
     }
     if (value is! Map) return const TravelConditionItem.unavailable();
-    if (value['available'] == false) return const TravelConditionItem.unavailable();
+    if (value['available'] == false) {
+      return const TravelConditionItem.unavailable();
+    }
     final text = value['text'] ?? value['summary'] ?? value['label'];
     if (text is! String || text.isEmpty) {
       return const TravelConditionItem.unavailable();

@@ -85,9 +85,8 @@ Dio _dio(List<_Reply> replies) {
 
 void main() {
   setUpAll(() async {
-    _fixtureRaw = await File(
-      'test/fixtures/schedule_evaluation_keep.json',
-    ).readAsString();
+    _fixtureRaw = await File('test/fixtures/schedule_evaluation_keep.json')
+        .readAsString();
   });
 
   Future<ValueNotifier<ScheduleEvaluationV2?>> pumpCard(

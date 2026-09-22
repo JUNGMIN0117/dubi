@@ -141,9 +141,12 @@ sh submit.sh batch/export_bus_road_mapping.py \
 ```
 
 `edges/`는 노선 순번별 링크 배열과 검증 근거, `mappings/`는 고유 segmentId별 안전한 링크
-배열을 Parquet으로 저장한다. 같은 `mappings` DataFrame을 Redis versioned Hash에도 JSON으로
+배열을 Parquet으로 저장한다. `review-table/`에는 구간별 LINK_ID·상태·근거·적용기간을
+사람이 확인할 수 있는 CSV로 저장한다. 같은 `mappings` DataFrame을 Redis versioned Hash에도 JSON으로
 기록한다. 동일 segmentId가 서로 다른 도로 경로를 가지거나 일부 occurrence만 매핑되면 링크를
-확정하지 않고 `AMBIGUOUS` 또는 `PARTIAL`로 남긴다. HDFS 쓰기 실패는 Redis 배포를 막지 않는다.
+확정하지 않고 `AMBIGUOUS` 또는 `PARTIAL`로 남긴다. 출력 경로를 지정하면 확인표 저장
+실패 시 Redis 활성화도 중단한다. 새 사고의 구간별 특성 자동 갱신은
+`docs/runbooks/incident-segment-activation.md`를 따른다.
 
 City Silver 도로 좌표가 HDFS에 쌓인 뒤 버스 구간→도시 영역 대응표를 배포한다. 도시데이터는
 서울 전체가 아니라 주요 장소만 제공하므로 먼 구간은 `OUT_OF_COVERAGE`로 보존한다.

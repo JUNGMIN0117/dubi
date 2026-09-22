@@ -55,8 +55,12 @@ python backend/tools/road-impact/verify_link_api.py \
 
 동일한 segment mapping DataFrame을 사용한다.
 
-- HDFS: `edges/`, `mappings/` Parquet과 품질 집계, 완료 표식
+- HDFS: `edges/`, `mappings/` Parquet, 사람 검토용 `review-table/` CSV, 품질 집계, 완료 표식
 - Redis: `ml:mapping:bus-road:*` Hash의 field=`segmentId`, value=JSON
 
 Redis는 staging Hash의 행 수와 segmentId 유일성을 확인한 뒤 Lua에서 최종 Hash와 active 포인터를
-한 번에 바꾼다. 실패하면 이전 active 포인터가 유지된다. HDFS 저장 실패와 Redis 저장은 분리한다.
+한 번에 바꾼다. 실패하면 이전 active 포인터가 유지된다. Redis만 필요한 경우 `--output`을 생략한다.
+`--output`을 지정한 실행에서는 CSV 확인표까지 저장되어야 Redis 활성화로 진행한다.
+확인표에는 구간 ID, 상태, 사유, 모든 LINK_ID, occurrence 연결률, 방향 경로 근거 및 적용기간을 담는다.
+현재 저장소에는 승인된 도로 crosswalk와 OA-13310 링크 마스터가 없으므로 실제 최종 확인표를
+생성하거나 운영 Redis 매핑을 활성화할 수 없다. 감사 후보를 운영값으로 복사하지 않는다.

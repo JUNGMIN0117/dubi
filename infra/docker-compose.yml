@@ -354,6 +354,30 @@ services:
       retries: 10
       start_period: 60s
 
+  # 새 전체 돌발 스냅샷을 15초 간격으로 확인하고 해당 버스 구간 CURRENT 특성을 갱신한다.
+  ml-incident-feature-refresh:
+    <<: *common
+    build:
+      context: ../ml-serving
+      dockerfile: Dockerfile
+    image: ddubi/ml-serving:${APP_VERSION:-0.1.0}
+    container_name: ml-incident-feature-refresh
+    profiles: ["road-silver"]
+    mem_limit: 512m
+    command: ["python", "incident_feature_refresh.py"]
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      ML_BUS_CROSSWALK_SHA256: ${ML_BUS_CROSSWALK_SHA256:-8014da5e1453d426789fa396622a0f0e4069ac484db76860348af517adc1f246}
+      ML_INCIDENT_MASTER_VERSION: ${ML_INCIDENT_MASTER_VERSION:-METRO-BUS-20260917-SEOUL-0902}
+      ML_INCIDENT_REFRESH_POLL_SECONDS: ${ML_INCIDENT_REFRESH_POLL_SECONDS:-15}
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
   backend:
     <<: *common
     build:

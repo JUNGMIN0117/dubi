@@ -49,6 +49,15 @@ keys:
       링크는 온라인 버스 특성의 확인된 사건으로 세지 않는다. 각 구간 조립 시 validUntil과
       링크 마스터 버전을 다시 검사한다.
 
+  incidentFeatureRefreshLast:
+    pattern: "ml:incident-feature-refresh:last:{masterVersion}"
+    type: string
+    ttlSeconds: 86400
+    owner: ml-serving
+    description: >-
+      마지막으로 처리한 전체 돌발 스냅샷 SHA, 활성 도로 대응표, 이전에 영향받은 링크·구간 목록.
+      새 회차에서 사고가 사라질 때 이전 구간을 다시 계산해 특성을 지운다.
+
   busWeatherMapping:
     pattern: "ml:mapping:bus-weather:{mappingVersion}:{masterVersion}:{gridConfigSha256}"
     type: hash

@@ -664,6 +664,7 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
     try {
       await controller.clearRouteLines();
       var index = 0;
+      var drawn = 0;
       // 좌표가 없는 구간(대개 도보)은 앞뒤를 잇는 직선으로 채워 선이 끊기지 않게 한다.
       for (final line in routeMapLines(widget.routeMap)) {
         if (line.points.length < 2) {
@@ -688,7 +689,9 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
           width: line.mode == 'WALK' ? 5 : 7,
         );
         index++;
+        drawn++;
       }
+      AppLog.debug('Saved route lines drawn: $drawn');
     } on Object catch (error) {
       // 선을 못 그려도 지도와 마커는 쓸 수 있다. 화면 전체를 실패로 만들지 않는다.
       AppLog.debug('Saved route line drawing failed: $error');

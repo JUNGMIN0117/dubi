@@ -31,6 +31,7 @@ import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.kakao.vectormap.route.RouteLineStyles
+import com.kakao.vectormap.route.RouteLineStylesSet
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
@@ -398,30 +399,62 @@ class KakaoMapController(
                 )
             }
             if (points.size < 2) {
+                Log.i("KakaoMapController", "addRouteLine skipped: id=$id points=${points.size}")
                 result.success(false)
                 return
             }
 
-            val layer = routeLineLayer ?: kMap.routeLineManager?.addLayer()
+            val manager = kMap.routeLineManager
+            if (manager == null) {
+                Log.e("KakaoMapController", "addRouteLine: routeLineManager is null")
+                result.error(
+                    "ROUTE_LINE_MANAGER_UNAVAILABLE",
+                    "RouteLineManager 를 쓸 수 없습니다.",
+                    null,
+                )
+                return
+            }
+
+            // 스타일은 지도에 먼저 등록해야 한다. 등록하지 않고 선만 넣으면 지도가 스타일을
+            // 찾지 못해 아무것도 그려지지 않는다(2026-09-22 실기기에서 확인).
+            // 색은 Flutter 가 정해서 넘긴다 — 지도 쪽에서 정하면 앱 테마와 어긋난다.
+            val style = RouteLineStyle.from(
+                args.optDouble("width", 8.0).toFloat(),
+                args.optLong("color", 0xFF00A99DL).toInt(),
+                args.optDouble("strokeWidth", 2.0).toFloat(),
+                args.optLong("strokeColor", 0xFFFFFFFFL).toInt(),
+            )
+            val stylesSetId = "ddubi-$id"
+            val stylesSet = manager.addStylesSet(
+                RouteLineStylesSet.from(stylesSetId, RouteLineStyles.from(style))
+            ) ?: RouteLineStylesSet.from(stylesSetId, RouteLineStyles.from(style))
+
+            val layer = routeLineLayer ?: manager.layer ?: manager.addLayer()
             if (layer == null) {
-                result.error("ROUTE_LINE_LAYER_UNAVAILABLE", "RouteLineLayer 를 만들 수 없습니다.", null)
+                Log.e("KakaoMapController", "addRouteLine: RouteLineLayer is null")
+                result.error(
+                    "ROUTE_LINE_LAYER_UNAVAILABLE",
+                    "RouteLineLayer 를 만들 수 없습니다.",
+                    null,
+                )
                 return
             }
             routeLineLayer = layer
 
-            // 색은 Flutter 가 정해서 넘긴다. 지도 쪽에서 색을 정하면 앱 테마와 어긋난다.
-            val style = RouteLineStyle.from(
-                args.optDouble("width", 8.0).toFloat(),
-                args.optLong("color", 0xFF00A99D).toInt(),
-                args.optDouble("strokeWidth", 2.0).toFloat(),
-                args.optLong("strokeColor", 0xFFFFFFFF).toInt(),
-            )
-            val segment = RouteLineSegment.from(points, RouteLineStyles.from(style))
+            val segment = RouteLineSegment.from(points, stylesSet.getStyles(0))
             val options = RouteLineOptions.from(id, segment)
+                .setStylesSet(stylesSet)
                 .setZOrder(args.optInt("zOrder", 0))
 
             routeLines.remove(id)?.let { layer.remove(it) }
-            layer.addRouteLine(options)?.let { routeLines[id] = it }
+            val line = layer.addRouteLine(options)
+            if (line == null) {
+                Log.e("KakaoMapController", "addRouteLine returned null: id=$id")
+                result.success(false)
+                return
+            }
+            routeLines[id] = line
+            Log.i("KakaoMapController", "addRouteLine ok: id=$id points=${points.size}")
             result.success(true)
         } catch (e: Exception) {
             Log.e("KakaoMapController", "addRouteLine failed", e)

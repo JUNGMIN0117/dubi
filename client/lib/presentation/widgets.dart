@@ -7,7 +7,9 @@ import '../domain/models.dart';
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton(this.label, {super.key, required this.onPressed});
   final String label;
-  final VoidCallback onPressed;
+
+  /// null 이면 버튼이 눌리지 않는다. 처리 중인 동안 같은 요청을 두 번 보내지 않게 막을 때 쓴다.
+  final VoidCallback? onPressed;
   @override
   Widget build(BuildContext c) => SizedBox(
     width: double.infinity,

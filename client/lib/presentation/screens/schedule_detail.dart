@@ -9,6 +9,7 @@ import '../../services/app_api.dart';
 import '../../services/recommendation_api.dart';
 import '../widgets.dart';
 import '../departure_headline.dart';
+import '../arrival_flow.dart';
 import '../recommendation_guide_card.dart';
 import '../schedule_evaluation_card.dart';
 import '../../domain/schedule_evaluation.dart';
@@ -30,6 +31,7 @@ class ScheduleDetailScreen extends StatelessWidget {
     this.recommendationApi,
     required this.scheduleId,
     required this.arrivalApi,
+    required this.userApi,
     this.initialSchedule,
     this.initialRoutes,
   });
@@ -38,6 +40,10 @@ class ScheduleDetailScreen extends StatelessWidget {
   final RecommendationApi? recommendationApi;
   final String scheduleId;
   final ArrivalApi arrivalApi;
+
+  /// 이동 기록 저장 동의를 켜는 데만 쓴다. 계정 동의가 꺼져 있으면 서버가 도착 시각을 버려서
+  /// 판정이 나오지 않기 때문에, 도착 시각을 남기기로 한 경우에만 함께 켠다.
+  final UserApi userApi;
   final Schedule? initialSchedule;
   final List<RouteOption>? initialRoutes;
 
@@ -608,6 +614,8 @@ class ScheduleDetailScreen extends StatelessWidget {
         destinationLabel: savedRoute.toName ?? schedule.place,
         displayRank: displayRank,
         evaluated: evaluated,
+        scheduleId: schedule.id,
+        departedAlready: schedule.hasDeparted,
       ),
     );
   }
@@ -626,36 +634,17 @@ class ScheduleDetailScreen extends StatelessWidget {
         ScheduleCommandFailureKind.unknown => '일정을 취소하지 못했어요. 잠시 후 다시 시도해주세요.',
       };
 
+  /// 도착 보고. 확인 창과 서버 호출은 [recordArrivalWithConsent] 한 곳에 있다 —
+  /// 이동 안내의 "도착했어요" 와 같은 흐름을 쓰기 위해서다.
   Future<void> _recordArrival(BuildContext context, Schedule schedule) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('도착을 완료할까요?'),
-        content: const Text('위치 정보 없이 일정만 완료하고 이동 기록을 남깁니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('완료'),
-          ),
-        ],
-      ),
+    final record = await recordArrivalWithConsent(
+      context,
+      scheduleId: schedule.id,
+      arrivalApi: arrivalApi,
+      userApi: userApi,
     );
-    if (confirmed != true) return;
-    try {
-      await arrivalApi.record(schedule.id);
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('도착 기록을 저장했어요.')));
-      context.go('/schedules');
-    } on Object {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('도착 기록을 저장하지 못했어요.')));
-    }
+    if (record == null || !context.mounted) return;
+    context.go('/schedules');
   }
 }
 

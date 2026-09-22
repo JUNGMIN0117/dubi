@@ -883,3 +883,72 @@ class _PlaceSearchDialogState extends State<_PlaceSearchDialog> {
     );
   }
 }
+
+/// 출발을 알렸고 아직 도착 전인 일정 표시.
+///
+/// 일정의 상태(status)는 도착을 기록해야 "완료" 가 되고, 그 전까지는 계속 "예정" 이다. 그래서
+/// 출발했어요 를 눌러도 홈에서는 아무것도 달라지지 않았다(2026-09-22 제보). 출발 사실은 서버가
+/// 따로 기록하므로(actualDepartAt) 그 값으로 이 구간을 보여준다.
+class MovingBadge extends StatelessWidget {
+  const MovingBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('scheduleMovingBadge'),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: const Color(0xFFE4F1FF),
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: const Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.directions_walk_rounded, size: 12, color: Color(0xFF1D5FBF)),
+        SizedBox(width: 3),
+        Text(
+          '이동 중',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF1D5FBF),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 홈 결론 카드 위에 붙는 "어느 일정의 결론인가" 한 줄.
+///
+/// 홈은 가장 가까운 일정 하나의 결론만 보여준다. 일정이 여럿이면 어느 것 이야기인지 이름이 있어야
+/// 헷갈리지 않는다(2026-09-22 제보).
+class HeadlineScheduleLabel extends StatelessWidget {
+  const HeadlineScheduleLabel({super.key, required this.schedule});
+
+  final Schedule schedule;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    key: const Key('homeHeadlineSchedule'),
+    children: [
+      const Icon(Icons.event_note_rounded, size: 14, color: Color(0xFF5C6B7F)),
+      const SizedBox(width: 5),
+      Expanded(
+        child: Text(
+          '다음 일정 · ${schedule.title} · ${schedule.time} 도착',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF5C6B7F),
+          ),
+        ),
+      ),
+      if (schedule.hasDeparted) ...[
+        const SizedBox(width: 6),
+        const MovingBadge(),
+      ],
+    ],
+  );
+}

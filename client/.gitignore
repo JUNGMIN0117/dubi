@@ -54,3 +54,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# 저장소에 들여온 외부 패키지 사본의 잠금 파일. path 의존이라 앱의 잠금 파일이
+# 기준이 되고 이 파일은 쓰이지 않는다. flutter 명령을 그 폴더에서 돌리면 생긴다.
+packages/*/pubspec.lock

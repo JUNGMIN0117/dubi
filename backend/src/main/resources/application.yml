@@ -131,6 +131,14 @@ ddubi:
   schedule:
     # 반복 일정 인스턴스 선생성 지평선. 연장은 Phase 4 일일 잡이 맡는다.
     repeat-horizon-days: 14
+    # 도착 확인 없이 지난 일정을 닫는 잡. 끄면 스케줄러 빈 자체가 만들어지지 않는다.
+    expiry-enabled: ${DDUBI_SCHEDULE_EXPIRY_ENABLED:true}
+    # 유예 시간이 시간 단위라 몇 분 늦게 닫혀도 사용자가 보는 것은 같다.
+    expiry-delay-ms: 300000
+    # 도착 예정 시각이 이만큼 지나야 닫는다. 늦게 도착한 사람이 뒤늦게 도착을 누를 여지를 남긴다.
+    expiry-grace: 6h
+    # 한 바퀴에 닫을 최대 건수. 오래 방치된 서버에서 한 트랜잭션이 DB 를 오래 잡지 않게 한다.
+    expiry-batch-size: 200
   notification:
     # 같은 suppress_key 재발송 차단 시간. 상황이 실제로 바뀌면 키가 달라지므로
     # 이 값이 길어도 새 정보는 막히지 않는다.

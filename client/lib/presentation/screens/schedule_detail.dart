@@ -729,11 +729,17 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
 
   void _onEvaluation() {
     final value = widget.headline.value;
-    if (value != null && mounted && !_sameEstimates(value.candidateEstimates)) {
-      setState(() {
-        _estimates = value.candidateEstimates;
-        _evaluation = value;
-      });
+    if (value != null && mounted) {
+      // 후보의 경로·소요시간·제안 여부가 같아도 평가 자체는 바뀔 수 있다. 구간별 시간
+      // 출처, 실시간 원인, 계산 시각 같은 것들이다. 예전에는 후보가 같으면 평가 객체를
+      // 통째로 안 바꿔서 상세 카드와 지도에 낡은 구간 정보가 남았다(BE 지적, 2026-09-22).
+      final estimatesChanged = !_sameEstimates(value.candidateEstimates);
+      if (estimatesChanged || _isNewEvaluation(value)) {
+        setState(() {
+          _estimates = value.candidateEstimates;
+          _evaluation = value;
+        });
+      }
     }
     final computedAt = widget.headline.value?.computedAt;
     if (computedAt == null) return;
@@ -745,6 +751,16 @@ class _LiveSavedRouteListState extends State<_LiveSavedRouteList> {
       return;
     }
     _reload();
+  }
+
+  /// 들고 있는 것과 다른 계산인가. 계산 id 가 우선이고, 없으면 계산 시각으로 본다.
+  bool _isNewEvaluation(ScheduleEvaluationV2 next) {
+    final current = _evaluation;
+    if (current == null) return true;
+    if (next.evaluationId != null || current.evaluationId != null) {
+      return next.evaluationId != current.evaluationId;
+    }
+    return next.computedAt != current.computedAt;
   }
 
   bool _sameEstimates(List<EvaluationCandidateEstimate> next) {

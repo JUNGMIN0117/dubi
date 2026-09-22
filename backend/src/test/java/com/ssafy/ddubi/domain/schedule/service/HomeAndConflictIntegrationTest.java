@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ssafy.ddubi.domain.schedule.dto.request.LocationRequest;
 import com.ssafy.ddubi.domain.schedule.dto.request.ScheduleCreateRequest;
 import com.ssafy.ddubi.domain.schedule.dto.response.HomeResponse;
+import com.ssafy.ddubi.domain.schedule.entity.Schedule;
 import com.ssafy.ddubi.domain.schedule.repository.ScheduleRepository;
 import com.ssafy.ddubi.domain.user.entity.User;
 import com.ssafy.ddubi.domain.user.repository.UserRepository;
@@ -138,8 +139,16 @@ class HomeAndConflictIntegrationTest extends IntegrationTestSupport {
         Long done = schedule("끝난 회의", GANGNAM, GANGNAM, base);
         Long canceled = schedule("접은 약속", GANGNAM, GANGNAM, base.plusHours(1));
         schedule("남은 일정", GANGNAM, GANGNAM, base.plusHours(2));
-        scheduleRepository.findById(done).orElseThrow().markDone();
-        scheduleRepository.findById(canceled).orElseThrow().cancel();
+        // 이 검사는 트랜잭션 안에서 돌지 않는다(@SpringBootTest 만 있고 @Transactional 이 없다).
+        // findById 로 꺼낸 일정은 영속 상태가 아니라서, 상태만 바꾸고 flush 해도 DB 에 남지
+        // 않는다. 그래서 취소한 일정이 그대로 조회돼 이 검사가 깨졌다. 저장까지 해야 한다.
+        Schedule doneSchedule = scheduleRepository.findById(done).orElseThrow();
+        doneSchedule.markDone();
+        scheduleRepository.save(doneSchedule);
+
+        Schedule canceledSchedule = scheduleRepository.findById(canceled).orElseThrow();
+        canceledSchedule.cancel();
+        scheduleRepository.save(canceledSchedule);
         scheduleRepository.flush();
 
         HomeResponse home = homeService.summary(userId, base.minusHours(1));

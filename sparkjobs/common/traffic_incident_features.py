@@ -37,8 +37,12 @@ def build_incident_snapshot(event, master, stale_seconds=2700, extractor=None, d
         if not isinstance(raw, dict):
             return None
         normalized = normalize_incident(
-            {"eventId": event.get("eventId"), "source": event.get("source"), "collectedAt": observed_at,
-             "payload": {"raw": raw, "providerLinkNamespace": LINK_NAMESPACE}},
+            {
+                "eventId": event.get("eventId"),
+                "source": event.get("source"),
+                "collectedAt": observed_at,
+                "payload": {"raw": raw, "providerLinkNamespace": LINK_NAMESPACE},
+            },
             master,
             stale_seconds=stale_seconds,
             direct_tolerance_meters=direct_tolerance,
@@ -53,10 +57,14 @@ def build_incident_snapshot(event, master, stale_seconds=2700, extractor=None, d
             rejected_count += 1
     enriched = enrich_rows(latest.values(), extractor)
     verified = [
-        {"providerIncidentId": row["providerIncidentId"], "matchedLinkId": row["matchedLinkId"],
-         "startedAt": row["startedAt"], "expectedClearAt": row["expectedClearAt"],
-         "locationMatchType": row["locationMatchType"],
-         "textFeatures": {k: v for k, v in row.items() if k.startswith("ai")}}
+        {
+            "providerIncidentId": row["providerIncidentId"],
+            "matchedLinkId": row["matchedLinkId"],
+            "startedAt": row["startedAt"],
+            "expectedClearAt": row["expectedClearAt"],
+            "locationMatchType": row["locationMatchType"],
+            "textFeatures": {k: v for k, v in row.items() if k.startswith("ai")},
+        }
         for row in enriched
         if row.get("matchedLinkId") and row.get("startedAt")
     ]

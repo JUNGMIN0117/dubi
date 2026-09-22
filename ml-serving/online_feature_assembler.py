@@ -364,7 +364,8 @@ class OnlineFeatureAssembler:
                 and incident.get("linkMasterAvailable") is True
                 and incident.get("linkNamespace") == "SEOUL_ACCINFO_LINK"
                 and incident.get("linkMasterVersion") == road.get("trafficLinkMasterVersion")
-                and observed is not None and observed <= as_of < expires
+                and observed is not None
+                and observed <= as_of < expires
                 and passage_at < expires
                 and isinstance(incident.get("incidents"), list)
                 and isinstance(road.get("topisLinkIds"), list)
@@ -387,8 +388,7 @@ class OnlineFeatureAssembler:
                 features["incidentUnmatchedCount"] = _integer(incident.get("unmatchedIncidentCount"), 0)
                 features["incidentDataAvailable"] = True
                 features["incidentMinAgeMinutes"] = (
-                    min((as_of - started).total_seconds() for started in matched.values()) / 60
-                    if matched else None
+                    min((as_of - started).total_seconds() for started in matched.values()) / 60 if matched else None
                 )
                 features["incidentSnapshotAgeMinutes"] = (as_of - observed).total_seconds() / 60
                 valid_until_values.append(expires)

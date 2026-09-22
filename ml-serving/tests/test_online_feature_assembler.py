@@ -343,19 +343,25 @@ def test_verified_incidents_join_only_resolved_links_and_deduplicate():
     road = json.loads(client.hashes[road_key][SEGMENT])
     road["trafficLinkMasterVersion"] = "link-v1"
     client.hashes[road_key][SEGMENT] = json.dumps(road)
-    client.strings["traffic:latest:incident-snapshot:all-current"] = json.dumps({
-        "snapshotVersion": "traffic-incident-snapshot-v1", "eventId": "poll-1",
-        "collectedAt": "2026-09-18T09:58:00+09:00", "validUntil": "2026-09-18T10:28:00+09:00",
-        "completeSnapshot": True, "linkMasterAvailable": True,
-        "linkNamespace": "SEOUL_ACCINFO_LINK", "linkMasterVersion": "link-v1",
-        "unmatchedIncidentCount": 2,
-        "incidents": [
-            {"providerIncidentId": "A", "matchedLinkId": "L1", "startedAt": "2026-09-18T09:50:00+09:00"},
-            {"providerIncidentId": "A", "matchedLinkId": "L2", "startedAt": "2026-09-18T09:50:00+09:00"},
-            {"providerIncidentId": "B", "matchedLinkId": "OTHER", "startedAt": "2026-09-18T09:40:00+09:00"},
-            {"providerIncidentId": "FUTURE", "matchedLinkId": "L1", "startedAt": "2026-09-18T10:01:00+09:00"},
-        ],
-    })
+    client.strings["traffic:latest:incident-snapshot:all-current"] = json.dumps(
+        {
+            "snapshotVersion": "traffic-incident-snapshot-v1",
+            "eventId": "poll-1",
+            "collectedAt": "2026-09-18T09:58:00+09:00",
+            "validUntil": "2026-09-18T10:28:00+09:00",
+            "completeSnapshot": True,
+            "linkMasterAvailable": True,
+            "linkNamespace": "SEOUL_ACCINFO_LINK",
+            "linkMasterVersion": "link-v1",
+            "unmatchedIncidentCount": 2,
+            "incidents": [
+                {"providerIncidentId": "A", "matchedLinkId": "L1", "startedAt": "2026-09-18T09:50:00+09:00"},
+                {"providerIncidentId": "A", "matchedLinkId": "L2", "startedAt": "2026-09-18T09:50:00+09:00"},
+                {"providerIncidentId": "B", "matchedLinkId": "OTHER", "startedAt": "2026-09-18T09:40:00+09:00"},
+                {"providerIncidentId": "FUTURE", "matchedLinkId": "L1", "startedAt": "2026-09-18T10:01:00+09:00"},
+            ],
+        }
+    )
     result = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
     assert result["features"]["verifiedIncidentCount"] == 1
     assert result["features"]["incidentUnmatchedCount"] == 2
@@ -372,16 +378,25 @@ def test_incident_snapshot_requires_valid_master_and_live_complete_poll():
     client.hashes[road_key][SEGMENT] = json.dumps(road)
     key = "traffic:latest:incident-snapshot:all-current"
     base = {
-        "snapshotVersion": "traffic-incident-snapshot-v1", "collectedAt": "2026-09-18T09:58:00+09:00",
-        "validUntil": "2026-09-18T10:28:00+09:00", "completeSnapshot": True,
-        "linkMasterAvailable": True, "linkNamespace": "SEOUL_ACCINFO_LINK",
-        "linkMasterVersion": "link-v1", "unmatchedIncidentCount": 0, "incidents": [],
+        "snapshotVersion": "traffic-incident-snapshot-v1",
+        "collectedAt": "2026-09-18T09:58:00+09:00",
+        "validUntil": "2026-09-18T10:28:00+09:00",
+        "completeSnapshot": True,
+        "linkMasterAvailable": True,
+        "linkNamespace": "SEOUL_ACCINFO_LINK",
+        "linkMasterVersion": "link-v1",
+        "unmatchedIncidentCount": 0,
+        "incidents": [],
     }
     client.strings[key] = json.dumps(base)
     result = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
     assert result["features"]["verifiedIncidentCount"] == 0
-    for change in ({"completeSnapshot": False}, {"linkMasterAvailable": False},
-                   {"linkMasterVersion": "wrong"}, {"validUntil": "2026-09-18T09:59:00+09:00"}):
+    for change in (
+        {"completeSnapshot": False},
+        {"linkMasterAvailable": False},
+        {"linkMasterVersion": "wrong"},
+        {"validUntil": "2026-09-18T09:59:00+09:00"},
+    ):
         client.strings[key] = json.dumps({**base, **change})
         result = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
         assert result["features"]["verifiedIncidentCount"] is None
@@ -394,17 +409,33 @@ def test_text_features_require_grounded_result_available_at_as_of():
     road = json.loads(client.hashes[road_key][SEGMENT])
     road["trafficLinkMasterVersion"] = "link-v1"
     client.hashes[road_key][SEGMENT] = json.dumps(road)
-    text = {"aiExtractionStatus": "VALID", "aiExtractedAt": "2026-09-18T09:59:00+09:00",
-            "aiIncidentKind": "ACCIDENT", "aiControlScope": "UNKNOWN", "aiClosedLaneCount": None,
-            "aiBusDetourMentioned": False, "aiStatusMention": "UNKNOWN"}
+    text = {
+        "aiExtractionStatus": "VALID",
+        "aiExtractedAt": "2026-09-18T09:59:00+09:00",
+        "aiIncidentKind": "ACCIDENT",
+        "aiControlScope": "UNKNOWN",
+        "aiClosedLaneCount": None,
+        "aiBusDetourMentioned": False,
+        "aiStatusMention": "UNKNOWN",
+    }
     key = "traffic:latest:incident-snapshot:all-current"
     snapshot = {
-        "snapshotVersion": "traffic-incident-snapshot-v1", "collectedAt": "2026-09-18T09:58:00+09:00",
-        "validUntil": "2026-09-18T10:28:00+09:00", "completeSnapshot": True,
-        "linkMasterAvailable": True, "linkNamespace": "SEOUL_ACCINFO_LINK",
-        "linkMasterVersion": "link-v1", "unmatchedIncidentCount": 0,
-        "incidents": [{"providerIncidentId": "A", "matchedLinkId": "L1",
-                       "startedAt": "2026-09-18T09:50:00+09:00", "textFeatures": text}],
+        "snapshotVersion": "traffic-incident-snapshot-v1",
+        "collectedAt": "2026-09-18T09:58:00+09:00",
+        "validUntil": "2026-09-18T10:28:00+09:00",
+        "completeSnapshot": True,
+        "linkMasterAvailable": True,
+        "linkNamespace": "SEOUL_ACCINFO_LINK",
+        "linkMasterVersion": "link-v1",
+        "unmatchedIncidentCount": 0,
+        "incidents": [
+            {
+                "providerIncidentId": "A",
+                "matchedLinkId": "L1",
+                "startedAt": "2026-09-18T09:50:00+09:00",
+                "textFeatures": text,
+            }
+        ],
     }
     client.strings[key] = json.dumps(snapshot)
     features = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())["features"]

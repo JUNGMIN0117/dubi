@@ -96,7 +96,9 @@ def require_api_key(env_path: Path = DEFAULT_ENV_PATH) -> str:
     load_env_file(env_path)
     api_key = (os.getenv(PORTAL_API_KEY_ENV_NAME) or os.getenv(API_KEY_ENV_NAME, "")).strip()
     if not api_key:
-        raise TopisNoticeError(f"{env_path}에 서울 열린데이터광장 일반 인증키를 {PORTAL_API_KEY_ENV_NAME}로 설정해야 합니다")
+        raise TopisNoticeError(
+            f"{env_path}에 서울 열린데이터광장 일반 인증키를 {PORTAL_API_KEY_ENV_NAME}로 설정해야 합니다"
+        )
     return api_key
 
 

@@ -39,7 +39,12 @@ def _time(date_value, time_value):
     date_text, time_text = _clean(date_value), _clean(time_value)
     if not date_text and not time_text:
         return None, "MISSING"
-    if not date_text or not time_text or not re.fullmatch(r"\d{8}", date_text) or not re.fullmatch(r"\d{4}(?:\d{2})?", time_text):
+    if (
+        not date_text
+        or not time_text
+        or not re.fullmatch(r"\d{8}", date_text)
+        or not re.fullmatch(r"\d{4}(?:\d{2})?", time_text)
+    ):
         return None, "INVALID"
     if len(time_text) == 4:
         time_text += "00"

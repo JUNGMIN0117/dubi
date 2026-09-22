@@ -55,9 +55,20 @@ STRINGS = (
     "descriptionRegion",
     "processingStatus",
     "rawPayloadJson",
-    "aiExtractionStatus", "aiIncidentKind", "aiIncidentDetail", "aiControlScope", "aiDirectionText",
-    "aiStatusMention", "aiTimeExpressionsJson", "aiControlStartAt", "aiControlEndAt", "aiEvidenceJson",
-    "aiExtractedAt", "aiModel", "aiPromptVersion", "aiInputHash",
+    "aiExtractionStatus",
+    "aiIncidentKind",
+    "aiIncidentDetail",
+    "aiControlScope",
+    "aiDirectionText",
+    "aiStatusMention",
+    "aiTimeExpressionsJson",
+    "aiControlStartAt",
+    "aiControlEndAt",
+    "aiEvidenceJson",
+    "aiExtractedAt",
+    "aiModel",
+    "aiPromptVersion",
+    "aiInputHash",
 )
 SCHEMA = T.StructType(
     [T.StructField(name, T.StringType()) for name in STRINGS]
@@ -66,8 +77,11 @@ SCHEMA = T.StructType(
         for name in ("grs80tmX", "grs80tmY", "latitude", "longitude", "linkCoordinateDistanceMeters")
     ]
     + [T.StructField("nearbyCandidateCount", T.IntegerType())]
-    + [T.StructField("aiClosedLaneCount", T.IntegerType()), T.StructField("aiBusDetourMentioned", T.BooleanType()),
-       T.StructField("aiLaneNumbers", T.ArrayType(T.IntegerType()))]
+    + [
+        T.StructField("aiClosedLaneCount", T.IntegerType()),
+        T.StructField("aiBusDetourMentioned", T.BooleanType()),
+        T.StructField("aiLaneNumbers", T.ArrayType(T.IntegerType())),
+    ]
     + [
         T.StructField(name, T.ArrayType(T.StringType()))
         for name in ("missingFields", "qualityFlags", "rejectionReasons", "aiQualityFlags")
@@ -167,31 +181,46 @@ def main():
                 rows.unpersist()
         finally:
             normalized.unpersist()
-        snapshot_events = frame.filter(F.col("eventType") == "traffic.incident.snapshot").select("rawEventJson").collect()
+        snapshot_events = (
+            frame.filter(F.col("eventType") == "traffic.incident.snapshot").select("rawEventJson").collect()
+        )
         if snapshot_events:
             from datetime import datetime, timezone
 
             import redis
 
-            client = redis.Redis(host=settings.redis_host, port=settings.redis_port,
-                                 password=settings.redis_password or None, decode_responses=True)
+            client = redis.Redis(
+                host=settings.redis_host,
+                port=settings.redis_port,
+                password=settings.redis_password or None,
+                decode_responses=True,
+            )
             try:
                 for item in snapshot_events:
                     snapshot = build_incident_snapshot(
-                        json.loads(item.rawEventJson), master, incident_policy.stale_seconds, extractor=extractor,
+                        json.loads(item.rawEventJson),
+                        master,
+                        incident_policy.stale_seconds,
+                        extractor=extractor,
                         direct_tolerance=incident_policy.direct_tolerance_meters,
                         nearby_max=incident_policy.nearby_max_meters,
                     )
                     if snapshot is None:
                         continue
-                    ttl = int((datetime.fromisoformat(snapshot["validUntil"]) - datetime.now(timezone.utc)).total_seconds())
+                    ttl = int(
+                        (datetime.fromisoformat(snapshot["validUntil"]) - datetime.now(timezone.utc)).total_seconds()
+                    )
                     if ttl <= 0:
                         continue
                     # A delayed Kafka batch must not replace a newer complete poll.
                     client.eval(
                         "local old=redis.call('GET',KEYS[1]); if old and cjson.decode(old).collectedAt >= ARGV[1] then return 0 end; "
                         "redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1",
-                        1, SNAPSHOT_KEY, snapshot["collectedAt"], json.dumps(snapshot, ensure_ascii=False), ttl,
+                        1,
+                        SNAPSHOT_KEY,
+                        snapshot["collectedAt"],
+                        json.dumps(snapshot, ensure_ascii=False),
+                        ttl,
                     )
             finally:
                 client.close()

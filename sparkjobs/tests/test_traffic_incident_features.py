@@ -5,28 +5,38 @@ from common.traffic_incident_features import build_incident_snapshot
 
 
 def _master():
-    row = {"linkId": "L1", "geometry": [[127.0, 37.5], [127.001, 37.5]],
-           "roadName": None, "districtName": None, "startNodeId": None, "endNodeId": None}
-    return VerifiedLinkMaster({"version": "link-v1", "validFrom": "2026-09-01T00:00:00+09:00",
-                               "validUntil": "2026-10-01T00:00:00+09:00"}, {"L1": row})
+    row = {
+        "linkId": "L1",
+        "geometry": [[127.0, 37.5], [127.001, 37.5]],
+        "roadName": None,
+        "districtName": None,
+        "startNodeId": None,
+        "endNodeId": None,
+    }
+    return VerifiedLinkMaster(
+        {"version": "link-v1", "validFrom": "2026-09-01T00:00:00+09:00", "validUntil": "2026-10-01T00:00:00+09:00"},
+        {"L1": row},
+    )
 
 
 def _event(items, **changes):
-    value = {"eventType": "traffic.incident.snapshot", "eventId": "poll-1",
-             "source": "seoul.traffic_incident", "collectedAt": "2026-09-18T10:00:00+09:00",
-             "payload": {"items": items, "rowCount": len(items), "completeSnapshot": True}}
+    value = {
+        "eventType": "traffic.incident.snapshot",
+        "eventId": "poll-1",
+        "source": "seoul.traffic_incident",
+        "collectedAt": "2026-09-18T10:00:00+09:00",
+        "payload": {"items": items, "rowCount": len(items), "completeSnapshot": True},
+    }
     value.update(changes)
     return value
 
 
 def _row(incident_id, link_id):
-    return {"incidentId": incident_id, "linkId": link_id,
-            "occurredDate": "20260918", "occurredTime": "095000"}
+    return {"incidentId": incident_id, "linkId": link_id, "occurredDate": "20260918", "occurredTime": "095000"}
 
 
 def test_complete_poll_deduplicates_and_tracks_unmatched_rows():
-    snapshot = build_incident_snapshot(_event([_row("A", "L1"), _row("A", "L1"),
-                                               _row("B", "OTHER")]), _master())
+    snapshot = build_incident_snapshot(_event([_row("A", "L1"), _row("A", "L1"), _row("B", "OTHER")]), _master())
     assert snapshot["sourceRowCount"] == 3
     assert snapshot["verifiedIncidentCount"] == 1
     assert snapshot["unmatchedIncidentCount"] == 1
@@ -34,18 +44,29 @@ def test_complete_poll_deduplicates_and_tracks_unmatched_rows():
 
 
 def test_partial_or_malformed_poll_cannot_create_zero_snapshot():
-    assert build_incident_snapshot(_event([], payload={"items": [], "rowCount": 0,
-                                                        "completeSnapshot": False}), _master()) is None
-    assert build_incident_snapshot(_event([], payload={"items": [], "rowCount": 1,
-                                                        "completeSnapshot": True}), _master()) is None
+    assert (
+        build_incident_snapshot(_event([], payload={"items": [], "rowCount": 0, "completeSnapshot": False}), _master())
+        is None
+    )
+    assert (
+        build_incident_snapshot(_event([], payload={"items": [], "rowCount": 1, "completeSnapshot": True}), _master())
+        is None
+    )
     assert build_incident_snapshot(_event([_row("", "L1")]), _master()) is None
 
 
 def test_verified_snapshot_carries_text_features_for_segment_join():
     class Extractor:
         def enrich_many(self, rows):
-            return [{**row, "aiExtractionStatus": "VALID", "aiIncidentKind": "ACCIDENT",
-                     "aiExtractedAt": "2026-09-18T09:59:00+09:00"} for row in rows]
+            return [
+                {
+                    **row,
+                    "aiExtractionStatus": "VALID",
+                    "aiIncidentKind": "ACCIDENT",
+                    "aiExtractedAt": "2026-09-18T09:59:00+09:00",
+                }
+                for row in rows
+            ]
 
     snapshot = build_incident_snapshot(_event([_row("A", "L1")]), _master(), extractor=Extractor())
     incident = snapshot["incidents"][0]

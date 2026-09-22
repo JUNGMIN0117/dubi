@@ -23,15 +23,23 @@ class PortalKeyTest(unittest.TestCase):
     def test_seoul_general_sources_share_one_key(self):
         settings = self.settings({"SEOUL_OPEN_DATA_API_KEY": "shared", "TRAFFIC_INCIDENT_API_KEY": "legacy"})
         for source_name in (
-            "SUBWAY_ALERT_API_KEY", "CITY_REALTIME_API_KEY", "TOPIS_NOTICE_API_KEY", "TRAFFIC_INCIDENT_API_KEY"
+            "SUBWAY_ALERT_API_KEY",
+            "CITY_REALTIME_API_KEY",
+            "TOPIS_NOTICE_API_KEY",
+            "TRAFFIC_INCIDENT_API_KEY",
         ):
             self.assertEqual(settings.api_key(source_name), "shared")
 
     def test_environment_loads_new_portal_variable(self):
-        with patch.dict(os.environ, {
-            "COLLECTOR_SOURCE": "traffic_incident", "KAFKA_BOOTSTRAP_SERVERS": "unused",
-            "SEOUL_OPEN_DATA_API_KEY": "shared",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "COLLECTOR_SOURCE": "traffic_incident",
+                "KAFKA_BOOTSTRAP_SERVERS": "unused",
+                "SEOUL_OPEN_DATA_API_KEY": "shared",
+            },
+            clear=True,
+        ):
             settings = Settings.from_env()
         self.assertEqual(settings.api_key("TRAFFIC_INCIDENT_API_KEY"), "shared")
 
@@ -50,10 +58,15 @@ class PortalKeyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             env_file.write_text("", encoding="utf-8")
-            with patch.dict(os.environ, {
-                "SEOUL_OPEN_DATA_API_KEY": "shared", "TRAFFIC_INCIDENT_API_KEY": "old-incident",
-                "TOPIS_NOTICE_API_KEY": "old-notice", "SUBWAY_ALERT_API_KEY": "old-alert",
-            }):
+            with patch.dict(
+                os.environ,
+                {
+                    "SEOUL_OPEN_DATA_API_KEY": "shared",
+                    "TRAFFIC_INCIDENT_API_KEY": "old-incident",
+                    "TOPIS_NOTICE_API_KEY": "old-notice",
+                    "SUBWAY_ALERT_API_KEY": "old-alert",
+                },
+            ):
                 self.assertEqual(traffic_incident.require_api_key(env_file), "shared")
                 self.assertEqual(topis_notice.require_api_key(env_file), "shared")
                 self.assertEqual(subway_alert.require_api_key(), "shared")

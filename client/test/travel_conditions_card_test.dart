@@ -132,22 +132,99 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  // 아래는 서버 계약(movement-conditions-v1)의 실제 응답 예시를 그대로 쓴다.
+  // 서버는 숫자와 코드만 준다. 문장 만들기는 앱이 한다.
   group('서버 응답 읽기', () {
-    test('빈 문자열은 값 없음으로 본다', () {
-      final parsed = TravelConditions.fromJson({'weather': ''});
-      expect(parsed.weather.available, isFalse);
+    test('계약 예시를 네 칸으로 읽는다', () {
+      final parsed = TravelConditions.fromJson(const {
+        'schemaVersion': 'movement-conditions-v1',
+        'observedAt': '2026-09-22T01:58:00Z',
+        'weather': {
+          'available': true,
+          'districts': ['종로구', '중구'],
+          'temperatureC': 20.9,
+          'precipitationMm': 0.0,
+        },
+        'congestion': {
+          'available': true,
+          'areaName': '시청',
+          'level': 'BUSY',
+          'score': 3,
+        },
+        'roadBlock': {'available': true, 'count': 1, 'summary': '봉은교 양방향 전면통제'},
+        'subwayDelay': {
+          'available': false,
+          'reason': 'NO_MATCHING_ACTIVE_ALERT',
+          'count': 0,
+        },
+      });
+
+      expect(parsed.weather.text, '20.9℃ · 비 안 옴');
+      expect(parsed.weather.note, '종로구·중구 기준');
+      expect(parsed.congestion.text, '시청 일대 붐빔');
+      expect(parsed.roadBlock.text, '봉은교 양방향 전면통제');
+      // NO_MATCHING_ACTIVE_ALERT 는 "지연 없음" 이 아니다. 확인 못 했다는 뜻이다.
+      expect(parsed.subwayDelay.available, isFalse);
+      expect(parsed.observedAt, DateTime.utc(2026, 9, 22, 1, 58).toLocal());
     });
 
-    test('available:false 는 값이 있어도 값 없음이다', () {
-      final parsed = TravelConditions.fromJson({
-        'weather': {'text': '맑음', 'available': false},
+    test('비가 오면 양을 적는다', () {
+      final parsed = TravelConditions.fromJson(const {
+        'weather': {
+          'available': true,
+          'temperatureC': 18.0,
+          'precipitationMm': 2.5,
+        },
+      });
+      expect(parsed.weather.text, '18.0℃ · 비 2.5mm');
+    });
+
+    test('available 이 거짓이면 값이 있어도 읽지 않는다', () {
+      final parsed = TravelConditions.fromJson(const {
+        'weather': {'available': false, 'temperatureC': 20.9},
+        'roadBlock': {'available': false, 'summary': '봉은교 통제'},
+      });
+      expect(parsed.weather.available, isFalse);
+      expect(parsed.roadBlock.available, isFalse);
+    });
+
+    test('기온이 없으면 강수량만으로 날씨를 만들지 않는다', () {
+      final parsed = TravelConditions.fromJson(const {
+        'weather': {'available': true, 'precipitationMm': 0.0},
       });
       expect(parsed.weather.available, isFalse);
     });
 
+    test('모르는 혼잡도 등급은 영어 코드를 그대로 쓰지 않는다', () {
+      expect(TravelConditions.congestionLabel('SOMETHING_NEW'), isNull);
+      final parsed = TravelConditions.fromJson(const {
+        'congestion': {
+          'available': true,
+          'areaName': '시청',
+          'level': 'SOMETHING_NEW',
+        },
+      });
+      expect(parsed.congestion.available, isFalse);
+    });
+
+    test('지하철 공지는 요약이 없으면 제목을 쓴다', () {
+      final parsed = TravelConditions.fromJson(const {
+        'subwayDelay': {
+          'available': true,
+          'count': 1,
+          'routeLines': ['5호선'],
+          'alerts': [
+            {'lineName': '5호선', 'title': '여의나루역 무정차 통과'},
+          ],
+        },
+      });
+      expect(parsed.subwayDelay.text, '여의나루역 무정차 통과');
+      expect(parsed.subwayDelay.note, '5호선');
+    });
+
     test('모르는 모양이 와도 네 칸이 확인 안 됨으로 남는다', () {
-      final parsed = TravelConditions.fromJson('이상한 값');
-      expect(parsed.hasAny, isFalse);
+      expect(TravelConditions.fromJson('이상한 값').hasAny, isFalse);
+      expect(TravelConditions.fromJson(const {}).hasAny, isFalse);
     });
   });
 }

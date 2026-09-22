@@ -21,10 +21,15 @@ class RecommendationGuideCard extends StatefulWidget {
     required this.headline,
     this.evaluationRepository,
     this.onStartJourney,
+    this.pastTense = false,
   });
 
   final RecommendationApi api;
   final String scheduleId;
+
+  /// 끝난 일정의 기록으로 보여줄 때 true. 말머리가 과거형이 된다. 버튼은 [evaluationRepository]
+  /// 를 넘기지 않으면 어차피 그려지지 않는다.
+  final bool pastTense;
 
   /// 버튼 줄(이 제안 적용·다시 계산·이동 안내 시작)을 쓰려면 필요하다. 없으면 버튼을
   /// 그리지 않는다.
@@ -54,6 +59,10 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
   /// 조회에 실패한 계산의 id. 값이 있으면 "다시 불러오기" 를 띄운다.
   String? _retryFor;
   bool _loading = false;
+
+  /// 마지막 조회가 "실패" 가 아니라 "아직" 이었는가 — 서버가 계산이 끝나지 않았다고(409) 답한 경우.
+  /// 이때는 사용자가 할 일이 없다. 기다리면 새 평가와 함께 다시 부른다.
+  bool _pending = false;
 
   /// 화면에 보이는 안내가 최신 계산의 것이 아닌가.
   ///
@@ -109,14 +118,23 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
           _guide = guide;
           _loadedFor = evaluationId;
           _retryFor = null;
+          _pending = false;
         } else {
-          // 계산이 아직이면(409) null 이 온다. 곧 다시 부를 수 있게 열어 둔다.
+          // 계산이 아직이거나(409) 안내가 아직 없다(404). 실패가 아니라 "아직" 이다 — 계산이
+          // 끝나면 평가가 새로 오고 그때 다시 부른다. 그동안 "못 불러왔어요" 라고 쓰지 않는다
+          // (2026-09-22 제보).
           _retryFor = evaluationId;
+          _pending = true;
         }
       });
     } on Object {
-      // 안내를 못 받아도 화면의 다른 정보는 그대로 쓸 수 있다. 오류 화면은 띄우지 않는다.
-      if (mounted) setState(() => _retryFor = evaluationId);
+      // 연결이 끊겼거나 서버가 오류를 냈다. 안내를 못 받아도 화면의 다른 정보는 그대로 쓸 수 있다.
+      if (mounted) {
+        setState(() {
+          _retryFor = evaluationId;
+          _pending = false;
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -175,9 +193,11 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Text(
-                        '이 일정에 맞춰',
-                        style: TextStyle(
+                      child: Text(
+                        // 끝난 일정에서는 과거형이다. 다녀온 일정에 "이 일정에 맞춰 … 제안해요" 가
+                        // 현재형으로 남아 있으면 아직 할 일이 있는 것처럼 읽힌다.
+                        widget.pastTense ? '이 일정에 맞춰 안내했어요' : '이 일정에 맞춰',
+                        style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF2F4A7D),
@@ -216,7 +236,12 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     if (guide == null) {
       return [
         Text(
-          _loading ? '추천 안내를 불러오고 있어요.' : '추천 안내를 아직 불러오지 못했어요.',
+          _loading
+              ? '추천 안내를 불러오고 있어요.'
+              : _pending
+              ? '계산이 끝나면 안내를 준비해요.'
+              : '추천 안내를 아직 불러오지 못했어요.',
+          key: const Key('guideEmptyMessage'),
           style: const TextStyle(
             fontSize: 15,
             height: 1.35,
@@ -224,7 +249,16 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
             color: DdubiColors.navy,
           ),
         ),
-        if (!_loading && _retryFor != null) ...[
+        if (!_loading && _pending) ...[
+          const SizedBox(height: 4),
+          const Text(
+            '계산이 끝나면 자동으로 이어서 불러와요.',
+            key: Key('guidePendingHint'),
+            style: TextStyle(fontSize: 12, color: Color(0xFF5C6B7F)),
+          ),
+        ],
+        // 진짜 실패(연결·서버 오류)일 때만 다시 누르게 한다. "아직" 인 경우에 누르면 또 409 다.
+        if (!_loading && !_pending && _retryFor != null) ...[
           const SizedBox(height: 6),
           TextButton(
             key: const Key('guideRetryButton'),

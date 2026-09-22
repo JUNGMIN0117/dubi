@@ -180,6 +180,103 @@ void main() {
     expect(DepartureHeadline.paletteOf(ready(null)).name, 'safe');
   });
 
+  // ------------------------------------------------------------------
+  // 남은 시간에 따라 말이 달라진다
+  // ------------------------------------------------------------------
+
+  /// 출발이 몇 시간 뒤여도 "08:10에 나가세요" 라고만 쓰면 당장 나가라는 말처럼 읽힌다(2026-09-22 제보).
+  test('한 시간 넘게 남았으면 여유 있다고 말하고 "나가면 돼요" 로 쓴다', () {
+    final base = DateTime(2026, 9, 22, 8, 0);
+    final timing = DepartureHeadlineContent.timing(
+      base,
+      base.add(const Duration(hours: 2, minutes: 15)),
+    );
+
+    expect(timing.label, contains('여유'));
+    expect(timing.clockSuffix, '에 나가면 돼요');
+    expect(timing.decorate('제목'), '제목 · 아직 2시간 15분 남았어요');
+  });
+
+  test('10분에서 1시간 사이면 지금까지 쓰던 말 그대로다', () {
+    final base = DateTime(2026, 9, 22, 8, 0);
+    final timing = DepartureHeadlineContent.timing(
+      base,
+      base.add(const Duration(minutes: 30)),
+    );
+
+    expect(timing.label, '추천 출발 시각');
+    expect(timing.clockSuffix, '에 나가세요');
+    expect(timing.decorate('제목'), '제목');
+  });
+
+  test('10분 안이면 곧 출발이라고 말한다', () {
+    final base = DateTime(2026, 9, 22, 8, 0);
+    final soon = DepartureHeadlineContent.timing(
+      base,
+      base.add(const Duration(minutes: 4)),
+    );
+    final now = DepartureHeadlineContent.timing(
+      base,
+      base.add(const Duration(seconds: 30)),
+    );
+
+    expect(soon.label, '곧 출발이에요');
+    expect(soon.decorate('제목'), '제목 · 4분 뒤 나가야 해요');
+    expect(now.decorate('제목'), '제목 · 지금 나가야 해요');
+  });
+
+  test('지났으면 지났다고 말한다', () {
+    final base = DateTime(2026, 9, 22, 8, 0);
+    final passed = DepartureHeadlineContent.timing(
+      base,
+      base.subtract(const Duration(minutes: 7)),
+    );
+
+    expect(passed.label, '출발 시각이 지났어요');
+    expect(passed.clockSuffix, '이 지났어요');
+    expect(passed.decorate('제목'), '제목 · 7분 지났어요');
+  });
+
+  test('확정 결론에도 남은 시간 말머리가 붙는다', () async {
+    final raw = await _raw('keep');
+    final depart = now.add(const Duration(hours: 3));
+    raw['proposedDepartAt'] = depart.toUtc().toIso8601String();
+    raw['estimatedArrivalAt'] = depart
+        .add(const Duration(minutes: 40))
+        .toUtc()
+        .toIso8601String();
+    raw['validUntil'] = now
+        .add(const Duration(minutes: 1))
+        .toUtc()
+        .toIso8601String();
+    final far = ScheduleEvaluationV2.fromJson(raw);
+    expect(far.canAcceptAt(now), isTrue);
+
+    final content = DepartureHeadlineContent.of(far, now);
+
+    expect(content.tone, DepartureHeadlineTone.ready);
+    expect(content.label, contains('여유'));
+    expect(content.clockSuffix, '에 나가면 돼요');
+    expect(content.title, contains('남았어요'));
+  });
+
+  test('출발 시각이 지났는데 출발을 알리지 않았으면 지났다고 크게 말한다', () async {
+    final raw = await _raw('keep');
+    raw['departureMissed'] = true;
+    raw['validUntil'] = now
+        .add(const Duration(minutes: 1))
+        .toUtc()
+        .toIso8601String();
+    final missed = ScheduleEvaluationV2.fromJson(raw);
+
+    final content = DepartureHeadlineContent.of(missed, now);
+
+    expect(content.tone, DepartureHeadlineTone.attention);
+    expect(content.title, contains('지났어요'));
+    expect(content.label, '출발 시각이 지났어요');
+    expect(content.departAt, isNotNull, reason: '지난 시각도 큰 숫자로는 보여준다');
+  });
+
   test('참고·대기·주의 카드는 여유와 관계없이 성격별 색을 쓴다', () {
     for (final tone in [
       DepartureHeadlineTone.reference,

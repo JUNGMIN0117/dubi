@@ -76,7 +76,13 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
 
   void _onEvaluation() {
     final value = widget.headline.value;
-    if (value == null || value.state != EvaluationState.ready) return;
+    // 멈춘(출발한) 일정도 부른다. 서버가 마지막 계산의 안내를 그대로 돌려주므로(2026-09-22),
+    // 출발한 뒤에도 출발할 때 본 AI 안내가 카드에 남는다. 앱을 다시 켜도 같다.
+    if (value == null ||
+        (value.state != EvaluationState.ready &&
+            value.state != EvaluationState.stopped)) {
+      return;
+    }
     final id = value.evaluationId;
     if (id == null || id.isEmpty || id == _loadedFor || _loading) return;
     _load(id);

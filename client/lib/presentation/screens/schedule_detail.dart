@@ -269,8 +269,12 @@ class ScheduleDetailScreen extends StatelessWidget {
               ] else if (repository is ScheduleEvaluationRepository) ...[
                 ValueListenableBuilder<ScheduleEvaluationV2?>(
                   valueListenable: headline,
-                  builder: (_, value, _) =>
-                      DepartureHeadline(evaluation: value, emphasized: true),
+                  builder: (_, value, _) => DepartureHeadline(
+                    evaluation: value,
+                    emphasized: true,
+                    // 출발 뒤에는 서버가 기록한 실제 출발 시각을 큰 숫자로 쓴다.
+                    departedAt: schedule.actualDepartAt,
+                  ),
                 ),
                 const SizedBox(height: 10),
               ],

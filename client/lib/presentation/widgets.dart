@@ -295,12 +295,21 @@ class MonthlyCalendar extends StatelessWidget {
   const MonthlyCalendar({
     super.key,
     required this.selectedDate,
-    required this.schedules,
     required this.onSelected,
+    this.schedules = const [],
+    this.markedDates,
+    this.markerLabel = '일정',
     this.expanded = false,
   });
   final DateTime selectedDate;
   final List<Schedule> schedules;
+
+  /// 일정 대신 표시할 날짜들. 있으면 [schedules] 대신 이것으로 날마다 점·개수를 그린다.
+  /// 이동 기록 달력처럼 일정이 아닌 것을 같은 달력에 올릴 때 쓴다.
+  final List<DateTime>? markedDates;
+
+  /// 넓은 모양에서 개수 옆에 붙는 말. 일정이면 "일정 3", 기록이면 "기록 3".
+  final String markerLabel;
   final ValueChanged<DateTime> onSelected;
   final bool expanded;
 
@@ -398,9 +407,10 @@ class MonthlyCalendar extends StatelessWidget {
               final inMonth = date.month == month.month;
               final selected = _sameDay(date, selectedDate),
                   isToday = _sameDay(date, today);
-              final count = schedules
-                  .where((item) => _sameDay(item.date, date))
-                  .length;
+              final marked = markedDates;
+              final count = marked != null
+                  ? marked.where((item) => _sameDay(item, date)).length
+                  : schedules.where((item) => _sameDay(item.date, date)).length;
               return Padding(
                 padding: const EdgeInsets.all(2),
                 child: InkWell(
@@ -459,7 +469,7 @@ class MonthlyCalendar extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
-                                    '일정 $count',
+                                    '$markerLabel $count',
                                     style: TextStyle(
                                       color: selected
                                           ? Colors.white

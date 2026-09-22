@@ -156,7 +156,16 @@ void main() {
     expect(find.byKey(const Key('guideHeadline')), findsNothing);
   });
 
-  testWidgets('계산이 바뀌고 조회가 실패하면 지난 안내를 지운다', (tester) async {
+  /// 계산이 바뀌고 조회가 실패했을 때 무엇을 보여줄지.
+  ///
+  /// 한때는 지난 안내를 지웠다. 지난 계산의 출발시각·요금이 새 결과인 척 남는 것을 막으려던
+  /// 것이다. 그런데 서버는 출발이 가까우면 1분마다 계산을 새로 하고, 안내 조회는 계산이
+  /// 끝나기 전이거나 유효기간(=다음 계산 예정 시각)이 지난 동안에는 반드시 거절한다. 매
+  /// 주기에 반드시 실패 구간이 있어서, 카드가 1분마다 빈칸이 됐다가 돌아왔다(2026-09-22 제보).
+  ///
+  /// 그래서 지우지 않고 그대로 두되 "이전 계산 기준" 이라고 적는다. 지난 값을 방금 결과로
+  /// 오해하게 하지 않는다는 원래 목적은 그 문구가 지킨다.
+  testWidgets('계산이 바뀌고 조회가 실패하면 지난 안내를 남기되 이전 계산 기준이라고 알린다', (tester) async {
     final dio = _dio([
       _guideJson(headline: '08:00 출발 · 08:46 도착 예정'), // 첫 계산은 성공
       null, // 두 번째 계산은 실패
@@ -169,11 +178,15 @@ void main() {
     headline.value = _evaluation('eval-2');
     await tester.pumpAndSettle();
 
-    // 지난 계산의 출발시각이 남아 있으면 안 된다.
-    expect(find.text('08:00 출발 · 08:46 도착 예정'), findsNothing);
+    // 읽던 내용은 그대로 있다 — 1분마다 빈 카드가 되지 않는다.
+    expect(find.text('08:00 출발 · 08:46 도착 예정'), findsOneWidget);
+    // 대신 최신이 아니라고 적는다.
+    expect(find.byKey(const Key('guideStaleNotice')), findsOneWidget);
+    expect(find.text('아래는 이전 계산 기준이에요.'), findsOneWidget);
     // 카드는 남는다 — 안에 버튼이 함께 있어서 사라지면 누를 자리까지 없어진다.
     expect(find.byKey(const Key('recommendationGuideCard')), findsOneWidget);
-    expect(find.byKey(const Key('guideRetryButton')), findsOneWidget);
+    // 다시 부르는 자리도 그 줄 안에 함께 둔다.
+    expect(find.byKey(const Key('guideRefreshStaleButton')), findsOneWidget);
   });
 
   testWidgets('다시 불러오기를 누르면 한 번 더 조회한다', (tester) async {

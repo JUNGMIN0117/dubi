@@ -19,6 +19,7 @@ import '../../domain/transit_reference.dart';
 import '../transit_reference_panel.dart';
 import '../travel_conditions_card.dart';
 import '../../core/diagnostics/developer_diagnostics.dart';
+import 'journey.dart';
 import 'map.dart';
 import 'schedule_form.dart';
 import 'shared.dart';
@@ -268,8 +269,12 @@ class ScheduleDetailScreen extends StatelessWidget {
               ] else if (repository is ScheduleEvaluationRepository) ...[
                 ValueListenableBuilder<ScheduleEvaluationV2?>(
                   valueListenable: headline,
-                  builder: (_, value, _) =>
-                      DepartureHeadline(evaluation: value, emphasized: true),
+                  builder: (_, value, _) => DepartureHeadline(
+                    evaluation: value,
+                    emphasized: true,
+                    // 출발 뒤에는 서버가 기록한 실제 출발 시각을 큰 숫자로 쓴다.
+                    departedAt: schedule.actualDepartAt,
+                  ),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -450,6 +455,7 @@ class ScheduleDetailScreen extends StatelessWidget {
                         routeRepository,
                         displayRank: displayRank,
                         evaluated: evaluated,
+                        estimatedArrivalAt: headline.value?.estimatedArrivalAt,
                       ),
               ),
               const SizedBox(height: 16),
@@ -469,6 +475,10 @@ class ScheduleDetailScreen extends StatelessWidget {
                       repository is ScheduleEvaluationRepository
                       ? repository as ScheduleEvaluationRepository
                       : null,
+                  // 평가는 누르는 순간의 값을 읽는다. 카드를 그릴 때 값을 박아 두면 1분마다
+                  // 바뀌는 계산과 어긋난다.
+                  onStartJourney: () =>
+                      _startJourney(c, schedule, savedRoutes, headline.value),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -604,6 +614,7 @@ class ScheduleDetailScreen extends StatelessWidget {
     DdubiRepository routeRepository, {
     int? displayRank,
     RouteEvaluatedNumbers evaluated = RouteEvaluatedNumbers.empty,
+    DateTime? estimatedArrivalAt,
   }) {
     if (savedRoute.routeId.trim().isEmpty) {
       ScaffoldMessenger.of(c).showSnackBar(
@@ -628,6 +639,68 @@ class ScheduleDetailScreen extends StatelessWidget {
         evaluated: evaluated,
         scheduleId: schedule.id,
         departedAlready: schedule.hasDeparted,
+        estimatedArrivalAt: estimatedArrivalAt,
+      ),
+    );
+  }
+
+  /// 일정 상세에서 곧장 이동 안내를 연다.
+  ///
+  /// 예전에는 이 자리에 "출발했어요" 가 있었다. 누르면 출발 시각만 기록하고 화면은 그대로라,
+  /// 정작 이동 안내를 보려면 경로 카드 → 경로 상세 → "이동 안내 시작" 을 따로 눌러야 했다.
+  /// 그 화면에도 같은 이름의 "출발했어요" 가 또 있어서, 같은 이름의 버튼 둘이 서로 다른 일을
+  /// 했다(2026-09-22 제보). 다음 단계로 가는 문을 하나로 만든다.
+  ///
+  /// 구간은 경로 상세와 같은 API 로 가져온다. 목록이 들고 있는 요약에는 구간이 없다.
+  Future<void> _startJourney(
+    BuildContext c,
+    Schedule schedule,
+    List<SavedRouteSummary> savedRoutes,
+    ScheduleEvaluationV2? evaluation,
+  ) async {
+    final api = recommendationApi;
+    // 선택된 경로가 없으면 목록 첫 줄을 쓴다. 목록의 맨 위가 화면에서 1순위로 보이는 경로다.
+    final selected = savedRoutes.where((route) => route.selected);
+    final savedRoute = selected.isNotEmpty
+        ? selected.first
+        : (savedRoutes.isEmpty ? null : savedRoutes.first);
+    if (api == null ||
+        savedRoute == null ||
+        savedRoute.routeId.trim().isEmpty) {
+      ScaffoldMessenger.of(c).showSnackBar(
+        const SnackBar(
+          key: Key('startJourneyUnavailable'),
+          content: Text('안내할 경로가 아직 없어요. 다시 계산한 뒤 눌러 주세요.'),
+        ),
+      );
+      return;
+    }
+    final SavedRouteDetail detail;
+    try {
+      detail = await api.getSavedRouteDetail(savedRoute.routeId);
+    } on Object {
+      if (!c.mounted) return;
+      ScaffoldMessenger.of(c).showSnackBar(
+        const SnackBar(
+          key: Key('startJourneyError'),
+          content: Text('이동 안내를 열지 못했어요. 잠시 뒤 다시 시도해 주세요.'),
+        ),
+      );
+      return;
+    }
+    if (!c.mounted) return;
+    await openPage(
+      c,
+      MovingScreen(
+        repository: routeRepository,
+        route: savedRoute.toRouteOption(schedule),
+        segments: detail.segments,
+        // 경로 카드·경로 상세와 같은 숫자를 쓴다. 화면마다 시간이 다르면 안 된다.
+        evaluated: RouteEvaluatedNumbers.of(evaluation, savedRoute.routeId),
+        scheduleId: schedule.id,
+        departedAlready: schedule.hasDeparted,
+        // 이동 중 화면의 "예상 도착" 은 이 값에서 온다. 없으면 그 화면은 시각을 만들어내지 않는다.
+        estimatedArrivalAt: evaluation?.estimatedArrivalAt,
       ),
     );
   }

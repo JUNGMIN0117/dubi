@@ -602,25 +602,30 @@ class _TodayScheduleCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F8F2),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Text(
-                    '예정',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: DdubiColors.green,
+                // 끝난 일정에는 "예정" 을 붙이지 않는다. 제목 옆에 완료·취소 뱃지가 이미
+                // 있는데 오른쪽에 "예정" 까지 붙어 두 상태가 동시에 보였다(2026-09-22 제보).
+                if (!ScheduleStatusBadge.shows(schedule.status)) ...[
+                  Container(
+                    key: const Key('scheduleUpcomingBadge'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F8F2),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      '예정',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: DdubiColors.green,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 4),
+                  const SizedBox(width: 4),
+                ],
                 const Icon(
                   Icons.chevron_right_rounded,
                   color: Color(0xFF1D3F8E),

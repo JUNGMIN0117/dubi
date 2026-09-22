@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-FEATURE_VERSION = "bus-segment-feature-v1"
+FEATURE_VERSION = "bus-segment-feature-v2"
 SNAPSHOT_KIND = "CURRENT"
 FEATURE_NAMES = (
     "busCongestionCode",
@@ -18,6 +18,11 @@ FEATURE_NAMES = (
     "roadSpeedKph",
     "roadTravelSeconds",
     "roadCoverageRatio",
+    "verifiedIncidentCount",
+    "incidentUnmatchedCount",
+    "incidentDataAvailable",
+    "incidentMinAgeMinutes",
+    "incidentSnapshotAgeMinutes",
     "accidentCount",
     "closureCount",
     "assemblyCount",
@@ -281,6 +286,8 @@ class OnlineFeatureAssembler:
         if city and city.get("primaryProviderAreaId"):
             source_keys["city"] = ["city:latest:area:{}".format(city["primaryProviderAreaId"])]
         source_keys["bus"] = [f"ml:latest:bus-segment:{segment_id}"]
+        if road:
+            source_keys["incident"] = ["traffic:latest:incident-snapshot:all-current"]
 
         flat_keys = [key for values in source_keys.values() for key in values]
         raw_values = self.client.mget(flat_keys) if flat_keys else []
@@ -339,6 +346,56 @@ class OnlineFeatureAssembler:
                 "linkCount": total_road_links,
                 "validLinkCount": len(valid_roads),
             }
+
+        incident_key = source_keys.get("incident", [None])[0]
+        incident = decoded.get(incident_key) if incident_key else None
+        if incident and road:
+            try:
+                observed = _instant(incident["collectedAt"])
+                expires = _instant(incident["validUntil"])
+            except (KeyError, TypeError, ValueError):
+                observed = expires = None
+            if (
+                incident.get("snapshotVersion") == "traffic-incident-snapshot-v1"
+                and incident.get("completeSnapshot") is True
+                and incident.get("linkMasterAvailable") is True
+                and incident.get("linkNamespace") == "SEOUL_ACCINFO_LINK"
+                and incident.get("linkMasterVersion") == road.get("trafficLinkMasterVersion")
+                and observed is not None and observed <= as_of < expires
+                and passage_at < expires
+                and isinstance(incident.get("incidents"), list)
+                and isinstance(road.get("topisLinkIds"), list)
+            ):
+                links = set(road["topisLinkIds"])
+                matched = {}
+                for row in incident["incidents"]:
+                    if not isinstance(row, dict) or row.get("matchedLinkId") not in links:
+                        continue
+                    try:
+                        started = _instant(row["startedAt"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if started <= as_of and row.get("providerIncidentId"):
+                        matched[row["providerIncidentId"]] = started
+                features["verifiedIncidentCount"] = len(matched)
+                features["incidentUnmatchedCount"] = _integer(incident.get("unmatchedIncidentCount"), 0)
+                features["incidentDataAvailable"] = True
+                features["incidentMinAgeMinutes"] = (
+                    min((as_of - started).total_seconds() for started in matched.values()) / 60
+                    if matched else None
+                )
+                features["incidentSnapshotAgeMinutes"] = (as_of - observed).total_seconds() / 60
+                valid_until_values.append(expires)
+                provenance["incident"] = {
+                    "key": incident_key,
+                    "eventId": incident.get("eventId"),
+                    "collectedAt": incident["collectedAt"],
+                    "validUntil": incident["validUntil"],
+                    "linkMasterVersion": incident["linkMasterVersion"],
+                    "unmatchedIncidentCount": incident.get("unmatchedIncidentCount"),
+                }
+        if features["incidentDataAvailable"] is None:
+            features["incidentDataAvailable"] = False
 
         for key in source_keys.get("city", []):
             value = decoded.get(key)

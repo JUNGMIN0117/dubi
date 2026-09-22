@@ -10,6 +10,7 @@ from common.kafka_source import read_events_stream
 from common.redis_sink import write_latest_with_row_ttl
 from common.settings import Settings
 from common.traffic_incident_enrichment import VerifiedLinkMaster, normalize_incident
+from common.traffic_incident_features import SNAPSHOT_KEY, build_incident_snapshot
 from common.traffic_incident_policy import policy
 from common.traffic_incident_runtime import supervise
 from pyspark.sql import SparkSession
@@ -157,6 +158,29 @@ def main():
                 rows.unpersist()
         finally:
             normalized.unpersist()
+        snapshot_events = frame.filter(F.col("eventType") == "traffic.incident.snapshot").select("rawEventJson").collect()
+        if snapshot_events:
+            import redis
+            from datetime import datetime, timezone
+
+            client = redis.Redis(host=settings.redis_host, port=settings.redis_port,
+                                 password=settings.redis_password or None, decode_responses=True)
+            try:
+                for item in snapshot_events:
+                    snapshot = build_incident_snapshot(json.loads(item.rawEventJson), master, incident_policy.stale_seconds)
+                    if snapshot is None:
+                        continue
+                    ttl = int((datetime.fromisoformat(snapshot["validUntil"]) - datetime.now(timezone.utc)).total_seconds())
+                    if ttl <= 0:
+                        continue
+                    # A delayed Kafka batch must not replace a newer complete poll.
+                    client.eval(
+                        "local old=redis.call('GET',KEYS[1]); if old and cjson.decode(old).collectedAt >= ARGV[1] then return 0 end; "
+                        "redis.call('SET',KEYS[1],ARGV[2],'EX',ARGV[3]); return 1",
+                        1, SNAPSHOT_KEY, snapshot["collectedAt"], json.dumps(snapshot, ensure_ascii=False), ttl,
+                    )
+            finally:
+                client.close()
 
     def start_redis():
         return (

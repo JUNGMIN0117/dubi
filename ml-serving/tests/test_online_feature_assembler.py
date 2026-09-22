@@ -209,7 +209,7 @@ def test_valid_from_missing_values_and_historical_request_are_handled_without_fa
     assert result["features"]["cityCongestionLevel"] is None
     assert "temperatureC" in result["missingFeatures"]
     assert "cityCongestionLevel" in result["missingFeatures"]
-    cache_key = f"ml:feature:bus-segment:bus-segment-feature-v1:{MASTER}:{SEGMENT}"
+    cache_key = f"ml:feature:bus-segment:bus-segment-feature-v2:{MASTER}:{SEGMENT}"
     assert client.get(cache_key) is None
 
 
@@ -217,7 +217,8 @@ def test_all_missing_sources_receive_only_short_result_validity():
     client = FakeRedis()
     result = OnlineFeatureAssembler(client, cache_ttl_seconds=900, now=lambda: NOW).assemble(request())
     assert result["validUntil"] == "2026-09-18T01:01:00+00:00"
-    assert all(value is None for value in result["features"].values())
+    assert result["features"]["incidentDataAvailable"] is False
+    assert all(value is None for name, value in result["features"].items() if name != "incidentDataAvailable")
     assert result["provenance"]["mappings"]["city"]["status"] == "ACTIVE_MAPPING_MISSING"
 
 
@@ -334,3 +335,54 @@ def test_ml_serving_feature_endpoint_is_unavailable_when_disabled(monkeypatch):
                 assert batch.json()["detail"] == "FEATURE_STORE_NOT_READY"
 
     asyncio.run(exercise())
+
+
+def test_verified_incidents_join_only_resolved_links_and_deduplicate():
+    client = configured()
+    road_key = client.get(f"ml:mapping:bus-road:active:{MASTER}")
+    road = json.loads(client.hashes[road_key][SEGMENT])
+    road["trafficLinkMasterVersion"] = "link-v1"
+    client.hashes[road_key][SEGMENT] = json.dumps(road)
+    client.strings["traffic:latest:incident-snapshot:all-current"] = json.dumps({
+        "snapshotVersion": "traffic-incident-snapshot-v1", "eventId": "poll-1",
+        "collectedAt": "2026-09-18T09:58:00+09:00", "validUntil": "2026-09-18T10:28:00+09:00",
+        "completeSnapshot": True, "linkMasterAvailable": True,
+        "linkNamespace": "SEOUL_ACCINFO_LINK", "linkMasterVersion": "link-v1",
+        "unmatchedIncidentCount": 2,
+        "incidents": [
+            {"providerIncidentId": "A", "matchedLinkId": "L1", "startedAt": "2026-09-18T09:50:00+09:00"},
+            {"providerIncidentId": "A", "matchedLinkId": "L2", "startedAt": "2026-09-18T09:50:00+09:00"},
+            {"providerIncidentId": "B", "matchedLinkId": "OTHER", "startedAt": "2026-09-18T09:40:00+09:00"},
+            {"providerIncidentId": "FUTURE", "matchedLinkId": "L1", "startedAt": "2026-09-18T10:01:00+09:00"},
+        ],
+    })
+    result = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
+    assert result["features"]["verifiedIncidentCount"] == 1
+    assert result["features"]["incidentUnmatchedCount"] == 2
+    assert result["features"]["incidentDataAvailable"] is True
+    assert result["features"]["incidentMinAgeMinutes"] == 10
+    assert result["features"]["incidentSnapshotAgeMinutes"] == 2
+
+
+def test_incident_snapshot_requires_valid_master_and_live_complete_poll():
+    client = configured()
+    road_key = client.get(f"ml:mapping:bus-road:active:{MASTER}")
+    road = json.loads(client.hashes[road_key][SEGMENT])
+    road["trafficLinkMasterVersion"] = "link-v1"
+    client.hashes[road_key][SEGMENT] = json.dumps(road)
+    key = "traffic:latest:incident-snapshot:all-current"
+    base = {
+        "snapshotVersion": "traffic-incident-snapshot-v1", "collectedAt": "2026-09-18T09:58:00+09:00",
+        "validUntil": "2026-09-18T10:28:00+09:00", "completeSnapshot": True,
+        "linkMasterAvailable": True, "linkNamespace": "SEOUL_ACCINFO_LINK",
+        "linkMasterVersion": "link-v1", "unmatchedIncidentCount": 0, "incidents": [],
+    }
+    client.strings[key] = json.dumps(base)
+    result = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
+    assert result["features"]["verifiedIncidentCount"] == 0
+    for change in ({"completeSnapshot": False}, {"linkMasterAvailable": False},
+                   {"linkMasterVersion": "wrong"}, {"validUntil": "2026-09-18T09:59:00+09:00"}):
+        client.strings[key] = json.dumps({**base, **change})
+        result = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
+        assert result["features"]["verifiedIncidentCount"] is None
+        assert result["features"]["incidentDataAvailable"] is False

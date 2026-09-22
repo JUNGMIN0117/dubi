@@ -38,6 +38,9 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
 
   /// 마지막으로 불러온 계산의 id. 같은 값이면 다시 부르지 않는다.
   String? _loadedFor;
+
+  /// 조회에 실패한 계산의 id. 값이 있으면 "다시 불러오기" 를 띄운다.
+  String? _retryFor;
   bool _loading = false;
 
   @override
@@ -62,28 +65,71 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
   }
 
   Future<void> _load(String evaluationId) async {
-    setState(() => _loading = true);
+    // 계산이 바뀐 순간 지난 안내를 내린다.
+    //
+    // 예전에는 조회가 실패해도 _guide 를 그대로 뒀다. 그 결과 새 계산 화면에 지난
+    // 계산의 경로·출발시각·요금이 계속 보였고, 사용자는 그게 방금 결과라고 믿었다
+    // (BE 지적, 2026-09-22). 빈 카드가 틀린 카드보다 낫다.
+    setState(() {
+      _loading = true;
+      _guide = null;
+      _loadedFor = null;
+    });
     try {
       final guide = await widget.api.getLatestGuide(widget.scheduleId);
       if (!mounted) return;
       setState(() {
-        // 계산이 아직이면(409) null 이 온다. 이때는 지난 안내를 지우지 않는다.
         if (guide != null) {
           _guide = guide;
           _loadedFor = evaluationId;
+          _retryFor = null;
+        } else {
+          // 계산이 아직이면(409) null 이 온다. 곧 다시 부를 수 있게 열어 둔다.
+          _retryFor = evaluationId;
         }
       });
     } on Object {
-      // 안내를 못 받아도 화면의 다른 정보는 그대로 쓸 수 있다. 조용히 넘긴다.
+      // 안내를 못 받아도 화면의 다른 정보는 그대로 쓸 수 있다. 오류 화면은 띄우지 않는다.
+      if (mounted) setState(() => _retryFor = evaluationId);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  /// 다시 불러본다. 실패했던 계산에 대해서만 동작한다.
+  ///
+  /// 안내는 화면의 곁가지라 자동으로 계속 조르지 않는다. 사용자가 원할 때만 부른다.
+  Future<void> _retry() async {
+    final id = _retryFor;
+    if (id == null || _loading) return;
+    await _load(id);
+  }
+
   @override
   Widget build(BuildContext context) {
     final guide = _guide;
-    if (guide == null) return const SizedBox.shrink();
+    if (guide == null) {
+      // 못 받았을 때 빈 자리로 두면 사용자가 다시 볼 방법이 없다. 단추 하나만 둔다.
+      if (_retryFor == null || _loading) return const SizedBox.shrink();
+      return InfoCard(
+        key: const Key('recommendationGuideRetry'),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                '추천 안내를 아직 불러오지 못했어요.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
+              ),
+            ),
+            TextButton(
+              key: const Key('guideRetryButton'),
+              onPressed: _retry,
+              child: const Text('다시 불러오기'),
+            ),
+          ],
+        ),
+      );
+    }
     return InfoCard(
       key: const Key('recommendationGuideCard'),
       child: Column(
@@ -118,6 +164,25 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
                 color: DdubiColors.navy,
               ),
             ),
+          // 무엇이 바뀌었는지(서버 판정)와 왜 그런지(GMS 문장). 이 둘이 GMS 를 붙인
+          // 이유인데 예전에는 앱이 아예 읽지 않아 화면에 나오지 않았다(BE 지적, 2026-09-22).
+          if (_changeLabel(guide.changeType) != null) ...[
+            const SizedBox(height: 8),
+            _changeBadge(guide.changeType!),
+          ],
+          if (guide.recommendationReason != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              guide.recommendationReason!,
+              key: const Key('guideRecommendationReason'),
+              style: const TextStyle(
+                fontSize: 13.5,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF344054),
+              ),
+            ),
+          ],
           if (guide.routeSummary != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -165,6 +230,50 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 서버가 확정한 변경 유형을 사람 말로 바꾼다.
+  ///
+  /// 모르는 값이면 null 을 돌려주고 아무것도 그리지 않는다. 서버가 나중에 유형을
+  /// 늘렸을 때 앱이 영어 코드를 그대로 보여주는 일이 없어야 한다.
+  static String? _changeLabel(String? changeType) => switch (changeType) {
+    'ROUTE_CHANGED' => '다른 경로 제안',
+    'DEPARTURE_TIME_CHANGED' => '출발시각 변경 제안',
+    'ETA_UPDATED' => '도착 예상 변경',
+    'NO_CHANGE' => '지금 경로 유지',
+    _ => null,
+  };
+
+  /// 유형별 색. 바꾸라는 제안은 눈에 띄게, 유지는 차분하게.
+  static (Color, Color) _changeColors(String changeType) =>
+      switch (changeType) {
+        'ROUTE_CHANGED' ||
+        'DEPARTURE_TIME_CHANGED' => (
+          const Color(0xFFFFF3E6),
+          const Color(0xFFB45309),
+        ),
+        'NO_CHANGE' => (const Color(0xFFE9F7EF), const Color(0xFF13703F)),
+        _ => (const Color(0xFFEEF3FA), const Color(0xFF3A5A87)),
+      };
+
+  Widget _changeBadge(String changeType) {
+    final (background, foreground) = _changeColors(changeType);
+    return Container(
+      key: const Key('guideChangeType'),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _changeLabel(changeType)!,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+          color: foreground,
+        ),
       ),
     );
   }

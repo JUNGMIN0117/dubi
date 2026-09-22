@@ -16,7 +16,7 @@ ml:feature:bus-segment:{featureVersion}:{masterVersion}:{segmentId}
 예시:
 
 ```text
-ml:feature:bus-segment:bus-segment-feature-v2:metropolitan-bus-v6:BUS:100100609:123456:123789
+ml:feature:bus-segment:bus-segment-feature-v3:metropolitan-bus-v6:BUS:100100609:123456:123789
 ```
 
 - `featureVersion`: JSON 필드·단위·결측 의미가 바뀌면 올린다.
@@ -59,6 +59,16 @@ TTL은 메모리 보관 상한일 뿐이다. ML은 TTL이 남아 있어도 `asOf
 `verifiedIncidentCount=0`은 **검증된 링크에서 0건**이라는 뜻이며 서울 전체 돌발이 없다는 뜻은 아니다.
 매핑이 미승인·만료되었거나 완전한 수집 회차가 없으면 건수는 `null`, 가용성은 `false`다.
 `accidentCount` 등 원인별 4개 필드는 공식 코드표의 분류가 검증될 때까지 `null`로 둔다.
+
+v3은 검증된 링크에 걸친 사건의 설명문 추출 결과를 추가한다. `incidentAiCoverageRatio`는
+해당 구간 사건 중 GMS 추출이 성공하고 `aiExtractedAt <= asOf`인 비율이다. 유형별
+`textAccidentCount`, `textConstructionCount`, `textBreakdownCount`, 통제 범위별
+`textFullClosureCount`, `textPartialClosureCount`, 우회 언급 수 `busDetourMentionCount`,
+예정/완료 언급 수 `textPlannedIncidentCount`, `textCompletedIncidentCount`를 제공한다.
+모든 사건의 해당 필드가 검증되지 않으면 그 집계는 `null`이다.
+`maxExplicitClosedLaneCount`는 원문에 `N개 차로`가 명시된 경우에만 값이 있으며
+`N차로`의 차로 번호를 개수로 바꾸지 않는다. 모델 추출 완료시각이 요청 `asOf`보다
+늦으면 당시에는 알 수 없던 결과로 보고 사용하지 않는다.
 
 ## ML 배치 조회
 

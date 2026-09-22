@@ -39,3 +39,15 @@ def test_partial_or_malformed_poll_cannot_create_zero_snapshot():
     assert build_incident_snapshot(_event([], payload={"items": [], "rowCount": 1,
                                                         "completeSnapshot": True}), _master()) is None
     assert build_incident_snapshot(_event([_row("", "L1")]), _master()) is None
+
+
+def test_verified_snapshot_carries_text_features_for_segment_join():
+    class Extractor:
+        def enrich_many(self, rows):
+            return [{**row, "aiExtractionStatus": "VALID", "aiIncidentKind": "ACCIDENT",
+                     "aiExtractedAt": "2026-09-18T09:59:00+09:00"} for row in rows]
+
+    snapshot = build_incident_snapshot(_event([_row("A", "L1")]), _master(), extractor=Extractor())
+    incident = snapshot["incidents"][0]
+    assert incident["matchedLinkId"] == "L1"
+    assert incident["textFeatures"]["aiIncidentKind"] == "ACCIDENT"

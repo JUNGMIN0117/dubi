@@ -722,7 +722,7 @@
           },
           "featureVersion": {
             "type": "string",
-            "const": "bus-segment-feature-v2",
+            "const": "bus-segment-feature-v3",
             "title": "Featureversion"
           },
           "masterVersion": {

@@ -8,18 +8,23 @@ TOPIS 공지의 [기존 GMS 구조화 방식](contracts/topis-notice-enrichment.
 
 ## 확인한 문장 표본
 
-아래 1~3은 [저장소의 OA-13315 테스트 fixture](../collector/tests/test_traffic_incident.py)다. **실제 API 관측값이 아니다.** 4~6은 [TOPIS 공개 화면](https://topis.seoul.go.kr/)의 돌발 표시를 요약한 것으로, OA-13315의 `ACC_INFO` 원문과 동일한지는 아직 검증하지 못했다. 현재 저장소에는 수집된 실제 `ACC_INFO` 표본 파일이 없다.
+2026-09-22 OA-13315 실시간 전체 응답 43건(서로 다른 설명문 42건)을 확인했다. 원본은
+저장소에 올리지 않고 로컬 `sparkjobs/data/incident-ai-review/live/source.json`에만 보존했다.
+사건 유형 코드는 `A04` 39건, `A01` 3건, `A02` 1건이었다. 아래 1~3은 테스트 fixture,
+4~6은 당시 실제 응답에서 확인한 문장 형태를 요약한 것이다.
 
 | 표본 | 문장 요지 | 확실히 뽑을 수 있는 값 | 주의할 점 |
 |---|---|---|---|
 | 1 · fixture | 세종대로 사고, **2개 차로** 통제 | `closedLaneCount=2` | 유형 코드는 공식 코드표로 확인 |
 | 2 · fixture | 행사로 인한 도로 통제 | `controlMentioned=true` | 부분/전면, 차로 수는 모름 |
 | 3 · fixture | 공사로 인한 부분 통제 | `controlScope=PARTIAL` | 통제 차로 수는 모름 |
-| 4 · TOPIS 화면 | 추돌사고, **2차로** 부분통제 | `laneNumbers=[2]`, `controlScope=PARTIAL` | **2개 차로 통제라는 뜻이 아님** |
-| 5 · TOPIS 화면 | 양방향 **하위 1개 차로** 통제 | `closedLaneCount=1`, `direction=BOTH` | 버스 진행 방향과의 일치 여부는 별도 판단 |
-| 6 · TOPIS 화면 | 양방향 **전면통제** | `controlScope=FULL`, `direction=BOTH` | 차로 총수는 모름; `closedLaneCount=null` |
+| 4 · 실제 응답 요약 | **3,4차로 추돌사고** | `laneNumbers=[3,4]` | 2개 차로 통제로 환산하지 않음 |
+| 5 · 실제 응답 요약 | 양방향 **하위 1개 차로** 통제 | `closedLaneCount=1`, `directionText=양방향` | 버스 진행 방향과의 일치 여부는 별도 판단 |
+| 6 · 실제 응답 요약 | 양방향 **전면통제** | `controlScope=FULL`, `directionText=양방향` | 차로 총수는 모름; `closedLaneCount=null` |
 
-이 표본으로 입력 형태의 차이를 확인했지만 분류 정확도는 측정할 수 없다. 실제 OA-13315 응답에서 사고·공사·집회·차로 번호·차로 개수·전면통제·완료 표현을 포함한 표본을 확보해 사람이 정답을 붙인 뒤 평가해야 한다.
+실제 응답 8건을 GMS에 보내 코드의 원문 근거 검증을 통과했다. 이것은 사람이 정답을 붙인
+정확도 평가가 아니다. 모델이 `1차로`를 1개 차로로 잘못 해석한 사례는 후속 규칙이 버리고
+`aiQualityFlags`에 남겼다. 사고·공사·집회·완료 표현의 라벨 평가를 거친 뒤 운영 활성화를 결정한다.
 
 ## 추출 결과: 사건 1건당 1행
 
@@ -44,8 +49,8 @@ TOPIS 공지의 [기존 GMS 구조화 방식](contracts/topis-notice-enrichment.
 
 1. **원천 확인:** 기존 Collector → Kafka → Silver는 유지한다. 원천 ID, 링크, 시각, 설명을 보존한다.
 2. **구조화 값 우선:** `ACC_TYPE`/`ACC_DTYPE`을 공식 코드표로 분류한다. `startedAt`은 원천 발생시각을 쓴다. `expectedClearAt`은 예측 종료이므로 실제 종료로 바꾸지 않는다.
-3. **설명문 추출:** `providerIncidentId + description·유형의 해시 + promptVersion`이 처음 나타나거나 수정될 때만 GMS를 호출한다. 간단한 표현은 규칙으로 먼저 추출하고, 복합 문장 또는 규칙 결과가 불확실한 경우 GMS를 적용해 비용과 품질을 비교한다. 기존 TOPIS 공지의 `GmsClient` 연결·재시도·JSON 검증 방식을 활용하되 돌발 전용 프롬프트와 스키마를 사용한다.
-4. **검증:** enum/숫자 범위/근거 문자열을 검사한다. `2차로`와 `2개 차로`를 별개 필드로 둔다. 문장과 원천 코드가 충돌하면 자동으로 원천 값을 바꾸지 않고 `CONFLICT`로 남긴다. 응답 실패는 `UNKNOWN`; 사건 자체는 버리지 않는다.
+3. **설명문 추출:** 제공자 사건 ID·설명문·모델·프롬프트 버전의 해시가 처음 나타나거나 수정될 때만 GMS를 호출한다. SQLite 영속 캐시와 배치 호출 상한을 사용한다. GMS가 제안한 유형·차로·통제·시각을 코드가 원문과 다시 대조한다.
+4. **검증:** enum/숫자 범위/근거 문자열을 검사한다. `2차로`와 `2개 차로`를 별개 필드로 둔다. 근거가 없는 제안은 해당 필드만 `UNKNOWN`/`null`로 바꾸고 `aiQualityFlags`에 남긴다. 원천 사건 유형 코드를 바꾸지 않는다. 응답 실패 시 `aiExtractionStatus`만 오류로 표시하고 사건 자체는 버리지 않는다.
 5. **저장:** 동일한 사건별 정규화 행을 Redis 최신값과 선택적 HDFS 이력에 쓴다. 원문, 추출 값, 모델·프롬프트 버전, 상태를 함께 저장한다. 현재의 Redis **전체 돌발 스냅샷**에도 검증된 추출 값만 전달한다. GMS 결과가 늦으면 기존 링크/건수 집계는 계속 동작한다.
 6. **구간 집계:** 승인된 `segmentId → LINK_ID 목록`과 `matchedLinkId`를 연결하고, 예측 기준시각 `asOf` 이전에 관측된 현재 사건만 집계한다. 통과 예정시각 `passageAt`에 실제 활성 상태가 보증되지 않으면 미래까지 영향이 확정된 것처럼 처리하지 않는다.
 
@@ -55,12 +60,12 @@ TOPIS 공지의 [기존 GMS 구조화 방식](contracts/topis-notice-enrichment.
 |---|---|---|
 | `verifiedIncidentCount` | 구간 링크와 일치하는 고유 사건 수 | 이미 구현 |
 | `incidentMinAgeMinutes` | 일치 사건 중 가장 최근 발생시각부터 `asOf`까지 | 이미 구현 |
-| `fullClosureIncidentCount` | `controlScope=FULL` 사건 수 | GMS 추출·연결 필요 |
-| `partialClosureIncidentCount` | `controlScope=PARTIAL` 사건 수 | GMS 추출·연결 필요 |
-| `maxExplicitClosedLaneCount` | 개수가 **명시된** 사건에서 최대 통제 차로 수 | GMS 추출·연결 필요; 모르면 `null` |
-| `detourMentionedIncidentCount` | 원문에 우회가 명시된 사건 수 | GMS 추출·연결 필요 |
+| `textFullClosureCount` | `controlScope=FULL` 사건 수 | v3 온라인 집계 구현; 승인 링크 매핑 필요 |
+| `textPartialClosureCount` | `controlScope=PARTIAL` 사건 수 | v3 온라인 집계 구현; 승인 링크 매핑 필요 |
+| `maxExplicitClosedLaneCount` | 개수가 **명시된** 사건에서 최대 통제 차로 수 | v3 온라인 집계 구현; 모르면 `null` |
+| `busDetourMentionCount` | 원문에 버스 우회가 명시된 사건 수 | v3 온라인 집계 구현 |
 | `roadSpeedKph`, `roadCoverageRatio` | 같은 구간의 실시간 도로 속도·관측 비율 | 기존 온라인 조립기에 구현 |
-| `incidentSnapshotAgeMinutes`, `aiExtractionAvailable` | 원천·AI 값의 신선도와 가용성 | 전자는 구현, 후자는 추가 필요 |
+| `incidentSnapshotAgeMinutes`, `incidentAiCoverageRatio` | 원천 신선도와 구간 내 유효한 AI 추출 비율 | v3 온라인 집계 구현 |
 
 한 구간에 사건이 여러 개면 사건 ID로 중복 제거 후 집계한다. `maxExplicitClosedLaneCount=0`은 **확인된 0개**일 때만 쓰고, 문장에 개수가 없으면 `null`이다. 차로 번호는 차로 수로 합산하지 않는다. `accidentCount` 등 유형별 건수는 공식 코드표 검증 후 추가한다.
 
@@ -78,3 +83,12 @@ TOPIS 공지의 [기존 GMS 구조화 방식](contracts/topis-notice-enrichment.
 1. 실제 OA-13315 `ACC_INFO` 표본을 여러 유형에서 확보하고 개인 식별 정보가 없는지 확인한다. 이번 문서의 표본 1~3은 fixture, 4~6은 TOPIS 화면 요약이라 동일 API 표본으로 간주하지 않는다.
 2. 동일 표본에 규칙만 적용한 결과와 GMS 결과를 나란히 비교한다. 특히 `2차로`/`2개 차로`, 완료/예정, 양방향/한 방향을 검사한다.
 3. 선택한 새 특성으로 과거 **버스 구간 이동시간** 예측을 재학습·시간순 검증하고, 기존 특성만 쓴 모델 대비 오차가 줄어드는지 측정한다. 효과가 확인된 필드만 운영 특성 계약에 추가한다.
+
+## 현재 구현 실행
+
+- `infra/.env`에 이미 있는 `GMS_API_KEY`를 사용한다. 키와 실시간 응답 원문은 Git에 넣지 않는다.
+- 로컬 표본 재검증: `python sparkjobs/tools/verify_incident_ai.py --fetch --env-file infra/.env --output sparkjobs/data/incident-ai-review/live --limit 8`
+- Spark 서비스의 `TRAFFIC_INCIDENT_AI_ENABLED` 기본값은 `false`다. 검토 후 `true`로 켜면
+  Redis 최신 행과 선택적 HDFS Silver 행에 동일한 AI 컬럼을 기록한다.
+- 모델 사용에는 승인된 서울 링크 마스터 및 버스 구간 대응표가 별도로 필요하다.
+  현재 저장소의 미승인 후보 연결로 돌발 위치를 확정하지 않는다.

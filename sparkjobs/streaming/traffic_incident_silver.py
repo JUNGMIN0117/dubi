@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from common.kafka_source import read_events_stream
 from common.redis_sink import write_latest_with_row_ttl
 from common.settings import Settings
+from common.traffic_incident_ai import enrich_rows, extractor_from_env
 from common.traffic_incident_enrichment import VerifiedLinkMaster, normalize_incident
 from common.traffic_incident_features import SNAPSHOT_KEY, build_incident_snapshot
 from common.traffic_incident_policy import policy
@@ -54,6 +55,9 @@ STRINGS = (
     "descriptionRegion",
     "processingStatus",
     "rawPayloadJson",
+    "aiExtractionStatus", "aiIncidentKind", "aiIncidentDetail", "aiControlScope", "aiDirectionText",
+    "aiStatusMention", "aiTimeExpressionsJson", "aiControlStartAt", "aiControlEndAt", "aiEvidenceJson",
+    "aiExtractedAt", "aiModel", "aiPromptVersion", "aiInputHash",
 )
 SCHEMA = T.StructType(
     [T.StructField(name, T.StringType()) for name in STRINGS]
@@ -62,9 +66,11 @@ SCHEMA = T.StructType(
         for name in ("grs80tmX", "grs80tmY", "latitude", "longitude", "linkCoordinateDistanceMeters")
     ]
     + [T.StructField("nearbyCandidateCount", T.IntegerType())]
+    + [T.StructField("aiClosedLaneCount", T.IntegerType()), T.StructField("aiBusDetourMentioned", T.BooleanType()),
+       T.StructField("aiLaneNumbers", T.ArrayType(T.IntegerType()))]
     + [
         T.StructField(name, T.ArrayType(T.StringType()))
-        for name in ("missingFields", "qualityFlags", "rejectionReasons")
+        for name in ("missingFields", "qualityFlags", "rejectionReasons", "aiQualityFlags")
     ]
 )
 
@@ -86,7 +92,7 @@ def load_master(env):
     )
 
 
-def enrich_batch(batch, master, stale_seconds, direct_tolerance, nearby_max):
+def enrich_batch(batch, master, stale_seconds, direct_tolerance, nearby_max, extractor=None):
     values = batch.filter(F.col("eventType") == "traffic.incident").select("rawEventJson").collect()
     unique, rows = {}, []
     for item in values:
@@ -99,6 +105,7 @@ def enrich_batch(batch, master, stale_seconds, direct_tolerance, nearby_max):
             continue
     for event in unique.values():
         rows.append(normalize_incident(event, master, stale_seconds, direct_tolerance, nearby_max))
+    rows = enrich_rows(rows, extractor)
     return batch.sparkSession.createDataFrame(rows, SCHEMA) if rows else batch.sparkSession.createDataFrame([], SCHEMA)
 
 
@@ -129,6 +136,7 @@ def main():
     incident_policy = policy(os.environ)
     settings, target = Settings.from_env(), output_uri(os.environ)
     master = load_master(os.environ)
+    extractor = extractor_from_env(os.environ)
     if not master.available:
         log.warning("Verified traffic link master is unavailable; no DIRECT/NEARBY mapping will be produced")
     spark = (
@@ -143,6 +151,7 @@ def main():
             incident_policy.stale_seconds,
             incident_policy.direct_tolerance_meters,
             incident_policy.nearby_max_meters,
+            extractor,
         )
 
     def redis_batch(frame, batch_id):
@@ -160,14 +169,19 @@ def main():
             normalized.unpersist()
         snapshot_events = frame.filter(F.col("eventType") == "traffic.incident.snapshot").select("rawEventJson").collect()
         if snapshot_events:
-            import redis
             from datetime import datetime, timezone
+
+            import redis
 
             client = redis.Redis(host=settings.redis_host, port=settings.redis_port,
                                  password=settings.redis_password or None, decode_responses=True)
             try:
                 for item in snapshot_events:
-                    snapshot = build_incident_snapshot(json.loads(item.rawEventJson), master, incident_policy.stale_seconds)
+                    snapshot = build_incident_snapshot(
+                        json.loads(item.rawEventJson), master, incident_policy.stale_seconds, extractor=extractor,
+                        direct_tolerance=incident_policy.direct_tolerance_meters,
+                        nearby_max=incident_policy.nearby_max_meters,
+                    )
                     if snapshot is None:
                         continue
                     ttl = int((datetime.fromisoformat(snapshot["validUntil"]) - datetime.now(timezone.utc)).total_seconds())

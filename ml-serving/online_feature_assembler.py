@@ -8,7 +8,10 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-FEATURE_VERSION = "bus-segment-feature-v2"
+from incident_text_features import NAMES as INCIDENT_TEXT_NAMES
+from incident_text_features import aggregate_text_features
+
+FEATURE_VERSION = "bus-segment-feature-v3"
 SNAPSHOT_KIND = "CURRENT"
 FEATURE_NAMES = (
     "busCongestionCode",
@@ -36,7 +39,7 @@ FEATURE_NAMES = (
     "areaPopulationMin",
     "areaPopulationMax",
     "nearbyPopulation",
-)
+) + INCIDENT_TEXT_NAMES
 SEGMENT_PATTERN = re.compile(r"^BUS:[A-Za-z0-9._-]{1,50}(?::[A-Za-z0-9._-]{1,50}){2}$")
 SAFE_VERSION = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -368,6 +371,7 @@ class OnlineFeatureAssembler:
             ):
                 links = set(road["topisLinkIds"])
                 matched = {}
+                matched_rows = {}
                 for row in incident["incidents"]:
                     if not isinstance(row, dict) or row.get("matchedLinkId") not in links:
                         continue
@@ -377,6 +381,8 @@ class OnlineFeatureAssembler:
                         continue
                     if started <= as_of and row.get("providerIncidentId"):
                         matched[row["providerIncidentId"]] = started
+                        matched_rows[row["providerIncidentId"]] = row
+                features.update(aggregate_text_features(matched_rows.values(), as_of))
                 features["verifiedIncidentCount"] = len(matched)
                 features["incidentUnmatchedCount"] = _integer(incident.get("unmatchedIncidentCount"), 0)
                 features["incidentDataAvailable"] = True

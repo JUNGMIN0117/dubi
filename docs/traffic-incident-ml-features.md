@@ -7,7 +7,7 @@
 | 1 | OA-13315 `AccInfo` 전체 조회 | Collector가 기존 개별 돌발 이벤트와 함께, 완전한 회차에 한해 전체 목록 스냅샷 이벤트 발행 | `city.raw`의 `traffic.incident.snapshot` |
 | 2 | 전체 목록 스냅샷 | Silver가 사고 ID를 중복 제거하고 승인된 `SEOUL_ACCINFO_LINK` 마스터로 링크를 검증 | `traffic:latest:incident-snapshot:all-current` (최대 30분) |
 | 3 | 버스 `segmentId` | 승인된 `ml:mapping:bus-road:active:{masterVersion}`에서 해당 구간의 `topisLinkIds` 조회 | 구간에 속한 검증된 링크 목록 |
-| 4 | 검증된 링크 목록 + 최신 스냅샷 | ML 최신 특성 조립기가 링크 ID를 비교하고 중복 사건을 한 번만 집계 | `bus-segment-feature-v2` 현재 Snapshot |
+| 4 | 검증된 링크 목록 + 최신 스냅샷 | ML 최신 특성 조립기가 링크 ID를 비교하고 중복 사건을 한 번만 집계 | `bus-segment-feature-v3` 현재 Snapshot |
 
 수집 회차가 부분 성공이거나 스냅샷 이벤트가 Kafka 크기 제한(800 KB)을 넘으면 새 스냅샷을 발행하지 않는다. 이전 스냅샷은 30분 후 만료된다. 지연 도착한 오래된 회차가 최신 Redis 값을 덮지 못하게 막는다.
 
@@ -28,4 +28,4 @@
 - `TRAFFIC_LINK_MASTER_PATH`/SHA와 승인된 버스 도로 매핑이 배포되어야 한다. 후보 매핑이나 단순히 같은 숫자 링크 ID는 사용하지 않는다.
 - 현재 승인 매핑이 0건이면 `verifiedIncidentCount=null`, `incidentDataAvailable=false`가 정상이다. 실데이터 연결률을 측정하고 매핑을 승인해야 수치가 채워진다.
 - 링크를 확인하지 못한 돌발이 남아 있으면 `verifiedIncidentCount`는 전체 영향 건수의 **하한**일 수 있다. ML 학습에는 `incidentUnmatchedCount`, `incidentDataAvailable`을 함께 넣고, 이 수만으로 지연 여부를 단정하지 않는다.
-- `bus-segment-feature-v2`는 현재시점 온라인 특성 계약이다. 기존 학습 행 v1이나 배포 모델에 자동으로 입력되지 않는다. 과거 시점의 완전한 수집 회차와 당시 승인 매핑으로 같은 규칙의 학습 행을 만든 뒤 모델을 재학습해야 한다.
+- `bus-segment-feature-v3`는 현재시점 온라인 특성 계약이다. 설명문 GMS 추출값은 추출시각이 `asOf` 이후면 사용하지 않는다. 기존 학습 행 v1이나 배포 모델에 자동으로 입력되지 않는다. 과거 시점의 완전한 수집 회차와 당시 승인 매핑으로 같은 규칙의 학습 행을 만든 뒤 모델을 재학습해야 한다.

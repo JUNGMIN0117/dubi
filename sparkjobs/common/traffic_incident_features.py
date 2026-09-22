@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 
+from common.traffic_incident_ai import enrich_rows
 from common.traffic_incident_enrichment import LINK_NAMESPACE, normalize_incident
 
 SNAPSHOT_KEY = "traffic:latest:incident-snapshot:all-current"
@@ -12,7 +13,7 @@ def _time(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def build_incident_snapshot(event, master, stale_seconds=2700):
+def build_incident_snapshot(event, master, stale_seconds=2700, extractor=None, direct_tolerance=200, nearby_max=100):
     payload = event.get("payload") or {}
     items = payload.get("items")
     observed_at = event.get("collectedAt")
@@ -40,6 +41,8 @@ def build_incident_snapshot(event, master, stale_seconds=2700):
              "payload": {"raw": raw, "providerLinkNamespace": LINK_NAMESPACE}},
             master,
             stale_seconds=stale_seconds,
+            direct_tolerance_meters=direct_tolerance,
+            nearby_max_meters=nearby_max,
         )
         incident_id = normalized.get("providerIncidentId")
         if not incident_id:
@@ -48,10 +51,13 @@ def build_incident_snapshot(event, master, stale_seconds=2700):
             latest[incident_id] = normalized
         else:
             rejected_count += 1
+    enriched = enrich_rows(latest.values(), extractor)
     verified = [
         {"providerIncidentId": row["providerIncidentId"], "matchedLinkId": row["matchedLinkId"],
-         "startedAt": row["startedAt"], "locationMatchType": row["locationMatchType"]}
-        for row in latest.values()
+         "startedAt": row["startedAt"], "expectedClearAt": row["expectedClearAt"],
+         "locationMatchType": row["locationMatchType"],
+         "textFeatures": {k: v for k, v in row.items() if k.startswith("ai")}}
+        for row in enriched
         if row.get("matchedLinkId") and row.get("startedAt")
     ]
     return {

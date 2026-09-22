@@ -457,7 +457,10 @@ class ScheduleDetailScreen extends StatelessWidget {
               // 시간과 순서는 서버 계산값이고 앱은 받은 값을 그대로 쓴다.
               // 예전에는 이 카드가 경로 목록 위에 있었고, 옆에 내용 없는 "이 일정에 맞춰"
               // 카드가 따로 있었다. 둘을 한 장으로 합치고 경로 목록 아래로 내렸다.
-              if (recommendationApi != null) ...[
+              // 끝난 일정에는 안내를 띄우지 않는다. 이미 다녀온 일정에 "이 경로를 제안해요"
+              // 나 "안내를 불러오지 못했어요" 가 뜨면 아직 할 일이 남은 것처럼 읽힌다.
+              if (recommendationApi != null &&
+                  !ScheduleStatusBadge.shows(schedule.status)) ...[
                 RecommendationGuideCard(
                   api: recommendationApi!,
                   scheduleId: schedule.id,
@@ -470,13 +473,22 @@ class ScheduleDetailScreen extends StatelessWidget {
                 const SizedBox(height: 16),
               ],
               // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
-              // 칸을 넷으로 나눴다. 조회 API 가 붙기 전에는 네 칸 모두 "확인 안 됨"이다.
-              TravelConditionsCard(
-                scheduleId: schedule.id,
-                service: recommendationApi,
-              ),
-              const SizedBox(height: 14),
-              if (repository is ScheduleEvaluationRepository)
+              // 칸을 넷으로 나눴다.
+              //
+              // 끝난 일정에는 띄우지 않는다. 이 값은 "지금" 의 날씨·혼잡도라서 어제 다녀온
+              // 일정 옆에 붙으면 그때의 상황으로 오해한다.
+              if (!ScheduleStatusBadge.shows(schedule.status)) ...[
+                TravelConditionsCard(
+                  scheduleId: schedule.id,
+                  service: recommendationApi,
+                ),
+                const SizedBox(height: 14),
+              ],
+              // 끝난 일정에는 이동 예측을 띄우지 않는다. 다시 계산할 것이 없다.
+              // else 로 흘러 "서버 예측에 연결되지 않았습니다" 가 뜨면 고장으로 읽힌다.
+              if (ScheduleStatusBadge.shows(schedule.status))
+                const SizedBox.shrink()
+              else if (repository is ScheduleEvaluationRepository)
                 // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.
                 ValueListenableBuilder<bool>(
                   valueListenable: DeveloperDiagnostics.enabled,

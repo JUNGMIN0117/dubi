@@ -1,4 +1,4 @@
-"""포털 공통키 우선순위와 기존 변수 fallback 검증."""
+"""소스별 전용키 우선과 포털 공통키 fallback 검증."""
 
 import os
 import sys
@@ -21,7 +21,7 @@ class PortalKeyTest(unittest.TestCase):
         return Settings(source="traffic_incident", kafka_bootstrap_servers="unused", api_keys=keys)
 
     def test_seoul_general_sources_share_one_key(self):
-        settings = self.settings({"SEOUL_OPEN_DATA_API_KEY": "shared", "TRAFFIC_INCIDENT_API_KEY": "legacy"})
+        settings = self.settings({"SEOUL_OPEN_DATA_API_KEY": "shared"})
         for source_name in (
             "SUBWAY_ALERT_API_KEY",
             "CITY_REALTIME_API_KEY",
@@ -29,6 +29,15 @@ class PortalKeyTest(unittest.TestCase):
             "TRAFFIC_INCIDENT_API_KEY",
         ):
             self.assertEqual(settings.api_key(source_name), "shared")
+
+    def test_existing_source_key_wins_over_portal_key(self):
+        # 운영 .env 에 남은 전용 키를 조용히 다른 키로 바꾸지 않는다.
+        seoul = self.settings({"SEOUL_OPEN_DATA_API_KEY": "shared", "TRAFFIC_INCIDENT_API_KEY": "legacy"})
+        self.assertEqual(seoul.api_key("TRAFFIC_INCIDENT_API_KEY"), "legacy")
+        self.assertEqual(seoul.api_key("TOPIS_NOTICE_API_KEY"), "shared")
+        bus = self.settings({"DATA_GO_KR_API_KEY": "portal", "BUS_ARRIVAL_API_KEY": "bus"})
+        self.assertEqual(bus.api_key("BUS_ARRIVAL_API_KEY"), "bus")
+        self.assertEqual(bus.api_key("BUS_LOCATION_API_KEY"), "portal")
 
     def test_environment_loads_new_portal_variable(self):
         with patch.dict(
@@ -54,7 +63,24 @@ class PortalKeyTest(unittest.TestCase):
         legacy = self.settings({"TRAFFIC_INCIDENT_API_KEY": "old"})
         self.assertEqual(legacy.api_key("TRAFFIC_INCIDENT_API_KEY"), "old")
 
-    def test_standalone_seoul_collectors_use_portal_key(self):
+    def test_standalone_seoul_collectors_use_portal_key_when_source_key_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "SEOUL_OPEN_DATA_API_KEY": "shared",
+                    "TRAFFIC_INCIDENT_API_KEY": "",
+                    "TOPIS_NOTICE_API_KEY": "",
+                    "SUBWAY_ALERT_API_KEY": "",
+                },
+            ):
+                self.assertEqual(traffic_incident.require_api_key(env_file), "shared")
+                self.assertEqual(topis_notice.require_api_key(env_file), "shared")
+                self.assertEqual(subway_alert.require_api_key(), "shared")
+
+    def test_standalone_seoul_collectors_keep_existing_source_key(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             env_file.write_text("", encoding="utf-8")
@@ -67,9 +93,9 @@ class PortalKeyTest(unittest.TestCase):
                     "SUBWAY_ALERT_API_KEY": "old-alert",
                 },
             ):
-                self.assertEqual(traffic_incident.require_api_key(env_file), "shared")
-                self.assertEqual(topis_notice.require_api_key(env_file), "shared")
-                self.assertEqual(subway_alert.require_api_key(), "shared")
+                self.assertEqual(traffic_incident.require_api_key(env_file), "old-incident")
+                self.assertEqual(topis_notice.require_api_key(env_file), "old-notice")
+                self.assertEqual(subway_alert.require_api_key(), "old-alert")
 
     def test_traffic_incident_collector_uses_shared_key(self):
         xml = """<AccInfo><list_total_count>1</list_total_count>

@@ -28,7 +28,9 @@ class Settings:
     api_keys: dict[str, str] = field(default_factory=dict)
     extra: dict[str, str] = field(default_factory=dict)  # 소스별 추가 설정 (예: WEATHER_GRID_POINTS)
 
-    # 포털별 공통 키를 우선 사용한다. 기존 소스별 변수는 배포 전환용 fallback이다.
+    # 소스별 전용 키가 있으면 그것을 먼저 쓰고, 없을 때만 포털별 공통 키를 쓴다.
+    # 운영 .env 에 남아 있는 전용 키를 조용히 다른 키로 바꾸지 않기 위한 순서다.
+    # 공통 키로 옮길 때는 .env 에서 해당 전용 변수를 지우면 그 소스만 전환된다.
     # 서울 실시간 지하철은 별도 전용 키이므로 일반키로 대체하지 않는다.
     API_KEY_NAMES = (
         "SEOUL_OPEN_DATA_API_KEY",
@@ -109,9 +111,9 @@ class Settings:
     def api_key(self, *names: str) -> str:
         """이름 순서대로 처음 발견되는 키를 돌려준다. 없으면 ConfigError."""
         for name in names:
+            if name in self.api_keys:
+                return self.api_keys[name]
             portal_name = self.PORTAL_KEY_BY_SOURCE.get(name)
             if portal_name and portal_name in self.api_keys:
                 return self.api_keys[portal_name]
-            if name in self.api_keys:
-                return self.api_keys[name]
         raise ConfigError(f"API 키가 없습니다: {' 또는 '.join(names)} 를 .env 에 설정하세요")

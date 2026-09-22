@@ -53,9 +53,11 @@ def load_env_file(path: Path = DEFAULT_ENV_PATH) -> None:
 
 def require_api_key() -> str:
     load_env_file()
-    api_key = (os.getenv(PORTAL_API_KEY_ENV_NAME) or os.getenv(API_KEY_ENV_NAME, "")).strip()
+    api_key = (os.getenv(API_KEY_ENV_NAME) or os.getenv(PORTAL_API_KEY_ENV_NAME, "")).strip()
     if not api_key:
-        raise SubwayAlertError(f"{DEFAULT_ENV_PATH}에 {PORTAL_API_KEY_ENV_NAME}를 설정해야 합니다.")
+        raise SubwayAlertError(
+            f"{DEFAULT_ENV_PATH}에 {API_KEY_ENV_NAME} 또는 {PORTAL_API_KEY_ENV_NAME}를 설정해야 합니다."
+        )
     return api_key
 
 

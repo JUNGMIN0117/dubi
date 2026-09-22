@@ -750,11 +750,15 @@ class _SavedRouteMapViewState extends State<_SavedRouteMapView> {
                 ),
               )
               .toList(growable: false),
-          // 좌표를 모르는 구간은 흐리게 그려 실제 경로와 구분한다. 추정임을 숨기지 않는다.
+          // 좌표를 모르는 구간은 조금 연하게 그려 실제 경로와 구분한다. 추정임을 숨기지
+          // 않되, 너무 연하면 지도 배경에 묻혀 아예 안 보인다(2026-09-22 기기 확인).
           color: line.approximate || line.mode == 'WALK'
-              ? color.withValues(alpha: 0.55).toARGB32()
+              ? color.withValues(alpha: 0.8).toARGB32()
               : color.toARGB32(),
-          width: line.mode == 'WALK' ? 5 : 7,
+          // 굵기는 기기에서 보고 정했다. 7 은 지도 위에서 실처럼 보여 있는지도 몰랐다.
+          width: line.mode == 'WALK' ? 12 : 16,
+          // 흰 테두리를 둘러 밝은 지도 배경에서도 선이 떠 보이게 한다.
+          strokeWidth: 3,
         );
         index++;
         drawn++;

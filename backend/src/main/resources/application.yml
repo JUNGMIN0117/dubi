@@ -116,6 +116,17 @@ logging:
   pattern:
     # requestId 는 RequestIdFilter 가 MDC 에 넣는다. 장애 추적의 기준 키다.
     console: "%d{HH:mm:ss.SSS} %-5level [%X{requestId:-}] %logger{36} - %msg%n"
+  level:
+    # 기동할 때마다 나오는 Flyway 업그레이드 권고를 내린다.
+    #
+    # "MySQL 8.4 is newer than this version of Flyway ... latest supported version is 8.1".
+    # 운영 DB 가 MySQL 8.4 LTS 인데 Spring Boot 3.4 가 붙여 주는 Flyway 10.20 은 8.1 까지만 안다.
+    # 실제 고장은 아니다 — V1~V15 가 모두 정상 적용됐고 실패 이력도 없다.
+    #
+    # 경고를 없애려면 Flyway 12 이상이 필요한데(10.22 도 11.13 도 상한이 8.1 이다), 그건 Spring Boot
+    # 3.4 가 검증한 조합 밖이라 지금 올리면 기동 자체가 위험해진다. Spring Boot 를 올릴 때 같이 푼다.
+    # 그때 이 줄을 지우면 경고가 다시 보인다.
+    org.flywaydb.core.internal.database.base.Database: ERROR
 
 # --- 뚜비 도메인 설정 -------------------------------------------------
 ddubi:

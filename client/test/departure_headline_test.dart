@@ -91,4 +91,107 @@ void main() {
     expect(content.tone, DepartureHeadlineTone.waiting);
     expect(content.title, contains('계산하고 있어요'));
   });
+
+  // ------------------------------------------------------------------
+  // 출발한 뒤
+  // ------------------------------------------------------------------
+
+  /// 서버는 멈춘 일정에도 마지막 계산 결과를 실어 준다(2026-09-22). 그 값으로 출발·도착·여유를
+  /// 그대로 보여준다. 예전의 "출발 안내가 끝났어요" 는 결과가 없을 때만 남는다.
+  test('출발한 뒤에는 실제 출발 시각과 도착 예정·여유를 그대로 보여준다', () async {
+    final raw = await _raw('keep');
+    raw['state'] = 'STOPPED';
+    final stopped = ScheduleEvaluationV2.fromJson(raw);
+    final departedAt = DateTime(2026, 9, 17, 23, 52);
+
+    final content = DepartureHeadlineContent.of(
+      stopped,
+      now,
+      departedAt: departedAt,
+    );
+
+    expect(content.tone, DepartureHeadlineTone.departed);
+    expect(content.label, '출발 시각');
+    expect(content.clockSuffix, '에 출발했어요');
+    expect(content.departAt, departedAt, reason: '서버가 기록한 실제 출발이 제안 시각보다 먼저다');
+    expect(content.arriveAt, stopped.estimatedArrivalAt);
+    expect(content.spareMinutes, isNotNull);
+    expect(content.title, contains('에 출발해'));
+    expect(content.title, contains('도착 예정'));
+    expect(content.title, isNot(contains('끝났어요')));
+  });
+
+  test('출발했는데 마지막 결과가 없는 예전 일정은 옛 문구를 그대로 쓴다', () {
+    final stopped = ScheduleEvaluationV2.fromJson({
+      'schemaVersion': 'schedule-evaluation-v2',
+      'state': 'STOPPED',
+    });
+
+    final content = DepartureHeadlineContent.of(stopped, now);
+
+    expect(content.tone, DepartureHeadlineTone.waiting);
+    expect(content.title, '이 일정의 출발 안내가 끝났어요.');
+    expect(content.departAt, isNull);
+  });
+
+  // ------------------------------------------------------------------
+  // 못 가는 경우는 못 간다고 말한다
+  // ------------------------------------------------------------------
+
+  /// 여유가 음수인데 초록 카드에 "늦음 3분" 이 작게 붙어 있으면 못 간다는 사실이 읽히지 않는다
+  /// (2026-09-22 제보). 제목부터 늦는다고 말하고 카드 전체를 붉게 한다.
+  test('이대로면 늦는 결과는 제목부터 늦는다고 말하고 붉게 그린다', () async {
+    final raw = await _raw('keep');
+    raw['latenessSeconds'] = 300;
+    raw['validUntil'] = now
+        .add(const Duration(minutes: 1))
+        .toUtc()
+        .toIso8601String();
+    final late = ScheduleEvaluationV2.fromJson(raw);
+
+    final content = DepartureHeadlineContent.of(late, now);
+
+    expect(content.tone, DepartureHeadlineTone.late);
+    expect(content.title, contains('늦어요'));
+    expect(content.title, contains('에 나가도'));
+    expect(content.spareMinutes, -5);
+    expect(DepartureHeadline.paletteOf(content).name, 'late');
+  });
+
+  // ------------------------------------------------------------------
+  // 여유에 따라 색이 달라진다
+  // ------------------------------------------------------------------
+
+  /// 안전할수록 지금의 초록, 빠듯할수록 붉어진다. 판단은 여유 분으로만 한다.
+  test('확정 카드 색은 여유에 따라 초록 → 노랑 → 주황으로 바뀐다', () {
+    DepartureHeadlineContent ready(int? spare) => DepartureHeadlineContent(
+      title: '',
+      tone: DepartureHeadlineTone.ready,
+      spareMinutes: spare,
+    );
+
+    expect(DepartureHeadline.paletteOf(ready(25)).name, 'safe');
+    expect(DepartureHeadline.paletteOf(ready(10)).name, 'safe');
+    expect(DepartureHeadline.paletteOf(ready(9)).name, 'hurry');
+    expect(DepartureHeadline.paletteOf(ready(5)).name, 'hurry');
+    expect(DepartureHeadline.paletteOf(ready(4)).name, 'tight');
+    expect(DepartureHeadline.paletteOf(ready(0)).name, 'tight');
+    // 여유를 모르면 겁주지 않는다.
+    expect(DepartureHeadline.paletteOf(ready(null)).name, 'safe');
+  });
+
+  test('참고·대기·주의 카드는 여유와 관계없이 성격별 색을 쓴다', () {
+    for (final tone in [
+      DepartureHeadlineTone.reference,
+      DepartureHeadlineTone.waiting,
+      DepartureHeadlineTone.attention,
+    ]) {
+      final content = DepartureHeadlineContent(
+        title: '',
+        tone: tone,
+        spareMinutes: 1,
+      );
+      expect(DepartureHeadline.paletteOf(content).name, tone.name);
+    }
+  });
 }

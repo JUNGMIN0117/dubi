@@ -233,9 +233,14 @@ ddubi:
     # gpt-5.5-pro는 Chat Completions가 아니라 Responses API 계약을 사용한다.
     path: /api.openai.com/v1/responses
     api-key: ${GMS_API_KEY:}
-    model: ${GMS_RECOMMENDATION_MODEL:gpt-5.5-pro}
-    # Pro 모델은 추론 시간이 길 수 있다. 카드 결과는 evaluationId 단위 Redis 캐시로 재호출을 막는다.
-    timeout-millis: ${GMS_RECOMMENDATION_TIMEOUT_MILLIS:20000}
+    # 기본은 가벼운 모델이다. pro 모델은 문장 하나에 크레딧 약 1,700 을 쓰고 20 초를 넘겨 시간 초과로
+    # 버려지는 일이 잦았다(2026-09-22, 하루 6 만 크레딧). compose 기본값과 같다.
+    model: ${GMS_RECOMMENDATION_MODEL:gpt-5.4-nano}
+    # 앱은 10 초까지만 기다린다. 서버가 그보다 오래 붙들면 앱은 실패로 보고 요청을 끊는데 크레딧은 그대로 나간다.
+    # 그래서 앱보다 짧게 둔다. 카드 결과는 evaluationId 단위 Redis 캐시로 재호출을 막는다.
+    timeout-millis: ${GMS_RECOMMENDATION_TIMEOUT_MILLIS:8000}
+    # 하루 호출 상한. 넘으면 그날은 서버 기본 문장만 쓴다. 모델·문구가 어떻게 바뀌어도 크레딧이 이 위로 새지 않는다.
+    daily-call-limit: ${GMS_RECOMMENDATION_DAILY_CALL_LIMIT:200}
   external:
     kakao:
       # 장소 검색과 대중교통 길찾기에 사용하는 카카오맵 REST API 주소

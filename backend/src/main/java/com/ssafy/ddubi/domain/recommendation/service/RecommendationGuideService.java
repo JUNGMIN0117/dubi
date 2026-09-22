@@ -11,20 +11,44 @@ import com.ssafy.ddubi.global.exception.ErrorCode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 /**
  * 최신 평가를 사용자용 추천 카드로 투영한다. 출발·도착·구간 순서와 지연 판정은 서버 계산값으로 고정하고 GMS에는 문장 표현만 맡긴다. 같은 evaluationId는
  * Redis에 캐시해 카드 조회마다 AI를 호출하지 않는다.
+ *
+ * <h3>GMS 를 부르는 조건 (2026-09-22 크레딧 사고 뒤)</h3>
+ *
+ * 하루에 크레딧 6 만이 나갔다. 원인은 셋이 겹친 것이다 — 출발이 가까우면 1 분마다 새 계산 번호가 생겨 캐시가 매번 빗나갔고, pro 모델이 20 초를 넘겨 시간 초과로
+ * 버려지면서도 크레딧은 나갔고, 만료된 결과는 캐시에 넣지 않아 같은 계산에 또 불렀다. 그래서 이제는:
+ *
+ * <ul>
+ *   <li>바뀐 것이 있을 때만 부른다 — 경로가 달라졌거나 출발시각이 달라졌거나 지연 원인이 있을 때. "그대로 유지" 는 서버 문장으로 충분하다.
+ *   <li>같은 계산 번호에는 한 번만 부른다 — 이미 만드는 중이면 기다리지 않고 서버 문장을 준다.
+ *   <li>하루 호출 상한을 둔다 — 넘으면 그날은 서버 문장만 쓴다.
+ *   <li>결과는 실패든 성공이든 최소 5 분은 캐시한다 — 만료가 임박했다고 캐시를 건너뛰면 다음 조회가 또 부른다.
+ * </ul>
  */
 @Service
 public class RecommendationGuideService {
+    private static final Logger log = LoggerFactory.getLogger(RecommendationGuideService.class);
     private static final String CACHE_PREFIX = "recommendation:guide:";
+    private static final String CALLS_PREFIX = CACHE_PREFIX + "gms-calls:";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /** 지금 GMS 문장을 만드는 중인 캐시 키. 같은 계산에 두 요청이 겹치면 뒤의 것은 부르지 않는다. */
+    private final Set<String> generating = ConcurrentHashMap.newKeySet();
+
     private static final List<String> CAUSE_PREFIXES =
             List.of(
                     "traffic:latest:incident-silver:",
@@ -95,7 +119,15 @@ public class RecommendationGuideService {
                         change,
                         new GmsRecommendationGuideClient.DelayFact(
                                 delay.status(), delay.reason(), delay.source(), delay.confirmed()));
-        var generated = gms.generate(facts).orElse(null);
+        GmsRecommendationGuideClient.GeneratedCopy generated = null;
+        boolean owner = false;
+        try {
+            if (worthAsking(change, delay)
+                    && (owner = generating.add(cacheKey))
+                    && withinDailyBudget(now)) generated = gms.generate(facts).orElse(null);
+        } finally {
+            if (owner) generating.remove(cacheKey);
+        }
         String delayReason =
                 generated != null && generated.delayExplanation() != null
                         ? generated.delayExplanation()
@@ -126,8 +158,45 @@ public class RecommendationGuideService {
                         evaluation.asOf(),
                         evaluation.validUntil(),
                         generated == null ? "TEMPLATE" : "GMS:" + properties.model());
-        cache(cacheKey, response, now, latest.frozen());
+        // 다른 요청이 같은 계산의 AI 문장을 만드는 중이면 이 서버 문장은 캐시하지 않는다. 늦게 끝난 쪽이 AI 문장을 덮어쓰면 안 된다.
+        if (owner || !generating.contains(cacheKey))
+            cache(cacheKey, response, now, latest.frozen());
         return response;
+    }
+
+    /**
+     * AI 문장이 서버 문장보다 나은 경우만 부른다. 경로나 출발시각이 바뀌었거나 지연 원인이 있을 때다. "지금 선택을 유지해도 돼요" 는 서버 문장으로 충분하고, 오늘
+     * 나간 크레딧의 대부분이 바로 이 경우였다.
+     */
+    static boolean worthAsking(
+            GmsRecommendationGuideClient.ChangeFact change,
+            RecommendationGuideResponse.Delay delay) {
+        return "ROUTE_CHANGED".equals(change.type())
+                || "DEPARTURE_TIME_CHANGED".equals(change.type())
+                || !"NO_CONFIRMED_DELAY".equals(delay.status());
+    }
+
+    /**
+     * 오늘(KST) GMS 호출 수를 하나 올리고 상한 안인지 본다. 카운터는 Redis 에 두어 서버가 다시 떠도 이어진다.
+     *
+     * <p>Redis 를 읽지 못하면 부른다. 카운터 장애로 안내 품질을 떨어뜨리지 않되, 상한을 넘긴 순간은 로그로 남겨 사람이 알 수 있게 한다.
+     */
+    private boolean withinDailyBudget(Instant now) {
+        try {
+            String key = CALLS_PREFIX + LocalDateTime.ofInstant(now, KST).toLocalDate();
+            Long calls = redis.opsForValue().increment(key);
+            if (calls == null) return true;
+            if (calls == 1) redis.expire(key, Duration.ofDays(2));
+            if (calls > properties.dailyCallLimit()) {
+                if (calls == properties.dailyCallLimit() + 1)
+                    log.warn(
+                            "GMS 일일 호출 상한 도달: {}회. 오늘은 서버 기본 문장만 쓴다.", properties.dailyCallLimit());
+                return false;
+            }
+            return true;
+        } catch (Exception ignored) {
+            return true;
+        }
     }
 
     /**
@@ -189,6 +258,12 @@ public class RecommendationGuideService {
     /** 멈춘 일정의 안내를 캐시에 두는 시간. 유효기간이 이미 지난 결과라 그 값으로는 TTL 을 잡을 수 없다. 하루 안에 다시 볼 일이 대부분이다. */
     static final Duration FROZEN_CACHE_TTL = Duration.ofHours(12);
 
+    /**
+     * 캐시에 두는 최소 시간. 예전에는 유효기간이 지났으면 캐시를 건너뛰었다. 그러면 같은 계산에 대한 다음 조회가 또 GMS 를 부른다 — 출발이 가까울 때 유효기간은 1
+     * 분이고 pro 모델은 그보다 오래 걸렸으니, 만들자마자 버려지고 다시 불렀다.
+     */
+    static final Duration MIN_CACHE_TTL = Duration.ofMinutes(5);
+
     private void cache(
             String key, RecommendationGuideResponse response, Instant now, boolean frozen) {
         try {
@@ -198,7 +273,7 @@ public class RecommendationGuideService {
                 ttl = FROZEN_CACHE_TTL;
             } else {
                 ttl = Duration.between(now, response.validUntil());
-                if (ttl.isNegative() || ttl.isZero()) return;
+                if (ttl.compareTo(MIN_CACHE_TTL) < 0) ttl = MIN_CACHE_TTL;
                 // 실시간 사실의 유효시각을 넘겨 AI 문장만 오래 남기지 않는다.
                 if (ttl.compareTo(Duration.ofMinutes(30)) > 0) ttl = Duration.ofMinutes(30);
             }

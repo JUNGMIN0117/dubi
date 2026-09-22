@@ -21,7 +21,7 @@
 ## 공식 API 검증
 
 `audit.py`가 만든 후보의 `LINK_ID`는 OA-13311 `LinkVerInfo`에서 현재 Vertex를 다시 확인한다.
-`verify_link_api.py`는 `TRAFFIC_INCIDENT_API_KEY`를 env 파일에서만 읽고 URL·로그·캐시에 남기지
+`verify_link_api.py`는 `SEOUL_OPEN_DATA_API_KEY`를 env 파일에서만 읽고 URL·로그·캐시에 남기지
 않는다. 성공한 링크를 한 파일씩 저장하므로 중단 후 같은 명령을 실행하면 완료 링크를 건너뛴다.
 같은 키를 실시간 Collector도 사용하므로 호출 수는 반드시 당일 잔여 예산 안에서 지정한다.
 

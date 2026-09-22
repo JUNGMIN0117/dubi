@@ -44,9 +44,10 @@ x-collector-env: &collector-env
   KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
   COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-}   # 비우면 소스별 기본 주기
   WEATHER_GRID_POINTS: ${WEATHER_GRID_POINTS:-}                 # 비우면 서울 25개 구
-  # --- API 키: <소스명>_API_KEY 로 통일 (2026-09-10). 값은 서버 .env 의 "수집기 전용" 절 ---
+  # --- 포털별 공통 키 우선. 기존 소스별 변수는 배포 전환용 fallback ---
   KMA_API_KEY: ${KMA_API_KEY:-}                                 # weather (우선)
   DATA_GO_KR_API_KEY: ${DATA_GO_KR_API_KEY:-}                   # weather (KMA 없을 때)
+  SEOUL_OPEN_DATA_API_KEY: ${SEOUL_OPEN_DATA_API_KEY:-}         # 서울 열린데이터광장 일반키
   BUS_ARRIVAL_API_KEY: ${BUS_ARRIVAL_API_KEY:-}
   BUS_LOCATION_API_KEY: ${BUS_LOCATION_API_KEY:-}
   SUBWAY_API_KEY: ${SUBWAY_API_KEY:-}                           # subway_arrival, subway_location

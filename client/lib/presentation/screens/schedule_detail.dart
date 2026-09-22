@@ -16,6 +16,7 @@ import '../../domain/route_evaluated_numbers.dart';
 import '../../domain/saved_route_display.dart';
 import '../../domain/transit_reference.dart';
 import '../transit_reference_panel.dart';
+import '../travel_conditions_card.dart';
 import '../../core/diagnostics/developer_diagnostics.dart';
 import 'map.dart';
 import 'schedule_form.dart';
@@ -461,13 +462,9 @@ class ScheduleDetailScreen extends StatelessWidget {
                       ),
               ),
               const SizedBox(height: 16),
-              // 네 칸 모두 "확인 필요"만 나오던 자리다. 값이 붙기 전까지는 한 줄로만 알린다.
-              const InfoCard(
-                child: Text(
-                  '오늘의 이동 변수(혼잡도·도로 통제·지하철 지연)는 아직 확인되지 않았어요.',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF5A6B85)),
-                ),
-              ),
+              // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
+              // 칸을 넷으로 나눴다. 조회 API 가 붙기 전에는 네 칸 모두 "확인 안 됨"이다.
+              TravelConditionsCard(scheduleId: schedule.id),
               const SizedBox(height: 14),
               if (repository is ScheduleEvaluationRepository)
                 // 개발자 진단(원본 코드·버전)은 디버그 빌드나 더보기 > 개발자 옵션을 켠 경우에만 붙는다.

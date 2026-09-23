@@ -25,7 +25,7 @@ import 'map.dart';
 import 'schedule_form.dart';
 import 'shared.dart';
 
-class ScheduleDetailScreen extends StatelessWidget {
+class ScheduleDetailScreen extends StatefulWidget {
   const ScheduleDetailScreen({
     super.key,
     required this.repository,
@@ -54,63 +54,7 @@ class ScheduleDetailScreen extends StatelessWidget {
   final List<RouteOption>? initialRoutes;
 
   @override
-  Widget build(BuildContext c) => StatefulBuilder(
-    // 아래로 당겨 새로 고침. 일정을 만든 직후에는 서버가 경로를 만드는 데 몇십 초가
-    // 걸려서, 화면을 먼저 연 사람은 "추천 결과가 없어요" 만 보고 막힌다(2026-09-22 확인).
-    // 자동 갱신이 어긋났을 때 사용자가 직접 다시 읽을 길을 둔다.
-    builder: (context, rebuild) => _screen(context, () => rebuild(() {})),
-  );
-
-  Widget _screen(BuildContext c, VoidCallback reload) =>
-      FutureBuilder<Schedule?>(
-        future: _loadSchedule(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const AppPage(
-              title: '일정 상세',
-              child: DataLoadError(message: '일정을 불러오지 못했어요.'),
-            );
-          }
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const AppPage(
-              title: '일정 상세',
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          final schedule = snapshot.data;
-          if (schedule == null) {
-            return const AppPage(
-              title: '일정 상세',
-              child: DataLoadError(message: '해당 일정을 찾을 수 없어요.'),
-            );
-          }
-          return FutureBuilder<_ScheduleRecommendationData>(
-            future: _loadRecommendation(schedule),
-            builder: (context, recommendationSnapshot) {
-              if (!recommendationSnapshot.hasData &&
-                  !recommendationSnapshot.hasError) {
-                return const AppPage(
-                  title: '일정 상세',
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              final data = recommendationSnapshot.data;
-              return _content(
-                context,
-                schedule,
-                data?.route,
-                data?.overview,
-                data?.savedRoutes ?? const [],
-                reload: reload,
-                recommendationUnavailable:
-                    recommendationSnapshot.hasError ||
-                    data?.recommendationUnavailable == true,
-                routesUnavailable: data?.routesUnavailable == true,
-              );
-            },
-          );
-        },
-      );
+  State<ScheduleDetailScreen> createState() => _ScheduleDetailScreenState();
 
   Future<Schedule?> _loadSchedule() async {
     try {
@@ -130,11 +74,11 @@ class ScheduleDetailScreen extends StatelessWidget {
   Future<_ScheduleRecommendationData> _loadRecommendation(
     Schedule schedule,
   ) async {
-    if (initialRoutes != null && initialRoutes!.isNotEmpty) {
-      return _ScheduleRecommendationData(route: initialRoutes!.first);
-    }
+    final initialRoute = initialRoutes?.isNotEmpty == true
+        ? initialRoutes!.first
+        : null;
     if (recommendationApi == null) {
-      return const _ScheduleRecommendationData();
+      return _ScheduleRecommendationData(route: initialRoute);
     }
     RecommendationOverview? overview;
     var recommendationUnavailable = false;
@@ -157,12 +101,14 @@ class ScheduleDetailScreen extends StatelessWidget {
           ? overview!.toRouteOption(schedule)
           : selectedSavedRoute.isNotEmpty
           ? selectedSavedRoute.first.toRouteOption(schedule)
-          : null,
+          : initialRoute,
       savedRoutes: savedRoutes,
       recommendationUnavailable: recommendationUnavailable,
       routesUnavailable: routesUnavailable,
     );
   }
+
+  // 나머지 화면 구성은 아래에서 최신 평가와 저장된 경로를 함께 사용한다.
 
   /// 요약 카드가 보여줄 값. 선택된 경로의 평가 소요시간이 있으면 그것을 쓴다.
   RouteOption _selectedRouteOption(
@@ -531,7 +477,12 @@ class ScheduleDetailScreen extends StatelessWidget {
               if (!ScheduleStatusBadge.shows(schedule.status)) ...[
                 TravelConditionsCard(
                   scheduleId: schedule.id,
+                  routeId: savedRoutes
+                      .where((savedRoute) => savedRoute.selected)
+                      .firstOrNull
+                      ?.routeId,
                   service: recommendationApi,
+                  evaluation: headline,
                 ),
                 const SizedBox(height: 14),
               ],
@@ -550,6 +501,7 @@ class ScheduleDetailScreen extends StatelessWidget {
                     // 같은 버튼이 위 안내 카드에 있다. 두 곳에 두면 서로 다른 단추로 읽힌다.
                     showActions: false,
                     headline: headline,
+                    departedAt: schedule.actualDepartAt,
                   ),
                 )
               else
@@ -779,6 +731,164 @@ class ScheduleDetailScreen extends StatelessWidget {
     if (record == null || !context.mounted) return;
     context.go('/schedules');
   }
+}
+
+/// 최초 진입 때만 빈 화면 대신 스켈레톤을 보이고, 이후 갱신은 마지막 성공 결과 위에서 처리한다.
+/// 서버의 주기 평가가 시작돼도 상단 카드·선택 경로·이동 변수를 화면에서 제거하지 않는다.
+class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
+  Schedule? _schedule;
+  _ScheduleRecommendationData? _recommendation;
+  String? _initialError;
+  int _request = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refresh());
+  }
+
+  @override
+  void didUpdateWidget(covariant ScheduleDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scheduleId == widget.scheduleId) return;
+    _schedule = null;
+    _recommendation = null;
+    _initialError = null;
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final request = ++_request;
+    try {
+      final schedule = await widget._loadSchedule();
+      if (!mounted || request != _request) return;
+      if (schedule == null) {
+        if (_schedule == null) {
+          setState(() => _initialError = '해당 일정을 찾을 수 없어요.');
+        }
+        return;
+      }
+      // 출발 직후 실제 출발시각은 경로 조회보다 먼저 반영한다. 기존 경로는 그 사이 남긴다.
+      setState(() => _schedule = schedule);
+      final data = await widget._loadRecommendation(schedule);
+      if (!mounted || request != _request) return;
+      setState(() {
+        // 일시적인 추천 API 장애로 이미 보여준 경로를 지우지 않는다.
+        if (_recommendation == null ||
+            (!data.recommendationUnavailable && !data.routesUnavailable)) {
+          _recommendation = data;
+        }
+        _initialError = null;
+      });
+    } on Object {
+      if (!mounted || request != _request) return;
+      if (_schedule == null) setState(() => _initialError = '일정을 불러오지 못했어요.');
+    }
+  }
+
+  void _reload() => unawaited(_refresh());
+
+  @override
+  Widget build(BuildContext context) {
+    final schedule = _schedule;
+    if (schedule == null || _recommendation == null) {
+      if (_initialError != null) {
+        return AppPage(
+          title: '일정 상세',
+          child: DataLoadError(message: _initialError!),
+        );
+      }
+      return const AppPage(title: '일정 상세', child: ScheduleDetailSkeleton());
+    }
+    final data = _recommendation!;
+    return widget._content(
+      context,
+      schedule,
+      data.route,
+      data.overview,
+      data.savedRoutes,
+      reload: _reload,
+      recommendationUnavailable: data.recommendationUnavailable,
+      routesUnavailable: data.routesUnavailable,
+    );
+  }
+}
+
+/// 실제 카드 위치에 맞춘 최초 로딩 화면. 반복되는 명도 변화는 계산 중임을 보여주되
+/// 새 평가가 올 때마다 재생하지 않는다(기존 결과가 있으면 그 결과를 그대로 유지한다).
+class ScheduleDetailSkeleton extends StatefulWidget {
+  const ScheduleDetailSkeleton({super.key});
+
+  @override
+  State<ScheduleDetailSkeleton> createState() => _ScheduleDetailSkeletonState();
+}
+
+class _ScheduleDetailSkeletonState extends State<ScheduleDetailSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 950),
+    lowerBound: 0.35,
+    upperBound: 0.85,
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    key: const Key('scheduleDetailSkeleton'),
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+    children: [
+      FadeTransition(
+        opacity: _pulse,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _bar(230, 18),
+            const SizedBox(height: 18),
+            _card(210, [180, 250, 145]),
+            const SizedBox(height: 12),
+            _card(125, [120, 260]),
+            const SizedBox(height: 24),
+            _bar(120, 22),
+            const SizedBox(height: 10),
+            _card(122, [155, 220]),
+            const SizedBox(height: 22),
+            _bar(95, 22),
+            const SizedBox(height: 10),
+            _card(150, [170, 260, 210]),
+          ],
+        ),
+      ),
+    ],
+  );
+
+  Widget _card(double height, List<double> widths) => Container(
+    height: height,
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF3F7FA),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [for (final width in widths) _bar(width, 16)],
+    ),
+  );
+
+  Widget _bar(double width, double height) => Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: const Color(0xFFD8E4EB),
+      borderRadius: BorderRadius.circular(9),
+    ),
+  );
 }
 
 class _ScheduleRecommendationData {

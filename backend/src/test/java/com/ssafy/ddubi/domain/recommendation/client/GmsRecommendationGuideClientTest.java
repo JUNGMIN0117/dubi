@@ -1,6 +1,8 @@
 package com.ssafy.ddubi.domain.recommendation.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -34,8 +36,6 @@ class GmsRecommendationGuideClientTest {
         String content =
                 json.writeValueAsString(
                         java.util.Map.of(
-                                "routeSummary",
-                                "집에서 역까지 걸은 뒤 지하철을 이용하세요.",
                                 "recommendationReason",
                                 "통제로 다른 경로를 제안해요.",
                                 "delayExplanation",
@@ -60,6 +60,8 @@ class GmsRecommendationGuideClientTest {
                 .andExpect(header("Authorization", "Bearer synthetic-key"))
                 .andExpect(jsonPath("$.model").value("gpt-5.4-nano"))
                 .andExpect(jsonPath("$.input").isString())
+                .andExpect(jsonPath("$.input").value(not(containsString("routeSteps"))))
+                .andExpect(jsonPath("$.input").value(not(containsString("fare"))))
                 .andExpect(jsonPath("$.messages").doesNotExist())
                 .andExpect(jsonPath("$.text.format.type").value("json_schema"))
                 .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
@@ -68,7 +70,6 @@ class GmsRecommendationGuideClientTest {
                         builder.baseUrl(properties.baseUrl()).build(), properties, json);
         var result = client.generate(facts(true));
         assertThat(result).isPresent();
-        assertThat(result.orElseThrow().routeSummary()).contains("지하철");
         assertThat(result.orElseThrow().recommendationReason()).contains("다른 경로");
         assertThat(result.orElseThrow().delayExplanation()).contains("사고");
         server.verify();
@@ -96,13 +97,6 @@ class GmsRecommendationGuideClientTest {
 
     private static GmsRecommendationGuideClient.Facts facts(boolean confirmed) {
         return new GmsRecommendationGuideClient.Facts(
-                "2026-09-21T08:10",
-                "2026-09-21T08:52",
-                List.of(
-                        new GmsRecommendationGuideClient.StepFact(
-                                1, "WALK", null, "집", "강남역", 300L)),
-                2520L,
-                new com.ssafy.ddubi.domain.route.model.FareRange(1550, 1650),
                 new GmsRecommendationGuideClient.ChangeFact(
                         "ROUTE_CHANGED",
                         "2026-09-21T08:20",

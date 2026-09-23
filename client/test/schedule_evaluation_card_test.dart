@@ -447,6 +447,65 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('주기 재계산 PENDING 동안 직전 평가와 상단 결론을 유지한다', (tester) async {
+    final repository = _FakeEvaluationRepository([
+      fixtures['keep']!,
+      fixtures['pending']!,
+      fixtures['advance']!,
+    ]);
+    final headline = ValueNotifier<ScheduleEvaluationV2?>(null);
+    addTearDown(headline.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEvaluationCard(
+            repository: repository,
+            scheduleId: 'schedule-1',
+            headline: headline,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(headline.value?.evaluationId, 'eval-keep');
+
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump();
+    expect(repository.latestCalls, 2);
+    expect(headline.value?.evaluationId, 'eval-keep');
+    expect(find.text('계산 중'), findsOneWidget);
+    expect(find.text('현재 출발 계획을 유지해도 일정 전에 도착할 것으로 예상됩니다.'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(headline.value?.evaluationId, 'eval-advance');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('실제 출발 시각이 등록되면 다음 정기 확인을 기다리지 않고 다시 읽는다', (tester) async {
+    final repository = _FakeEvaluationRepository([
+      fixtures['keep']!,
+      fixtures['stopped']!,
+    ]);
+    Widget card(DateTime? departedAt) => MaterialApp(
+      home: Scaffold(
+        body: ScheduleEvaluationCard(
+          repository: repository,
+          scheduleId: 'schedule-1',
+          departedAt: departedAt,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(card(null));
+    await tester.pump();
+    expect(repository.latestCalls, 1);
+    await tester.pumpWidget(card(DateTime(2026, 9, 23, 8, 11)));
+    await tester.pump();
+    expect(repository.latestCalls, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('STOPPED와 출발시각 입력 필요 상태에서는 polling을 중단한다', (tester) async {
     for (final name in ['stopped', 'departure_required']) {
       final repository = _FakeEvaluationRepository([fixtures[name]!]);

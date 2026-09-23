@@ -131,6 +131,9 @@ void main() {
     expect(find.text('도로 통제 영향 구간을 피해 다른 경로를 제안해요.'), findsOneWidget);
     expect(find.byKey(const Key('guideChangeType')), findsOneWidget);
     expect(find.text('다른 경로 제안'), findsOneWidget);
+    expect(find.byKey(const Key('guideRouteSummary')), findsNothing);
+    expect(find.byKey(const Key('guideFare')), findsNothing);
+    expect(find.text('도보로 역까지 이동한 뒤 지하철을 이용하세요.'), findsNothing);
   });
 
   testWidgets('모르는 변경 유형은 영어 코드를 그대로 보여주지 않는다', (tester) async {

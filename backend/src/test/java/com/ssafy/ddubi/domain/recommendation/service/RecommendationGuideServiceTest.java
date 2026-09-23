@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ssafy.ddubi.domain.recommendation.client.GmsRecommendationGuideClient;
 import com.ssafy.ddubi.domain.recommendation.client.RecommendationGuideProperties;
 import com.ssafy.ddubi.domain.recommendation.evaluation.DepartureEstimate;
@@ -116,7 +117,7 @@ class RecommendationGuideServiceTest {
                 .thenReturn(
                         Optional.of(
                                 new GmsRecommendationGuideClient.GeneratedCopy(
-                                        "강남역까지 걸은 뒤 잠실역까지 지하철로 이동하세요.", "현재 경로를 유지해도 돼요.", null)));
+                                        "현재 경로를 유지해도 돼요.", null)));
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked")
         ValueOperations<String, String> values = mock(ValueOperations.class);
@@ -206,8 +207,7 @@ class RecommendationGuideServiceTest {
         when(gms.generate(any()))
                 .thenReturn(
                         Optional.of(
-                                new GmsRecommendationGuideClient.GeneratedCopy(
-                                        "AI 경로 문장", "AI 사유 문장", null)));
+                                new GmsRecommendationGuideClient.GeneratedCopy("AI 사유 문장", null)));
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked")
         ValueOperations<String, String> values = mock(ValueOperations.class);
@@ -240,6 +240,24 @@ class RecommendationGuideServiceTest {
         assertThat(result.generatedBy()).isEqualTo("TEMPLATE");
         assertThat(result.recommendationReason()).contains("유지");
         verify(rig.gms(), never()).generate(any());
+    }
+
+    /** 경로가 같아도 도착 예정이 바뀌면 AI 설명 대상이다. AI 장애 때는 서버가 변경 방향을 말한다. */
+    @Test
+    void etaChangeReceivesExplanationAndTruthfulFallback() throws Exception {
+        ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+        ObjectNode node = json.valueToTree(unchanged(json, "2026-09-20T23:10:00Z"));
+        node.put("evaluationId", "evaluation-eta-change");
+        node.put("estimatedArrivalAt", "2026-09-21T08:57:00");
+        var evaluation = json.treeToValue(node, ScheduleEvaluationV2.class);
+        var rig = rig(json, evaluation, false);
+        when(rig.gms().generate(any())).thenReturn(Optional.empty());
+
+        var result = rig.service().guide(7L, 3L, Instant.parse("2026-09-20T23:01:00Z"));
+
+        assertThat(result.changeType()).isEqualTo("ETA_UPDATED");
+        assertThat(result.recommendationReason()).contains("5분 늦어져");
+        verify(rig.gms()).generate(any());
     }
 
     /**

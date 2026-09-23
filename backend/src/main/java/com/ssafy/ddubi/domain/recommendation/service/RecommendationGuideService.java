@@ -112,21 +112,6 @@ public class RecommendationGuideService {
                                 .orElse("이동 경로를 확인하고 있어요.");
         var facts =
                 new GmsRecommendationGuideClient.Facts(
-                        value(evaluation.proposedDepartAt()),
-                        value(evaluation.estimatedArrivalAt()),
-                        steps.stream()
-                                .map(
-                                        step ->
-                                                new GmsRecommendationGuideClient.StepFact(
-                                                        step.sequence(),
-                                                        step.mode(),
-                                                        step.routeLabel(),
-                                                        step.fromName(),
-                                                        step.toName(),
-                                                        step.durationSeconds()))
-                                .toList(),
-                        evaluation.durationSeconds(),
-                        evaluation.fare(),
                         change,
                         new GmsRecommendationGuideClient.DelayFact(
                                 delay.status(), delay.reason(), delay.source(), delay.confirmed()));
@@ -145,7 +130,7 @@ public class RecommendationGuideService {
                         : delay.reason();
         String recommendationReason =
                 generated == null
-                        ? fallbackRecommendation(change.type(), delay)
+                        ? fallbackRecommendation(change, delay)
                         : generated.recommendationReason();
         RecommendationGuideResponse response =
                 new RecommendationGuideResponse(
@@ -158,7 +143,7 @@ public class RecommendationGuideService {
                         headline(evaluation),
                         change.type(),
                         recommendationReason,
-                        generated == null ? fallbackRoute : generated.routeSummary(),
+                        fallbackRoute,
                         steps,
                         new RecommendationGuideResponse.Delay(
                                 delay.status(),
@@ -223,6 +208,7 @@ public class RecommendationGuideService {
             RecommendationGuideResponse.Delay delay) {
         return "ROUTE_CHANGED".equals(change.type())
                 || "DEPARTURE_TIME_CHANGED".equals(change.type())
+                || "ETA_UPDATED".equals(change.type())
                 || !"NO_CONFIRMED_DELAY".equals(delay.status());
     }
 
@@ -291,15 +277,48 @@ public class RecommendationGuideService {
     }
 
     private static String fallbackRecommendation(
-            String changeType, RecommendationGuideResponse.Delay delay) {
+            GmsRecommendationGuideClient.ChangeFact change,
+            RecommendationGuideResponse.Delay delay) {
         String cause = delay.reason();
-        return switch (changeType) {
+        String context = cause == null ? null : sentence(cause) + " 이를 반영해 ";
+        return switch (change.type()) {
             case "ROUTE_CHANGED" ->
-                    cause == null ? "현재 이동 상황을 반영해 다른 경로를 제안해요." : cause + " 다른 경로를 제안해요.";
-            case "DEPARTURE_TIME_CHANGED" -> "같은 경로를 이용하되 출발시각 변경을 제안해요.";
-            case "ETA_UPDATED" -> "경로와 출발시각은 유지하고 예상 도착시간을 갱신했어요.";
-            default -> "현재 선택한 경로와 출발시각을 유지해도 돼요.";
+                    context == null ? "이동 상황을 다시 확인해 다른 경로를 제안해요." : context + "다른 경로를 제안해요.";
+            case "DEPARTURE_TIME_CHANGED" ->
+                    (context == null ? "최신 계산 결과를 반영해 " : context)
+                            + "출발시각을 "
+                            + departureDirection(change.departureDeltaSeconds())
+                            + " 제안해요.";
+            case "ETA_UPDATED" ->
+                    (context == null ? "최신 계산 결과로 " : context)
+                            + "예상 도착시각이 "
+                            + arrivalDirection(change.arrivalDeltaSeconds())
+                            + " 안내를 갱신했어요.";
+            default ->
+                    context == null
+                            ? "현재 선택한 경로와 출발시각을 유지해도 돼요."
+                            : sentence(cause) + " 현재 경로와 출발시각은 유지해요.";
         };
+    }
+
+    /** 원인 문장과 서버가 계산한 변경 방향을 결합한다. 원문을 사건의 확정 근거로 승격하지 않는다. */
+    private static String sentence(String value) {
+        String trimmed = value.strip();
+        return trimmed.endsWith(".") || trimmed.endsWith("!") || trimmed.endsWith("?")
+                ? trimmed
+                : trimmed + ".";
+    }
+
+    private static String departureDirection(Long seconds) {
+        if (seconds == null || seconds == 0) return "다시 확인하도록";
+        long minutes = Math.abs(seconds) / 60;
+        return (minutes > 0 ? minutes + "분 " : "") + (seconds < 0 ? "앞당기도록" : "늦추도록");
+    }
+
+    private static String arrivalDirection(Long seconds) {
+        if (seconds == null || seconds == 0) return "변경되어";
+        long minutes = Math.abs(seconds) / 60;
+        return (minutes > 0 ? minutes + "분 " : "") + (seconds < 0 ? "빨라져" : "늦어져");
     }
 
     private RecommendationGuideResponse cached(String key) {

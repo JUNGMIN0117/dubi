@@ -216,7 +216,10 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
               ),
             ],
           ),
-          if (guide != null) ...[const SizedBox(height: 12), _detailBox(guide)],
+          if (guide != null && guide.delay.hasMessage) ...[
+            const SizedBox(height: 12),
+            _detailBox(guide),
+          ],
           if (widget.evaluationRepository != null) ...[
             const SizedBox(height: 12),
             const Divider(height: 1, color: Color(0xFFC7EEDC)),
@@ -345,7 +348,8 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     ];
   }
 
-  /// 카드 안쪽 흰 상자. 경로·시각·요금·구간·지연을 담는다.
+  /// 중복되는 경로·시각·요금은 아래 전용 카드에 맡긴다. 여기에는 확인된
+  /// 교통 영향과 변경 이유만 남겨 AI 안내의 목적을 분명히 한다.
   Widget _detailBox(RecommendationGuide guide) => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
@@ -355,62 +359,11 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (guide.routeSummary != null)
-          Text(
-            guide.routeSummary!,
-            key: const Key('guideRouteSummary'),
-            style: const TextStyle(
-              fontSize: 13,
-              height: 1.45,
-              color: Color(0xFF344054),
-            ),
-          ),
-        if (guide.headline != null && guide.recommendationReason != null) ...[
-          const SizedBox(height: 10),
-          Text(
-            guide.headline!,
-            key: const Key('guideHeadline'),
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w900,
-              color: DdubiColors.navy,
-            ),
-          ),
-        ],
-        if (guide.minimumFareWon != null) ...[
-          const SizedBox(height: 8),
-          Row(
-            key: const Key('guideFare'),
-            children: [
-              const Icon(
-                Icons.payments_outlined,
-                size: 16,
-                color: Color(0xFF5C6B7F),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '예상 요금 ${_fare(guide.minimumFareWon!, guide.maximumFareWon)}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: DdubiColors.navy,
-                ),
-              ),
-            ],
-          ),
-        ],
-        if (guide.steps.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          for (final step in guide.steps) _stepRow(step),
-        ],
-        if (guide.delay.hasMessage) ...[
-          const SizedBox(height: 10),
-          _delayRow(guide.delay),
-        ],
+        _delayRow(guide.delay),
         if (guide.dataAsOf != null) ...[
           const SizedBox(height: 10),
           Text(
-            '실시간 정보 기준 ${_clock(guide.dataAsOf!)}',
+            '확인한 자료 기준 ${_clock(guide.dataAsOf!)}',
             key: const Key('guideDataAsOf'),
             style: const TextStyle(fontSize: 11, color: Color(0xFF6B7A8C)),
           ),
@@ -462,28 +415,6 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     );
   }
 
-  Widget _stepRow(GuideStep step) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(_stepIcon(step.mode), size: 17, color: _stepTone(step.mode)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            _stepText(step),
-            style: const TextStyle(fontSize: 13, color: DdubiColors.navy),
-          ),
-        ),
-        if (step.durationSeconds != null)
-          Text(
-            '약 ${(step.durationSeconds! / 60).ceil()}분',
-            style: const TextStyle(fontSize: 12, color: Color(0xFF6E8193)),
-          ),
-      ],
-    ),
-  );
-
   /// 지연 안내. 확인된 이유가 있을 때만 그린다 — 분 단위 숫자가 없으면 만들어내지 않는다.
   Widget _delayRow(GuideDelay delay) {
     final tone = _delayTone(delay.status);
@@ -527,38 +458,6 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     );
   }
 
-  static String _stepText(GuideStep step) {
-    if (step.instruction != null) return step.instruction!;
-    final label = _modeLabel(step.mode);
-    final route = step.routeLabel == null ? label : '$label ${step.routeLabel}';
-    final from = step.fromName ?? '';
-    final to = step.toName ?? '';
-    if (from.isEmpty && to.isEmpty) return route;
-    return '$route  $from → $to';
-  }
-
-  static String _modeLabel(String mode) => switch (mode) {
-    'WALK' => '도보',
-    'BUS' => '버스',
-    'SUBWAY' => '지하철',
-    'TAXI' => '택시',
-    _ => mode,
-  };
-
-  static IconData _stepIcon(String mode) => switch (mode) {
-    'WALK' => Icons.directions_walk_rounded,
-    'BUS' => Icons.directions_bus_rounded,
-    'SUBWAY' => Icons.directions_subway_rounded,
-    _ => Icons.place_outlined,
-  };
-
-  static Color _stepTone(String mode) => switch (mode) {
-    'WALK' => const Color(0xFF7F91A2),
-    'BUS' => DdubiColors.green,
-    'SUBWAY' => DdubiColors.blue,
-    _ => DdubiColors.navy,
-  };
-
   static Color _delayTone(String status) => switch (status) {
     'POSSIBLE' => const Color(0xFFE0A100),
     'DELAYED' => const Color(0xFFFF6B35),
@@ -571,19 +470,6 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     return '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
   }
-
-  /// 단일 요금과 범위 요금을 구분한다. 최대값이 없으면 확인된 최소값만 표시한다.
-  static String _fare(int minimum, int? maximum) {
-    final value = maximum == null || maximum == minimum
-        ? _number(minimum)
-        : '${_number(minimum)}~${_number(maximum)}';
-    return '$value원';
-  }
-
-  static String _number(int value) => value.toString().replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+(?!\d))'),
-    (_) => ',',
-  );
 }
 
 /// 안내 카드 아래쪽 버튼 줄.

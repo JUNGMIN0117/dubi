@@ -202,9 +202,15 @@ public class GmsRecommendationGuideClient {
         return null;
     }
 
-    /** 내부 코드명(ROUTE_CHANGED 처럼 대문자와 밑줄)이 섞인 문장. 노선명(N15, 750A)은 밑줄이 없어 걸리지 않는다. */
+    /**
+     * 내부 코드명(ROUTE_CHANGED 처럼 대문자와 밑줄)이 섞인 문장. 노선명(N15, 750A)은 밑줄이 없어 걸리지 않는다.
+     *
+     * <p>경계를 {@code \b} 로 두지 않는다. {@code \b} 는 한글도 글자로 봐서 "ROUTE_CHANGED로" 처럼 조사가 붙으면 경계가 없다고 판단해
+     * 놓친다. 앞뒤가 영문·숫자·밑줄만 아니면 끊긴 것으로 본다.
+     */
     private static final java.util.regex.Pattern INTERNAL_CODE =
-            java.util.regex.Pattern.compile("\\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\\b");
+            java.util.regex.Pattern.compile(
+                    "(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])");
 
     /** 시각(12:30)이나 초 단위 숫자. 시각은 따로 표시되고, 문장을 다시 쓰는 동안 틀린 값이 된다. */
     private static final java.util.regex.Pattern CLOCK_OR_SECONDS =

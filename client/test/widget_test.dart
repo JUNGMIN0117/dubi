@@ -1182,6 +1182,7 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump();
 
     expect(find.text('이동 중'), findsOneWidget);
     expect(find.text('출발했어요'), findsNothing);

@@ -72,3 +72,22 @@ def test_verified_snapshot_carries_text_features_for_segment_join():
     incident = snapshot["incidents"][0]
     assert incident["matchedLinkId"] == "L1"
     assert incident["textFeatures"]["aiIncidentKind"] == "ACCIDENT"
+
+
+def test_provisional_snapshot_keeps_provider_link_only_when_opted_in():
+    from common.traffic_incident_enrichment import VerifiedLinkMaster
+
+    event = _event([_row("A", "L1")])
+    unavailable = VerifiedLinkMaster.unavailable()
+    regular = build_incident_snapshot(event, unavailable)
+    assert regular["linkMasterAvailable"] is False
+    assert regular["incidents"] == []
+
+    provisional = build_incident_snapshot(
+        event,
+        unavailable,
+        provisional_link_version="provisional-accinfo-input-v1",
+    )
+    assert provisional["linkMasterAvailable"] is True
+    assert provisional["linkMappingStatus"] == "PROVISIONAL"
+    assert provisional["incidents"][0]["matchedLinkId"] == "L1"

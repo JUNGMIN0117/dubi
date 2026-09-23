@@ -131,3 +131,40 @@ def test_refresh_writes_current_feature_snapshot():
     feature = json.loads(client.get(key))
     assert feature["features"]["verifiedIncidentCount"] == 1
     assert feature["provenance"]["incident"]["linkMasterVersion"] == "links-v1"
+
+
+def test_provisional_mapping_refresh_is_opt_in():
+    client = configured()
+    client.values.pop(f"ml:mapping:bus-road:active:{MASTER}")
+    provisional = "ml:mapping:bus-road-provisional:v1:master-v1:sha"
+    client.values[f"ml:mapping:bus-road-provisional:active:{MASTER}"] = provisional
+    client.values[provisional + ":meta"] = json.dumps(
+        {
+            "masterVersion": MASTER,
+            "trafficLinkMasterVersion": "links-v1",
+            "crosswalkSha256": SHA,
+            "rowCount": 1,
+        }
+    )
+    client.rows[provisional] = {
+        "BUS:1:A:B": json.dumps(
+            {
+                "segmentId": "BUS:1:A:B",
+                "masterVersion": MASTER,
+                "trafficLinkMasterVersion": "links-v1",
+                "mappingStatus": "PROVISIONAL",
+                "topisLinkNamespace": "SEOUL_ACCINFO_LINK",
+                "topisLinkIds": ["L1"],
+                "mappingAsOf": "2026-09-17T00:00:00+00:00",
+                "roadPathValidFrom": "2026-09-01T00:00:00+00:00",
+                "roadPathValidUntil": "2026-10-01T00:00:00+00:00",
+            }
+        )
+    }
+    client.values["traffic:latest:incident-snapshot:all-current"] = snapshot(["L1"])
+
+    assert (
+        IncidentFeatureRefresher(client, MASTER, SHA, now=lambda: NOW).refresh_once()["status"] == "MAPPING_UNAVAILABLE"
+    )
+    result = IncidentFeatureRefresher(client, MASTER, SHA, now=lambda: NOW, allow_provisional_road=True).refresh_once()
+    assert result == {"status": "UPDATED", "updated": 1}

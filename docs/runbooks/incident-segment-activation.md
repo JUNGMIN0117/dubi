@@ -41,3 +41,42 @@ docker compose --env-file infra/.env -f infra/docker-compose.yml --profile road-
 
 최종 확인표를 만드는 배치와 자동 갱신 Worker는 **코드로 준비**되어 있다. 승인 자료 배포,
 실제 서비스 실행, 운영 Redis/HDFS 적재 및 종단 검증은 아직 완료되지 않았다.
+
+## 후보 매핑 임시 활성화
+
+공식 `RESOLVED` 대응표를 만들기 전에는 엄격한 후보만 별도 `PROVISIONAL` 대응표로 발행할 수 있다.
+정식 포인터 `ml:mapping:bus-road:active:{masterVersion}`는 바꾸지 않는다. 후보는
+`ml:mapping:bus-road-provisional:active:{masterVersion}`에서만 조회한다. 같은 구간에 유효한
+`RESOLVED`가 있으면 Backend와 ML 모두 정식을 먼저 사용한다.
+
+후보 발행기는 다음 조건을 모두 만족하는 occurrence만 사용한다.
+
+- `SINGLE_CONNECTED_CANDIDATE_PATH`
+- 모든 경로 표본에 방향 허용 후보가 존재
+- 근접 후보가 둘 이상인 표본이 0개
+- 선택 경로의 방향별 교통 링크 ID가 정확히 하나
+- 같은 `segmentId`의 모든 occurrence가 같은 링크 경로
+
+```sh
+python batch/export_bus_road_provisional_mapping.py \
+  --candidates /data/occurrence-candidates.jsonl \
+  --candidates-sha <SHA256> \
+  --master-version <버스 masterVersion> \
+  --bus-crosswalk-sha <버스 crosswalk SHA256> \
+  --as-of 2026-09-23T00:00:00+09:00 \
+  --valid-until 2026-10-23T00:00:00+09:00 \
+  --output /data/provisional-bus-road.json
+```
+
+발행 결과를 확인한 뒤 세 서비스에 같은 설정을 전달한다.
+
+```env
+ROAD_PROVISIONAL_MAPPING_ENABLED=true
+ROAD_PROVISIONAL_TRAFFIC_LINK_MASTER_VERSION=provisional-accinfo-input-v1
+ML_REDIS_LATEST_FEATURES_ENABLED=true
+```
+
+후보 모드의 돌발 Silver는 공식 링크 마스터가 없을 때 AccInfo 원문의 `LINK_ID`를 후보 링크로
+보존한다. ML snapshot의 `provenance.mappings.road.status`와 일정 상세 API의
+`roadBlock.mappingStatus`는 `PROVISIONAL`이다. 앱은 이를 `후보 매핑 · 추정 정보`로 표시한다.
+후보 artifact TTL 기본값은 7일이며 다시 발행하지 않으면 자동 만료된다.

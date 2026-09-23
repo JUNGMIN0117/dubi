@@ -30,8 +30,8 @@ def _instant(value):
         return None
 
 
-def reverse_index(client, mapping_key, master_version, link_master_version, crosswalk_sha):
-    """활성화된 승인 대응표의 RESOLVED 행만 역조회한다. 후보 파일은 읽지 않는다."""
+def mapping_index(client, mapping_key, master_version, link_master_version, crosswalk_sha, accepted_status):
+    """검증된 Redis artifact에서 허용된 상태의 segment→link 목록을 읽는다."""
     metadata = _json(client.get(mapping_key + ":meta"))
     if not isinstance(metadata, dict) or any(
         (
@@ -41,12 +41,12 @@ def reverse_index(client, mapping_key, master_version, link_master_version, cros
         )
     ):
         return None
-    reverse = defaultdict(set)
+    segments = {}
     row_count = 0
     for _, raw in client.hscan_iter(mapping_key, count=1000):
         row_count += 1
         row = _json(raw)
-        if not isinstance(row, dict) or row.get("mappingStatus") != "RESOLVED":
+        if not isinstance(row, dict) or row.get("mappingStatus") != accepted_status:
             continue
         if (
             row.get("masterVersion") != master_version
@@ -58,24 +58,39 @@ def reverse_index(client, mapping_key, master_version, link_master_version, cros
         segment = row.get("segmentId")
         if not isinstance(links, list) or not links or not isinstance(segment, str):
             return None
+        segment_links = set()
         for link in links:
             if not isinstance(link, str) or not link:
                 return None
-            reverse[link].add(segment)
+            segment_links.add(link)
+        segments[segment] = segment_links
     if row_count == 0 or row_count != metadata.get("rowCount"):
         return None
-    return reverse
+    return segments
 
 
 class IncidentFeatureRefresher:
-    def __init__(self, client, master_version, crosswalk_sha, now=lambda: datetime.now(UTC)):
+    def __init__(
+        self,
+        client,
+        master_version,
+        crosswalk_sha,
+        now=lambda: datetime.now(UTC),
+        allow_provisional_road=False,
+    ):
         if not master_version or len(crosswalk_sha) != 64:
             raise ValueError("master version and crosswalk SHA are required")
         self.client = client
         self.master_version = master_version
         self.crosswalk_sha = crosswalk_sha.lower()
+        self.allow_provisional_road = bool(allow_provisional_road)
         self.now = now
-        self.assembler = OnlineFeatureAssembler(client, now=now, expected_crosswalk_sha=self.crosswalk_sha)
+        self.assembler = OnlineFeatureAssembler(
+            client,
+            now=now,
+            expected_crosswalk_sha=self.crosswalk_sha,
+            allow_provisional_road=self.allow_provisional_road,
+        )
         self.state_key = "ml:incident-feature-refresh:last:" + master_version
 
     def refresh_once(self):
@@ -93,19 +108,42 @@ class IncidentFeatureRefresher:
         collected, expires = _instant(snapshot.get("collectedAt")), _instant(snapshot.get("validUntil"))
         if collected is None or expires is None or not collected <= current < expires:
             return {"status": "SNAPSHOT_STALE", "updated": 0}
+        sources = []
         active_key = "ml:mapping:bus-road:active:" + self.master_version
         mapping_key = self.client.get(active_key)
-        if not mapping_key or not str(mapping_key).startswith("ml:mapping:bus-road:"):
+        if mapping_key and str(mapping_key).startswith("ml:mapping:bus-road:"):
+            sources.append((mapping_key, "RESOLVED"))
+        if self.allow_provisional_road:
+            provisional_key = self.client.get("ml:mapping:bus-road-provisional:active:" + self.master_version)
+            if provisional_key and str(provisional_key).startswith("ml:mapping:bus-road-provisional:"):
+                sources.append((provisional_key, "PROVISIONAL"))
+        if not sources:
             return {"status": "MAPPING_UNAVAILABLE", "updated": 0}
         digest = hashlib.sha256(raw.encode("utf-8") if isinstance(raw, str) else raw).hexdigest()
         previous = _json(self.client.get(self.state_key)) or {}
-        if previous.get("snapshotSha256") == digest and previous.get("mappingKey") == mapping_key:
+        mapping_keys = [source[0] for source in sources]
+        if previous.get("snapshotSha256") == digest and previous.get("mappingKeys") == mapping_keys:
             return {"status": "UNCHANGED", "updated": 0}
-        reverse = reverse_index(
-            self.client, mapping_key, self.master_version, snapshot.get("linkMasterVersion"), self.crosswalk_sha
-        )
-        if reverse is None:
+        segment_links = {}
+        for source_key, accepted_status in sources:
+            index = mapping_index(
+                self.client,
+                source_key,
+                self.master_version,
+                snapshot.get("linkMasterVersion"),
+                self.crosswalk_sha,
+                accepted_status,
+            )
+            if index is None:
+                continue
+            for segment, links in index.items():
+                segment_links.setdefault(segment, links)
+        if not segment_links:
             return {"status": "MAPPING_NOT_VERIFIED", "updated": 0}
+        reverse = defaultdict(set)
+        for segment, links in segment_links.items():
+            for link in links:
+                reverse[link].add(segment)
         current_links = {
             row.get("matchedLinkId")
             for row in snapshot["incidents"]
@@ -128,7 +166,10 @@ class IncidentFeatureRefresher:
                     "passageAt": current.isoformat(),
                 }
             )
-        if self.client.get(active_key) != mapping_key or self.client.get(SNAPSHOT_KEY) != raw:
+        current_keys = [self.client.get(active_key)]
+        if self.allow_provisional_road:
+            current_keys.append(self.client.get("ml:mapping:bus-road-provisional:active:" + self.master_version))
+        if [key for key in current_keys if key] != mapping_keys or self.client.get(SNAPSHOT_KEY) != raw:
             return {"status": "SOURCE_CHANGED", "updated": len(affected)}
         self.client.setex(
             self.state_key,
@@ -136,7 +177,7 @@ class IncidentFeatureRefresher:
             json.dumps(
                 {
                     "snapshotSha256": digest,
-                    "mappingKey": mapping_key,
+                    "mappingKeys": mapping_keys,
                     "links": sorted(current_links),
                     "segments": sorted(current_segments),
                     "refreshedAt": current.isoformat(),
@@ -163,7 +204,11 @@ def main():
         socket_connect_timeout=3,
     )
     refresher = IncidentFeatureRefresher(
-        client, os.environ["ML_INCIDENT_MASTER_VERSION"], os.environ["ML_BUS_CROSSWALK_SHA256"]
+        client,
+        os.environ["ML_INCIDENT_MASTER_VERSION"],
+        os.environ["ML_BUS_CROSSWALK_SHA256"],
+        allow_provisional_road=str(os.environ.get("ROAD_PROVISIONAL_MAPPING_ENABLED", "false")).lower()
+        in ("1", "true", "yes"),
     )
     while True:
         try:

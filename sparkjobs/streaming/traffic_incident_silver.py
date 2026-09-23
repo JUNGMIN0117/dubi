@@ -150,6 +150,13 @@ def main():
     incident_policy = policy(os.environ)
     settings, target = Settings.from_env(), output_uri(os.environ)
     master = load_master(os.environ)
+    provisional_link_version = None
+    if str(os.environ.get("ROAD_PROVISIONAL_MAPPING_ENABLED", "false")).lower() in ("1", "true", "yes"):
+        provisional_link_version = os.environ.get(
+            "ROAD_PROVISIONAL_TRAFFIC_LINK_MASTER_VERSION", "provisional-accinfo-input-v1"
+        ).strip()
+        if not provisional_link_version:
+            raise ValueError("ROAD_PROVISIONAL_TRAFFIC_LINK_MASTER_VERSION is required in provisional mode")
     extractor = extractor_from_env(os.environ)
     if not master.available:
         log.warning("Verified traffic link master is unavailable; no DIRECT/NEARBY mapping will be produced")
@@ -204,6 +211,7 @@ def main():
                         extractor=extractor,
                         direct_tolerance=incident_policy.direct_tolerance_meters,
                         nearby_max=incident_policy.nearby_max_meters,
+                        provisional_link_version=provisional_link_version,
                     )
                     if snapshot is None:
                         continue

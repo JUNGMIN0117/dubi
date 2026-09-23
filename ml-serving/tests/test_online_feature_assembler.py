@@ -370,6 +370,31 @@ def test_verified_incidents_join_only_resolved_links_and_deduplicate():
     assert result["features"]["incidentSnapshotAgeMinutes"] == 2
 
 
+def test_provisional_road_mapping_is_opt_in_and_recorded_in_provenance():
+    client = configured()
+    resolved_key = client.get(f"ml:mapping:bus-road:active:{MASTER}")
+    resolved = json.loads(client.hashes[resolved_key][SEGMENT])
+    resolved["mappingStatus"] = "UNMAPPED"
+    client.hashes[resolved_key][SEGMENT] = json.dumps(resolved)
+    provisional_key = "ml:mapping:bus-road-provisional:v1:master-v1:sha"
+    client.strings[f"ml:mapping:bus-road-provisional:active:{MASTER}"] = provisional_key
+    client.hashes[provisional_key] = {
+        SEGMENT: json.dumps(
+            {
+                **resolved,
+                "mappingStatus": "PROVISIONAL",
+                "mappingVersion": "bus-road-link-provisional-v1",
+            }
+        )
+    }
+
+    disabled = OnlineFeatureAssembler(client, now=lambda: NOW).assemble(request())
+    assert disabled["provenance"]["mappings"]["road"]["status"] == "UNMAPPED"
+    enabled = OnlineFeatureAssembler(client, now=lambda: NOW, allow_provisional_road=True).assemble(request())
+    assert enabled["provenance"]["mappings"]["road"]["status"] == "PROVISIONAL"
+    assert enabled["provenance"]["mappings"]["road"]["estimated"] is True
+
+
 def test_incident_snapshot_requires_valid_master_and_live_complete_poll():
     client = configured()
     road_key = client.get(f"ml:mapping:bus-road:active:{MASTER}")

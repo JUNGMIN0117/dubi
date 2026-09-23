@@ -13,7 +13,15 @@ def _time(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def build_incident_snapshot(event, master, stale_seconds=2700, extractor=None, direct_tolerance=200, nearby_max=100):
+def build_incident_snapshot(
+    event,
+    master,
+    stale_seconds=2700,
+    extractor=None,
+    direct_tolerance=200,
+    nearby_max=100,
+    provisional_link_version=None,
+):
     payload = event.get("payload") or {}
     items = payload.get("items")
     observed_at = event.get("collectedAt")
@@ -48,6 +56,17 @@ def build_incident_snapshot(event, master, stale_seconds=2700, extractor=None, d
             direct_tolerance_meters=direct_tolerance,
             nearby_max_meters=nearby_max,
         )
+        if (
+            provisional_link_version
+            and not master.available
+            and normalized.get("processingStatus") != "REJECTED"
+            and normalized.get("inputLinkNamespace") == LINK_NAMESPACE
+            and normalized.get("inputLinkId")
+        ):
+            normalized["matchedLinkId"] = normalized["inputLinkId"]
+            normalized["locationMatchType"] = "PROVISIONAL_INPUT_LINK"
+            normalized["linkMasterStatus"] = "PROVISIONAL"
+            normalized["linkMasterVersion"] = provisional_link_version
         incident_id = normalized.get("providerIncidentId")
         if not incident_id:
             return None
@@ -77,8 +96,11 @@ def build_incident_snapshot(event, master, stale_seconds=2700, extractor=None, d
         "sourceRowCount": len(items),
         "verifiedIncidentCount": len(verified),
         "unmatchedIncidentCount": len(latest) - len(verified) + rejected_count,
-        "linkMasterAvailable": bool(master.available and master.applicable(observed_at)),
-        "linkMasterVersion": master.metadata.get("version"),
+        "linkMasterAvailable": bool(
+            master.available and master.applicable(observed_at) or provisional_link_version and not master.available
+        ),
+        "linkMasterVersion": master.metadata.get("version") or provisional_link_version,
+        "linkMappingStatus": "PROVISIONAL" if provisional_link_version and not master.available else "RESOLVED",
         "linkNamespace": LINK_NAMESPACE,
         "incidents": verified,
     }

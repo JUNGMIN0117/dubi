@@ -106,6 +106,15 @@ keys:
     owner: spark
     description: "검증과 전체 기록을 마친 현재 busRoadMapping Hash 키를 가리킨다."
 
+  busRoadProvisionalMappingActive:
+    pattern: "ml:mapping:bus-road-provisional:active:{masterVersion}"
+    type: string
+    ttlSeconds: 604800
+    owner: spark
+    description: >-
+      후보 모드를 명시적으로 켰을 때만 읽는 PROVISIONAL 버스 구간 대응표 포인터다.
+      정식 busRoadMappingActive를 변경하지 않으며 같은 구간의 RESOLVED가 항상 우선한다.
+
   busRoadMappingMetadata:
     pattern: "ml:mapping:bus-road:{mappingVersion}:{masterVersion}:{roadCrosswalkSha256}:meta"
     type: string

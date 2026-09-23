@@ -157,18 +157,20 @@ sparkjobs-test:
   image:
     name: apache/spark:3.5.3-python3
     entrypoint: [""]
+  # pip 캐시는 두지 않는다. 러너가 캐시 폴더를 root 소유로 풀어 놓아 비루트 사용자인 pip 이 쓰지 못하고
+  # "캐시 끔" 경고만 내기 때문이다. 남는 내려받기는 pytest·fakeredis·pyarrow 등 약 60MB 라 30초 안이다.
   variables:
     HOME: /tmp
     PYTHONPATH: /opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
-    PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
-  cache:
-    key: sparkjobs-pip
-    paths: [.cache/pip]
-    unprotect: true
   script:
-    # requirements-dev 의 pyspark 는 이미지에 이미 있으므로 그 줄만 빼고 설치한다.
-    - grep -viE '^pyspark==' sparkjobs/requirements-dev.txt > /tmp/req-ci.txt
-    - python3 -m pip install --quiet --user -r /tmp/req-ci.txt
+    # requirements-dev 의 pyspark 핀이 이미지 안 pyspark 와 같은지 먼저 확인한다. 아래에서 핀 줄을 걸러 내고
+    # 이미지 것을 쓰기 때문에, 누가 핀만 올리면 CI 가 조용히 옛 버전으로 시험하게 되는 것을 여기서 막는다.
+    - PIN=$(grep -oE '^pyspark==[0-9.]+' sparkjobs/requirements-dev.txt | cut -d= -f3)
+    - python3 -c "import pyspark, sys; want='$PIN'; have=pyspark.__version__; print('pyspark 핀', want, '/ 이미지', have); sys.exit(want != have)"
+    # dev 목록에서 pyspark 줄과 "-r requirements.txt" 줄을 빼고, 런타임 목록(requirements.txt)은 원래 자리에서 따로 넘긴다.
+    # 걸러낸 파일을 /tmp 에 두면 그 안의 "-r" 상대 경로가 /tmp 기준으로 풀려 실패하기 때문이다(2026-09-23 MR !184 에서 확인).
+    - grep -viE '^(pyspark==|-r )' sparkjobs/requirements-dev.txt > /tmp/req-ci.txt
+    - python3 -m pip install --quiet --user -r sparkjobs/requirements.txt -r /tmp/req-ci.txt
     - cd sparkjobs && python3 -m pytest -q
   rules:
     - changes:

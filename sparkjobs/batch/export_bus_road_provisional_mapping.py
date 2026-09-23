@@ -2,13 +2,17 @@
 
 import argparse
 import json
+import logging
 import os
 from pathlib import Path
 
 from common.provisional_road_mapping import DEFAULT_TTL_SECONDS, load_rows, publish
 
+LOG = logging.getLogger(__name__)
+
 
 def main(argv=None):
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", required=True, help="road-occurrence-review의 occurrence-candidates.jsonl")
     parser.add_argument("--candidates-sha", required=True)
@@ -78,7 +82,10 @@ def main(argv=None):
             )
         finally:
             client.close()
-    print(json.dumps({key: value for key, value in artifact.items() if key != "mappings"}, ensure_ascii=False))
+    LOG.info(
+        "provisional road mapping result=%s",
+        json.dumps({key: value for key, value in artifact.items() if key != "mappings"}, ensure_ascii=False),
+    )
     return 0
 
 

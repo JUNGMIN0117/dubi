@@ -226,6 +226,20 @@ void main() {
       expect(parsed.roadBlock.note, '후보 매핑 · 추정 정보');
     });
 
+    test('시연용 가짜 통제는 실제 사고로 보이지 않게 덧말을 붙인다', () {
+      final parsed = TravelConditions.fromJson(const {
+        'roadBlock': {
+          'available': true,
+          'count': 1,
+          'summary': '[시연] 선택한 버스 구간에 가짜 도로 통제를 적용했어요.',
+          'source': 'DEMO_TOPIS',
+          'mappingStatus': 'DEMO',
+        },
+      });
+      expect(parsed.roadBlock.text, startsWith('[시연]'));
+      expect(parsed.roadBlock.note, '시연용 가상 통제');
+    });
+
     test('기온이 없으면 강수량만으로 날씨를 만들지 않는다', () {
       final parsed = TravelConditions.fromJson(const {
         'weather': {'available': true, 'precipitationMm': 0.0},

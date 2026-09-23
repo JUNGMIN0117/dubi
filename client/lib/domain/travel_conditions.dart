@@ -174,6 +174,10 @@ class TravelConditions {
     if (summary is! String || summary.isEmpty) {
       return const TravelConditionItem.unavailable();
     }
+    // 발표용 가짜 통제. 실제 사고로 오해하지 않게 덧말로 한 번 더 밝힌다.
+    if (data['source'] == 'DEMO_TOPIS') {
+      return TravelConditionItem.value(summary, note: '시연용 가상 통제');
+    }
     final count = data['count'];
     final provisional = data['mappingStatus'] == 'PROVISIONAL';
     return TravelConditionItem.value(

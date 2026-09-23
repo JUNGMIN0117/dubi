@@ -118,11 +118,19 @@ class ScheduleEvaluationCard extends StatefulWidget {
     this.headline,
     this.departedAt,
     this.showActions = true,
+    this.onFirstReadyDisplayed,
+    this.refreshGeneration = 0,
   });
 
   /// 버튼 줄을 이 카드에 그릴지. 일정 상세는 같은 버튼을 AI 안내 카드에 두므로 끈다.
   /// 두 곳에 같이 두면 사용자가 서로 다른 단추로 오해한다.
   final bool showActions;
+
+  /// 최초 READY 카드가 프레임에 그려진 직후 한 번만 호출한다. 시연 타이머는 이 시점부터 센다.
+  final VoidCallback? onFirstReadyDisplayed;
+
+  /// 외부 시연 이벤트가 저장·재평가된 직후 30초 정기 조회를 기다리지 않고 최신 결과를 읽는다.
+  final int refreshGeneration;
 
   final ScheduleEvaluationRepository repository;
   final String scheduleId;
@@ -192,6 +200,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
   int requestGeneration = 0;
   int retryCount = 0;
   int fastPolls = 0;
+  bool firstReadyReported = false;
 
   /// 마지막 조회 실패 종류. 404(아직 결과 없음)만 "계산 중"으로 본다. 연결 실패는 30초 backoff 를 유지한다.
   EvaluationFailureKind? lastFailure;
@@ -220,6 +229,7 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
       requestGeneration++;
       evaluation = null;
       latestState = null;
+      firstReadyReported = false;
       // 부모가 새 일정을 그리는 프레임 안에서 notifier를 갱신하면 빌드 중 재빌드가
       // 겹친다. 새 프레임 직후 이전 결론을 비우고 해당 일정만 조회한다.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -227,7 +237,8 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
         widget.headline?.value = null;
         _load(force: true);
       });
-    } else if (oldWidget.departedAt == null && widget.departedAt != null) {
+    } else if (oldWidget.refreshGeneration != widget.refreshGeneration ||
+        oldWidget.departedAt == null && widget.departedAt != null) {
       timer?.cancel();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _load(force: true);
@@ -311,6 +322,17 @@ class _ScheduleEvaluationCardState extends State<ScheduleEvaluationCard>
         // 상단 결론도 실제로 보여주는 평가와 함께 교체한다.
         if (widget.headline?.value != evaluation) {
           widget.headline?.value = evaluation;
+        }
+        if (!firstReadyReported &&
+            evaluation?.state == EvaluationState.ready &&
+            evaluation?.selectedRouteId != null) {
+          firstReadyReported = true;
+          final displayedScheduleId = widget.scheduleId;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && widget.scheduleId == displayedScheduleId) {
+              widget.onFirstReadyDisplayed?.call();
+            }
+          });
         }
       }
     } on ScheduleEvaluationFailure catch (failure) {

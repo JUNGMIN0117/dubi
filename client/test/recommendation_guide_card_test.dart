@@ -140,6 +140,26 @@ void main() {
     expect(find.text('도보로 역까지 이동한 뒤 지하철을 이용하세요.'), findsNothing);
   });
 
+  testWidgets('구형 AI의 경로 나열은 숨기고 교통 영향과 경로 변경만 설명한다', (tester) async {
+    final response = _guideJson(
+      changeType: 'ROUTE_CHANGED',
+      reason: '출발지에서 서울역까지 도보 이동 → 1호선 탑승 후 노량진 하차 → 버스 탑승',
+      generatedBy: 'GMS:gpt-5.4-nano',
+    );
+    response['delay'] = {
+      'status': 'DISRUPTED',
+      'reason': '[시연용] 선택한 버스 경로에 가짜 도로 통제를 적용했어요.',
+      'source': 'DEMO_TOPIS',
+      'confirmed': true,
+    };
+
+    await pumpCard(tester, _dio([response]));
+
+    expect(find.textContaining('서울역까지 도보 이동 →'), findsNothing);
+    expect(find.text('확인된 교통 영향을 반영해 다른 경로를 제안해요.'), findsOneWidget);
+    expect(find.textContaining('[시연용] 선택한 버스 경로'), findsOneWidget);
+  });
+
   testWidgets('모르는 변경 유형은 영어 코드를 그대로 보여주지 않는다', (tester) async {
     final dio = _dio([
       _guideJson(changeType: 'SOMETHING_NEW', reason: '설명입니다.'),

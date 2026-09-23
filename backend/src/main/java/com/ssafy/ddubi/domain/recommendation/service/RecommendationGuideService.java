@@ -118,12 +118,21 @@ public class RecommendationGuideService {
         GmsRecommendationGuideClient.GeneratedCopy generated = null;
         boolean owner = false;
         try {
-            if (worthAsking(change, delay)
+            // 발표용 사건은 실제 TOPIS 공지로 오해하면 안 된다. 서버의 [시연용] 문장을
+            // 그대로 쓰고 생성 AI에는 보내지 않아 가짜 상황을 사실처럼 부풀리지 않는다.
+            boolean syntheticDemo =
+                    evaluation.causes().stream()
+                            .anyMatch(cause -> "DEMO_TOPIS".equals(cause.source()));
+            if (!syntheticDemo
+                    && worthAsking(change, delay)
                     && (owner = generating.add(cacheKey))
                     && firstAsk(askedKey, now)) generated = gms.generate(facts).orElse(null);
         } finally {
             if (owner) generating.remove(cacheKey);
         }
+        // GMS가 지시를 어기고 경로 구간을 재서술하면 사용자 화면의 상세 목록과 중복된다.
+        // AI가 만든 문장만 버리고 서버 계산·교통 원인은 그대로 유지한다.
+        if (generated != null && routeNarration(generated.recommendationReason())) generated = null;
         String delayReason =
                 generated != null && generated.delayExplanation() != null
                         ? generated.delayExplanation()
@@ -309,6 +318,13 @@ public class RecommendationGuideService {
                 : trimmed + ".";
     }
 
+    /** 경로 단계 열거와 교통 상황 설명을 구분한다. 시각/요금은 다른 카드의 책임이다. */
+    static boolean routeNarration(String value) {
+        if (value == null) return false;
+        return value.contains("→")
+                || (value.contains("탑승 후") && value.contains("하차") && value.contains("에서"));
+    }
+
     private static String departureDirection(Long seconds) {
         if (seconds == null || seconds == 0) return "다시 확인하도록";
         long minutes = Math.abs(seconds) / 60;
@@ -441,7 +457,11 @@ public class RecommendationGuideService {
         String reason =
                 detailMatchesChosen
                         ? detail.message()
-                        : confirmed ? "선택 경로에 공식 교통 영향이 확인됐어요." : "선택 경로 주변에 교통 영향 가능성이 있어요.";
+                        : "DEMO_TOPIS".equals(chosen.source())
+                                ? "[시연용] 선택한 버스 경로에 가짜 도로 통제를 적용해 다른 경로를 계산했어요."
+                                : confirmed
+                                        ? "선택 경로에 공식 교통 영향이 확인됐어요."
+                                        : "선택 경로 주변에 교통 영향 가능성이 있어요.";
         String source = detailMatchesChosen ? detail.source() : chosen.source();
         // 평시·시간표 기준 차이가 아직 공개 계약에 없으므로 원인만으로 지연 분을 만들지 않는다.
         return new RecommendationGuideResponse.Delay(status, null, reason, source, confirmed);

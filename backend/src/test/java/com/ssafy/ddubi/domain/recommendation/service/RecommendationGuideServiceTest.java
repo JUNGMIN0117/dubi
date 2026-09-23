@@ -27,6 +27,13 @@ import org.springframework.data.redis.core.ValueOperations;
 /** AI가 시간·구조를 바꾸지 않고 서버 계산값 위에 표현 문구만 더하는지 검증한다. */
 class RecommendationGuideServiceTest {
     @Test
+    void rejectsGeneratedTurnByTurnDirectionsButKeepsIncidentExplanation() {
+        assertThat(RecommendationGuideService.routeNarration("서울역에서 1호선 탑승 후 노량진 하차 → 버스 탑승"))
+                .isTrue();
+        assertThat(RecommendationGuideService.routeNarration("도로 통제를 반영해 다른 경로를 제안해요.")).isFalse();
+    }
+
+    @Test
     void classifiesRouteDepartureEtaAndNoChangeBeforeCallingGms() throws Exception {
         ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 

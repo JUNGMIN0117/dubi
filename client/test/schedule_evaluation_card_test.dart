@@ -283,6 +283,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('첫 READY 표시 뒤 시연 콜백은 한 번만 실행되고 이벤트 후 즉시 재조회한다', (tester) async {
+    final repository = _FakeEvaluationRepository([fixtures['keep']!]);
+    var displayed = 0;
+    Widget card(int generation) => MaterialApp(
+      home: Scaffold(
+        body: ScheduleEvaluationCard(
+          repository: repository,
+          scheduleId: 'schedule-1',
+          refreshGeneration: generation,
+          onFirstReadyDisplayed: () => displayed++,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(card(0));
+    await tester.pumpAndSettle();
+    expect(displayed, 1);
+    expect(repository.latestCalls, 1);
+
+    await tester.pumpWidget(card(1));
+    await tester.pumpAndSettle();
+    expect(repository.latestCalls, 2);
+    expect(displayed, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('409 수락 충돌 후 최신 평가를 다시 조회하고 자동 수락하지 않는다', (tester) async {
     final first = fixtures['keep']!;
     final latest = fixtures['advance']!;

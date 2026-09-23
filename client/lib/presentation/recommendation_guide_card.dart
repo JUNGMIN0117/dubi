@@ -392,17 +392,37 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
   }
 
   static String _reason(RecommendationGuide guide) {
-    if (guide.recommendationReason != null) {
+    if (guide.recommendationReason != null &&
+        !_looksLikeRouteNarration(guide.recommendationReason!)) {
       return guide.recommendationReason!;
     }
-    if (guide.delay.hasMessage) return guide.delay.reason!;
+    // 구형 서버 캐시나 GMS 응답이 경로를 화살표로 다시 나열해도, 바로 아래의
+    // 구간별 목록과 중복되지 않게 상황·변경 이유만 보여준다.
+    final impact = guide.delay.hasMessage;
     return switch (guide.changeType) {
-      'ROUTE_CHANGED' => '새 계산에서 다른 경로가 제안됐어요. 변경 이유를 확인하고 있어요.',
-      'DEPARTURE_TIME_CHANGED' => '새 계산에서 출발시각이 바뀌었어요. 변경 이유를 확인하고 있어요.',
-      'ETA_UPDATED' => '새 계산에서 도착 예상이 바뀌었어요. 변경 이유를 확인하고 있어요.',
-      _ => '확인된 교통 영향이나 추천 변경은 없어요. 새 정보가 들어오면 다시 살펴볼게요.',
+      'ROUTE_CHANGED' =>
+        impact
+            ? '확인된 교통 영향을 반영해 다른 경로를 제안해요.'
+            : '새 계산에서 다른 경로를 제안해요. 변경 이유를 확인하고 있어요.',
+      'DEPARTURE_TIME_CHANGED' =>
+        impact
+            ? '확인된 교통 영향을 반영해 출발시각을 다시 제안해요.'
+            : '새 계산에서 출발시각이 바뀌었어요. 변경 이유를 확인하고 있어요.',
+      'ETA_UPDATED' =>
+        impact
+            ? '교통 영향을 반영하면서 도착 예상이 달라졌어요.'
+            : '새 계산에서 도착 예상이 바뀌었어요. 변경 이유를 확인하고 있어요.',
+      'NO_CHANGE' when impact => '교통 영향은 확인됐지만 현재 경로와 출발시각은 유지해요.',
+      _ =>
+        impact
+            ? '교통 영향 정보를 확인했어요. 자세한 내용은 아래에서 볼 수 있어요.'
+            : '확인된 교통 영향이나 추천 변경은 없어요. 새 정보가 들어오면 다시 살펴볼게요.',
     };
   }
+
+  static bool _looksLikeRouteNarration(String value) =>
+      value.contains('→') ||
+      (value.contains('탑승 후') && value.contains('하차') && value.contains('에서'));
 
   /// 중복되는 경로·시각·요금은 아래 전용 카드에 맡긴다. 여기에는 확인된
   /// 교통 영향과 변경 이유만 남겨 AI 안내의 목적을 분명히 한다.

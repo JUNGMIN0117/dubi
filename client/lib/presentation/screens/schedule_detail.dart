@@ -139,6 +139,8 @@ class ScheduleDetailScreen extends StatefulWidget {
     VoidCallback? reload,
     bool recommendationUnavailable = false,
     bool routesUnavailable = false,
+    VoidCallback? onFirstEvaluationDisplayed,
+    int evaluationRefreshGeneration = 0,
   }) {
     // 다녀왔거나 취소한 일정. 이 화면은 "앞으로 어떻게 갈까" 가 아니라 "어떻게 다녀왔나" 를 보여준다.
     // 말은 과거형이고, 고치거나 출발할 버튼은 없다(2026-09-22 제보).
@@ -341,33 +343,6 @@ class ScheduleDetailScreen extends StatefulWidget {
                   ),
                 ),
               ],
-              // 교통 상황과 변경 이유를 경로·요금·구간 숫자보다 먼저 보여준다.
-              // 버튼도 결론 바로 아래에 둬서 사용자가 긴 경로 목록을 지나 내려가지 않는다.
-              if (recommendationApi != null && !schedule.isCanceled) ...[
-                RecommendationGuideCard(
-                  api: recommendationApi!,
-                  scheduleId: schedule.id,
-                  headline: headline,
-                  pastTense: finished,
-                  evaluationRepository: finished
-                      ? null
-                      : repository is ScheduleEvaluationRepository
-                      ? repository as ScheduleEvaluationRepository
-                      : null,
-                  onStartJourney: finished
-                      ? null
-                      : () async {
-                          await _startJourney(
-                            c,
-                            schedule,
-                            savedRoutes,
-                            headline.value,
-                          );
-                          if (c.mounted) reload?.call();
-                        },
-                ),
-                const SizedBox(height: 16),
-              ],
               const SizedBox(height: 14),
               Row(
                 children: [
@@ -463,6 +438,33 @@ class ScheduleDetailScreen extends StatefulWidget {
                       },
               ),
               const SizedBox(height: 16),
+              // 0591a4e 직전 배치대로 현재 선택 경로·추천 목록 다음에 둔다.
+              // 상단 "이 일정에 맞춰" 바로 아래로 옮기면 두 카드가 한 덩어리처럼 보인다.
+              if (recommendationApi != null && !schedule.isCanceled) ...[
+                RecommendationGuideCard(
+                  api: recommendationApi!,
+                  scheduleId: schedule.id,
+                  headline: headline,
+                  pastTense: finished,
+                  evaluationRepository: finished
+                      ? null
+                      : repository is ScheduleEvaluationRepository
+                      ? repository as ScheduleEvaluationRepository
+                      : null,
+                  onStartJourney: finished
+                      ? null
+                      : () async {
+                          await _startJourney(
+                            c,
+                            schedule,
+                            savedRoutes,
+                            headline.value,
+                          );
+                          if (c.mounted) reload?.call();
+                        },
+                ),
+                const SizedBox(height: 16),
+              ],
               // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
               // 칸을 넷으로 나눴다.
               //
@@ -496,6 +498,8 @@ class ScheduleDetailScreen extends StatefulWidget {
                     showActions: false,
                     headline: headline,
                     departedAt: schedule.actualDepartAt,
+                    onFirstReadyDisplayed: onFirstEvaluationDisplayed,
+                    refreshGeneration: evaluationRefreshGeneration,
                   ),
                 )
               else
@@ -736,6 +740,9 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
   int _request = 0;
   int _initialRoutePolls = 0;
   Timer? _initialRouteTimer;
+  Timer? _roadClosureDemoTimer;
+  final Set<String> _roadClosureDemoStarted = {};
+  int _evaluationRefreshGeneration = 0;
 
   /// 새 일정은 일정 저장 응답이 먼저 오고 경로 계산 결과가 뒤따른다. 그 사이에는
   /// 내용 없는 경로 카드 대신 스켈레톤을 유지한다. 이미 한 번 받은 경로는 절대 가리지 않는다.
@@ -767,6 +774,7 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.scheduleId == widget.scheduleId) return;
     _initialRouteTimer?.cancel();
+    _roadClosureDemoTimer?.cancel();
     _initialRoutePolls = 0;
     _schedule = null;
     _recommendation = null;
@@ -777,7 +785,63 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
   @override
   void dispose() {
     _initialRouteTimer?.cancel();
+    _roadClosureDemoTimer?.cancel();
     super.dispose();
+  }
+
+  /// 카드와 첫 경로가 그려진 프레임 이후 10초를 기다린다. 화면을 다시 열어도 같은
+  /// 위젯에서는 재발동하지 않으며, 서버의 일정 전용 Redis 키도 중복 작동을 막는다.
+  void _startRoadClosureDemo(Schedule schedule) {
+    if (!schedule.title.startsWith('[시연]') ||
+        widget.recommendationApi == null ||
+        !_roadClosureDemoStarted.add(schedule.id)) {
+      return;
+    }
+    _roadClosureDemoTimer = Timer(const Duration(seconds: 10), () {
+      unawaited(_activateRoadClosureDemo(schedule));
+    });
+  }
+
+  /// 다른 자동 평가가 잠깐 lease를 잡은 경우 시연 사건을 몇 번 재시도한다.
+  /// 서버가 새 통제 키를 썼다가 평가에 실패하면 그 키를 되돌리므로 재시도가 멱등이다.
+  Future<void> _activateRoadClosureDemo(Schedule schedule) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!mounted || widget.scheduleId != schedule.id) return;
+      try {
+        final result = await widget.recommendationApi!.activateRoadClosureDemo(
+          schedule.id,
+        );
+        if (!mounted || widget.scheduleId != schedule.id) return;
+        // 서버가 Redis 통제를 기록하고 재평가를 끝낸 뒤, 카드·상단 안내를 즉시 교체한다.
+        setState(() => _evaluationRefreshGeneration++);
+        unawaited(_refresh());
+        if (result.state != 'ALTERNATIVE_READY' &&
+            result.state != 'ALREADY_APPLIED') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('시연 통제는 반영됐지만 이용 가능한 대안을 찾지 못했어요.')),
+          );
+        } else if (result.state == 'ALTERNATIVE_READY' &&
+            result.notificationStatus != 'SENT') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('대안 경로는 계산됐지만 휴대폰 알림이 전송되지 않았어요. 알림 설정을 확인해 주세요.'),
+            ),
+          );
+        }
+        return;
+      } on Object {
+        if (!mounted || widget.scheduleId != schedule.id) return;
+        if (attempt < 2) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+          continue;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('시연용 도로 통제를 적용하지 못했어요. 서버 설정과 경로를 확인해 주세요.'),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _refresh() async {
@@ -861,6 +925,8 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
       reload: _reload,
       recommendationUnavailable: data.recommendationUnavailable,
       routesUnavailable: data.routesUnavailable,
+      onFirstEvaluationDisplayed: () => _startRoadClosureDemo(schedule),
+      evaluationRefreshGeneration: _evaluationRefreshGeneration,
     );
   }
 }

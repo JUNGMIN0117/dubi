@@ -5,8 +5,8 @@ import java.util.Set;
 /**
  * 버스 이동시간 fallback 수식을 실행한다.
  *
- * <p>서울 ML 호출 실패 시에는 최근 180일 반감기 집계의 가중합/가중치 합을 사용한다. 경기·인천은 해당 구간·시간대 평균이 있으면 우선 사용하고,
- * 결측이면 구간 기준시간과 수도권 시간계수를 곱한다. 부산은 시간대 표본을 {@code alpha=0.25}만큼 구간 기준값 쪽으로 완화한다.
+ * <p>서울 ML 호출 실패 시에는 최근 180일 반감기 집계의 가중합/가중치 합을 사용한다. 경기·인천은 해당 구간·시간대 평균이 있으면 우선 사용하고, 결측이면 구간
+ * 기준시간과 수도권 시간계수를 곱한다. 부산은 시간대 표본을 {@code alpha=0.25}만큼 구간 기준값 쪽으로 완화한다.
  *
  * <p>이 클래스는 외부 I/O나 상태를 가지지 않는다. MySQL 행에 저장된 수식 입력만 받아 초 단위 결과를 반환하므로 같은 입력은 항상 같은 값을 만든다. 입력이
  * 불완전하거나 결과가 0초 이하·1시간 초과이면 임의 보정하지 않고 실패시켜 호출자가 카카오 BUS step 시간으로 fallback하게 한다.
@@ -60,7 +60,8 @@ public final class BusTravelTimeFormula {
                 result =
                         count > 0
                                 ? positive(input.localMeanSeconds())
-                                : positive(input.segmentMeanSeconds()) * positive(input.hourFactor());
+                                : positive(input.segmentMeanSeconds())
+                                        * positive(input.hourFactor());
             }
             case BUSAN_GTFS -> {
                 if (!"BUSAN_GTFS".equals(namespace))

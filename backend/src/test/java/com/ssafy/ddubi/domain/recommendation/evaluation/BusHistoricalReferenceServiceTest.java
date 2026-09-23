@@ -160,7 +160,7 @@ class BusHistoricalReferenceServiceTest {
                                             null,
                                             null,
                                             0L,
-                                            80.0,
+                                            80.00032,
                                             1.25,
                                             null);
                             var row =
@@ -175,7 +175,7 @@ class BusHistoricalReferenceServiceTest {
                                             q.dow(),
                                             q.hourSlot(),
                                             "GTFS_SCHEDULE_FORMULA",
-                                            99.0,
+                                            100.0,
                                             5,
                                             0,
                                             LocalDate.of(2025, 3, 1),
@@ -201,7 +201,9 @@ class BusHistoricalReferenceServiceTest {
                         new BusHistoricalReferenceService.Session(),
                         System.nanoTime() + Duration.ofSeconds(20).toNanos());
 
-        assertEquals(100, result.seconds());
+        // 계약상 진단용 meanSeconds와 수식 결과의 차이는 0.001초 이내여야 한다.
+        // 수식값 100.0004초와 저장값 100.0초는 유효하지만 올림 결과가 달라 재계산 여부를 검증한다.
+        assertEquals(101, result.seconds());
         assertEquals("GTFS_FORMULA_APPLIED", result.reason());
     }
 

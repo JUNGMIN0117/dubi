@@ -54,14 +54,7 @@ class BusTravelTimeFormulaTest {
     void busanUsesPoint25ShrinkageFormula() {
         var input =
                 new BusTravelTimeFormula.Input(
-                        BusTravelTimeFormula.BUSAN_GTFS,
-                        null,
-                        null,
-                        100.0,
-                        2L,
-                        120.0,
-                        1.5,
-                        0.25);
+                        BusTravelTimeFormula.BUSAN_GTFS, null, null, 100.0, 2L, 120.0, 1.5, 0.25);
 
         assertThat(BusTravelTimeFormula.seconds("BUSAN_GTFS", input))
                 .isEqualTo((2 * 100.0 + 0.25 * 120.0 * 1.5) / 2.25);
@@ -81,14 +74,7 @@ class BusTravelTimeFormulaTest {
                         null);
         var busan =
                 new BusTravelTimeFormula.Input(
-                        BusTravelTimeFormula.BUSAN_GTFS,
-                        null,
-                        null,
-                        100.0,
-                        1L,
-                        100.0,
-                        1.0,
-                        0.5);
+                        BusTravelTimeFormula.BUSAN_GTFS, null, null, 100.0, 1L, 100.0, 1.0, 0.5);
 
         assertThatThrownBy(() -> BusTravelTimeFormula.seconds("SEOUL_BUS", metropolitan))
                 .isInstanceOf(IllegalArgumentException.class);

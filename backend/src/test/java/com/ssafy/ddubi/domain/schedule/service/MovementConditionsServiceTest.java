@@ -48,14 +48,14 @@ class MovementConditionsServiceTest {
         when(redis.value("weather:latest:60:127"))
                 .thenReturn(
                         """
-                        {
-                          "districts":["종로구","중구"],
-                          "features":{"temperatureC":20.9,"precipitationMm":0.0,"precipitationTypeCode":0},
-                          "observedAt":"2026-09-22T01:00:00+09:00",
-                          "validUntil":"2026-09-22T03:00:00+09:00",
-                          "source":"kma.ultra-srt-ncst"
-                        }
-                        """);
+{
+  "districts":["종로구","중구"],
+  "features":{"temperatureC":20.9,"precipitationMm":0.0,"precipitationTypeCode":0},
+  "observedAt":"2026-09-22T01:00:00+09:00",
+  "validUntil":"2026-09-22T03:00:00+09:00",
+  "source":"kma.ultra-srt-ncst"
+}
+""");
         var service =
                 new MovementConditionsService(schedules, routes, redis, new ObjectMapper(), false);
 

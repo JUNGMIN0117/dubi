@@ -126,9 +126,7 @@ class TravelConditions {
     return TravelConditionItem.value(
       summary,
       note: provisional
-          ? (count is int && count > 1
-                ? '후보 매핑 · 돌발 $count건'
-                : '후보 매핑 · 추정 정보')
+          ? (count is int && count > 1 ? '후보 매핑 · 돌발 $count건' : '후보 매핑 · 추정 정보')
           : (count is int && count > 1 ? '통제 $count건' : null),
     );
   }

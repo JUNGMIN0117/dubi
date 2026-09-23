@@ -341,6 +341,33 @@ class ScheduleDetailScreen extends StatefulWidget {
                   ),
                 ),
               ],
+              // 교통 상황과 변경 이유를 경로·요금·구간 숫자보다 먼저 보여준다.
+              // 버튼도 결론 바로 아래에 둬서 사용자가 긴 경로 목록을 지나 내려가지 않는다.
+              if (recommendationApi != null && !schedule.isCanceled) ...[
+                RecommendationGuideCard(
+                  api: recommendationApi!,
+                  scheduleId: schedule.id,
+                  headline: headline,
+                  pastTense: finished,
+                  evaluationRepository: finished
+                      ? null
+                      : repository is ScheduleEvaluationRepository
+                      ? repository as ScheduleEvaluationRepository
+                      : null,
+                  onStartJourney: finished
+                      ? null
+                      : () async {
+                          await _startJourney(
+                            c,
+                            schedule,
+                            savedRoutes,
+                            headline.value,
+                          );
+                          if (c.mounted) reload?.call();
+                        },
+                ),
+                const SizedBox(height: 16),
+              ],
               const SizedBox(height: 14),
               Row(
                 children: [
@@ -436,39 +463,6 @@ class ScheduleDetailScreen extends StatefulWidget {
                       },
               ),
               const SizedBox(height: 16),
-              // 계산 근거(내부 사유 코드) 대신 사용자가 행동할 수 있는 안내를 보여준다.
-              // 시간과 순서는 서버 계산값이고 앱은 받은 값을 그대로 쓴다.
-              // 예전에는 이 카드가 경로 목록 위에 있었고, 옆에 내용 없는 "이 일정에 맞춰"
-              // 카드가 따로 있었다. 둘을 한 장으로 합치고 경로 목록 아래로 내렸다.
-              // 다녀온 일정에도 출발할 때 받은 안내를 기록으로 남긴다(과거형, 버튼 없음). 취소한
-              // 일정에는 띄우지 않는다 — 가지 않은 길의 안내는 기록이 아니다.
-              if (recommendationApi != null && !schedule.isCanceled) ...[
-                RecommendationGuideCard(
-                  api: recommendationApi!,
-                  scheduleId: schedule.id,
-                  headline: headline,
-                  pastTense: finished,
-                  evaluationRepository: finished
-                      ? null
-                      : repository is ScheduleEvaluationRepository
-                      ? repository as ScheduleEvaluationRepository
-                      : null,
-                  // 평가는 누르는 순간의 값을 읽는다. 카드를 그릴 때 값을 박아 두면 1분마다
-                  // 바뀌는 계산과 어긋난다.
-                  onStartJourney: finished
-                      ? null
-                      : () async {
-                          await _startJourney(
-                            c,
-                            schedule,
-                            savedRoutes,
-                            headline.value,
-                          );
-                          if (c.mounted) reload?.call();
-                        },
-                ),
-                const SizedBox(height: 16),
-              ],
               // 한 줄이던 자리다. 한 줄이면 무엇이 되고 무엇이 안 되는지 알 수 없어서
               // 칸을 넷으로 나눴다.
               //
@@ -740,6 +734,27 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
   _ScheduleRecommendationData? _recommendation;
   String? _initialError;
   int _request = 0;
+  int _initialRoutePolls = 0;
+  Timer? _initialRouteTimer;
+
+  /// 새 일정은 일정 저장 응답이 먼저 오고 경로 계산 결과가 뒤따른다. 그 사이에는
+  /// 내용 없는 경로 카드 대신 스켈레톤을 유지한다. 이미 한 번 받은 경로는 절대 가리지 않는다.
+  bool get _waitingForFirstRoute {
+    final schedule = _schedule;
+    final data = _recommendation;
+    return schedule != null &&
+        data != null &&
+        widget.recommendationApi != null &&
+        !schedule.isCanceled &&
+        !ScheduleStatusBadge.shows(schedule.status) &&
+        // 응답이 정상인데 아직 경로가 없는 경우만 계산 대기로 취급한다.
+        // 조회 실패를 30초짜리 스켈레톤으로 가리면 장애를 알아챌 수 없다.
+        !data.recommendationUnavailable &&
+        !data.routesUnavailable &&
+        data.route == null &&
+        data.savedRoutes.isEmpty &&
+        _initialRoutePolls < 10;
+  }
 
   @override
   void initState() {
@@ -751,10 +766,18 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
   void didUpdateWidget(covariant ScheduleDetailScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.scheduleId == widget.scheduleId) return;
+    _initialRouteTimer?.cancel();
+    _initialRoutePolls = 0;
     _schedule = null;
     _recommendation = null;
     _initialError = null;
     unawaited(_refresh());
+  }
+
+  @override
+  void dispose() {
+    _initialRouteTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -772,6 +795,7 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
       setState(() => _schedule = schedule);
       final data = await widget._loadRecommendation(schedule);
       if (!mounted || request != _request) return;
+      var shouldPoll = false;
       setState(() {
         // 일시적인 추천 API 장애로 이미 보여준 경로를 지우지 않는다.
         if (_recommendation == null ||
@@ -779,7 +803,28 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
           _recommendation = data;
         }
         _initialError = null;
+        shouldPoll =
+            _recommendation?.route == null &&
+            _recommendation?.savedRoutes.isEmpty == true &&
+            widget.recommendationApi != null &&
+            !schedule.isCanceled &&
+            !ScheduleStatusBadge.shows(schedule.status);
+        if (shouldPoll) {
+          _initialRoutePolls++;
+        }
       });
+      // 첫 경로가 아직 없으면 서버 계산 완료까지 3초 간격으로 다시 확인한다.
+      // 30초 뒤에는 일반 상세 화면과 수동 새로고침을 열어 두되, 느린 계산 결과가
+      // 뒤늦게 도착해도 자동으로 갈아 끼울 수 있도록 10초 간격 조회를 계속한다.
+      _initialRouteTimer?.cancel();
+      if (shouldPoll) {
+        _initialRouteTimer = Timer(
+          _initialRoutePolls < 10
+              ? const Duration(seconds: 3)
+              : const Duration(seconds: 10),
+          _refresh,
+        );
+      }
     } on Object {
       if (!mounted || request != _request) return;
       if (_schedule == null) setState(() => _initialError = '일정을 불러오지 못했어요.');
@@ -799,6 +844,12 @@ class _ScheduleDetailScreenState extends State<ScheduleDetailScreen> {
         );
       }
       return const AppPage(title: '일정 상세', child: ScheduleDetailSkeleton());
+    }
+    if (_waitingForFirstRoute) {
+      return AppPage(
+        title: schedule.title,
+        child: const ScheduleDetailSkeleton(),
+      );
     }
     final data = _recommendation!;
     return widget._content(

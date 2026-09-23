@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
@@ -64,6 +66,9 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
   /// 마지막 조회가 "실패" 가 아니라 "아직" 이었는가 — 서버가 계산이 끝나지 않았다고(409) 답한 경우.
   /// 이때는 사용자가 할 일이 없다. 기다리면 새 평가와 함께 다시 부른다.
   bool _pending = false;
+  Timer? _pendingRetry;
+  int _pendingAttempts = 0;
+  String? _pendingVersion;
 
   /// 화면에 보이는 안내가 최신 계산의 것이 아닌가.
   ///
@@ -80,26 +85,50 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
 
   @override
   void dispose() {
+    _pendingRetry?.cancel();
     widget.headline.removeListener(_onEvaluation);
     super.dispose();
   }
 
   void _onEvaluation() {
-    final value = widget.headline.value;
+    final id = _versionFor(widget.headline.value);
+    if (id == null) return;
+    if (id != _pendingVersion) {
+      _pendingRetry?.cancel();
+      _pendingAttempts = 0;
+      _pendingVersion = id;
+    }
+    if (id == _loadedFor || _loading) return;
+    _load(id);
+  }
+
+  String? _versionFor(ScheduleEvaluationV2? value) {
     // 멈춘(출발한) 일정도 부른다. 서버가 마지막 계산의 안내를 그대로 돌려주므로(2026-09-22),
     // 출발한 뒤에도 출발할 때 본 AI 안내가 카드에 남는다. 앱을 다시 켜도 같다.
     if (value == null ||
         (value.state != EvaluationState.ready &&
             value.state != EvaluationState.stopped)) {
-      return;
+      return null;
     }
     final evaluationId = value.evaluationId;
-    if (evaluationId == null || evaluationId.isEmpty) return;
-    final id = value.state == EvaluationState.stopped
+    if (evaluationId == null || evaluationId.isEmpty) return null;
+    return value.state == EvaluationState.stopped
         ? '$evaluationId:departed:${value.computedAt?.toIso8601String()}'
         : evaluationId;
-    if (id == _loadedFor || _loading) return;
-    _load(id);
+  }
+
+  /// 첫 안내 조회가 409/404로 끝나도 같은 evaluationId를 다시 확인한다. 평가 값은
+  /// 그대로인 채 안내만 늦게 준비될 수 있으므로 새 평가 알림만 기다리면 영원히 빈 카드다.
+  void _retryPending(String id) {
+    _pendingRetry?.cancel();
+    if (_pendingAttempts >= 10) return;
+    _pendingAttempts++;
+    _pendingRetry = Timer(const Duration(seconds: 3), () {
+      if (!mounted || _pendingVersion != id || _loading || _loadedFor == id) {
+        return;
+      }
+      _load(id);
+    });
   }
 
   Future<void> _load(String evaluationId) async {
@@ -120,6 +149,7 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
       if (!mounted) return;
       setState(() {
         if (guide != null) {
+          _pendingRetry?.cancel();
           _guide = guide;
           _loadedFor = evaluationId;
           _retryFor = null;
@@ -130,6 +160,7 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
           // (2026-09-22 제보).
           _retryFor = evaluationId;
           _pending = true;
+          _retryPending(evaluationId);
         }
       });
     } on Object {
@@ -141,7 +172,13 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
         });
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+        // 조회 중 새 평가가 도착했다면 그 버전의 안내를 이어서 불러온다.
+        if (_versionFor(widget.headline.value) != evaluationId) {
+          _onEvaluation();
+        }
+      }
     }
   }
 
@@ -201,7 +238,11 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
                       child: Text(
                         // 끝난 일정에서는 과거형이다. 다녀온 일정에 "이 일정에 맞춰 … 제안해요" 가
                         // 현재형으로 남아 있으면 아직 할 일이 있는 것처럼 읽힌다.
-                        widget.pastTense ? '이 일정에 맞춰 안내했어요' : '이 일정에 맞춰',
+                        widget.pastTense
+                            ? '이 일정에 맞춰 안내했어요'
+                            : guide?.generatedBy?.startsWith('GMS:') == true
+                            ? 'AI 교통 안내'
+                            : '교통 상황 안내',
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
@@ -244,11 +285,13 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
     if (guide == null) {
       return [
         Text(
-          _loading
-              ? '추천 안내를 불러오고 있어요.'
+          widget.headline.value == null
+              ? '교통 상황과 변경 이유를 확인하고 있어요.'
+              : _loading
+              ? '교통 상황 안내를 불러오고 있어요.'
               : _pending
-              ? '계산이 끝나면 안내를 준비해요.'
-              : '추천 안내를 아직 불러오지 못했어요.',
+              ? '계산 결과를 확인해 안내를 준비하고 있어요.'
+              : '교통 상황 안내를 아직 불러오지 못했어요.',
           key: const Key('guideEmptyMessage'),
           style: const TextStyle(
             fontSize: 15,
@@ -331,10 +374,10 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
         _changeBadge(guide.changeType!),
         const SizedBox(height: 8),
       ],
-      // 사유가 없으면 지어내지 않는다. 서버가 준 결론(headline)을 대신 크게 쓰고,
-      // 아래 상자에서는 같은 문장을 되풀이하지 않는다.
+      // 구형 서버가 사유 없이 출발·도착 숫자만 주더라도 그것을 다시 읽어 주지 않는다.
+      // 현재 계산에서 실제로 확인된 변경 유형 또는 지연 사유만 설명한다.
       Text(
-        guide.recommendationReason ?? guide.headline ?? '최신 계산 결과예요.',
+        _reason(guide),
         key: guide.recommendationReason != null
             ? const Key('guideRecommendationReason')
             : const Key('guideFallbackLine'),
@@ -346,6 +389,19 @@ class _RecommendationGuideCardState extends State<RecommendationGuideCard> {
         ),
       ),
     ];
+  }
+
+  static String _reason(RecommendationGuide guide) {
+    if (guide.recommendationReason != null) {
+      return guide.recommendationReason!;
+    }
+    if (guide.delay.hasMessage) return guide.delay.reason!;
+    return switch (guide.changeType) {
+      'ROUTE_CHANGED' => '새 계산에서 다른 경로가 제안됐어요. 변경 이유를 확인하고 있어요.',
+      'DEPARTURE_TIME_CHANGED' => '새 계산에서 출발시각이 바뀌었어요. 변경 이유를 확인하고 있어요.',
+      'ETA_UPDATED' => '새 계산에서 도착 예상이 바뀌었어요. 변경 이유를 확인하고 있어요.',
+      _ => '확인된 교통 영향이나 추천 변경은 없어요. 새 정보가 들어오면 다시 살펴볼게요.',
+    };
   }
 
   /// 중복되는 경로·시각·요금은 아래 전용 카드에 맡긴다. 여기에는 확인된

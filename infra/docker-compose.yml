@@ -264,11 +264,11 @@ services:
       - --innodb-log-buffer-size=16M
       - --slow-query-log=ON
       - --long-query-time=1
-      # 바이너리 로그 보존 3일(기본 30일). 복제가 없고 복구는 04:10 일일 덤프(+서버1 사본)로 하므로 binlog 는 덤프 사이의
+      # 바이너리 로그 보존 1일(기본 30일). 복제가 없고 복구는 04:10 일일 덤프(+서버1 사본)로 하므로 binlog 는 덤프 사이의
       # 시점 복구용으로만 값어치가 있는데, 2026-09-23 실측 58개 53.8GB 가 쌓여 서버2 디스크의 17% 를 차지했다(실제 데이터는 11.6GB).
-      # 추천 결과 표가 행당 약 700KB 라 갱신마다 그만큼 기록되기 때문이다. 이 값은 재기동 때 반영되고, 이미 쌓인 것은
-      # `PURGE BINARY LOGS BEFORE NOW() - INTERVAL 3 DAY` 로 한 번 정리했다.
-      - --binlog-expire-logs-seconds=259200
+      # schedule_evaluation(행 평균 1.5MB)·recommendation(행 750KB) 이 갱신마다 통째로 기록돼 하루 16~19GB 씩 쌓이기 때문이다.
+      # 1일이면 정상 상태 약 17GB. 이 값은 재기동 때 반영되고, 서버에는 SET PERSIST 로 같은 값을 즉시 넣었다.
+      - --binlog-expire-logs-seconds=86400
     environment:
       TZ: ${TZ:-Asia/Seoul}
       MYSQL_DATABASE: ${MYSQL_DATABASE}

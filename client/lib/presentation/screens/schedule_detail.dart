@@ -113,10 +113,12 @@ class ScheduleDetailScreen extends StatelessWidget {
       );
 
   Future<Schedule?> _loadSchedule() async {
-    if (initialSchedule != null) return initialSchedule;
     try {
       return await repository.scheduleById(scheduleId);
     } on Object {
+      // 홈에서 전달된 일정은 빠른 첫 표시용이다. 출발 버튼을 누르고 돌아왔을 때는
+      // 실제 출발 시각과 이동 상태를 서버에서 다시 읽어야 이전 스냅샷이 남지 않는다.
+      if (initialSchedule != null) return initialSchedule;
       final schedules = await repository.schedules();
       for (final schedule in schedules) {
         if (schedule.id == scheduleId) return schedule;
@@ -472,15 +474,20 @@ class ScheduleDetailScreen extends StatelessWidget {
                 headline: headline,
                 onSelected: recommendationApi == null
                     ? null
-                    : (savedRoute, displayRank, evaluated) => _openSavedRoute(
-                        c,
-                        schedule,
-                        savedRoute,
-                        routeRepository,
-                        displayRank: displayRank,
-                        evaluated: evaluated,
-                        estimatedArrivalAt: headline.value?.estimatedArrivalAt,
-                      ),
+                    : (savedRoute, displayRank, evaluated) async {
+                        final result = await _openSavedRoute(
+                          c,
+                          schedule,
+                          savedRoute,
+                          routeRepository,
+                          displayRank: displayRank,
+                          evaluated: evaluated,
+                          estimatedArrivalAt:
+                              headline.value?.estimatedArrivalAt,
+                        );
+                        if (c.mounted) reload?.call();
+                        return result;
+                      },
               ),
               const SizedBox(height: 16),
               // 계산 근거(내부 사유 코드) 대신 사용자가 행동할 수 있는 안내를 보여준다.
@@ -504,12 +511,15 @@ class ScheduleDetailScreen extends StatelessWidget {
                   // 바뀌는 계산과 어긋난다.
                   onStartJourney: finished
                       ? null
-                      : () => _startJourney(
-                          c,
-                          schedule,
-                          savedRoutes,
-                          headline.value,
-                        ),
+                      : () async {
+                          await _startJourney(
+                            c,
+                            schedule,
+                            savedRoutes,
+                            headline.value,
+                          );
+                          if (c.mounted) reload?.call();
+                        },
                 ),
                 const SizedBox(height: 16),
               ],

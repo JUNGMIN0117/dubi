@@ -43,7 +43,8 @@ TOPIS AI 잡의 컬럼, 좌표·반경, 결측/오류 정책과 과거 아카이
 도시 인구·예측·도로 링크의 컬럼, WGS84 `XYLIST`, 결측 및 백필 정책은
 [City Realtime Silver 계약](../docs/contracts/city-realtime-silver.md)을 따른다.
 
-Compose의 TOPIS AI와 교통 돌발 잡은 각각 `topis-ai`, `road-silver` 프로필에서만 명시적으로 켠다.
+Compose의 TOPIS AI는 `topis-ai`, 교통 돌발 Silver는 `road-silver` 프로필로 서버1에서 실행한다.
+새 돌발 회차를 버스 구간 Redis feature로 갱신하는 Worker는 서버2의 `road-feature` 프로필로 실행한다.
 일반 비기상 잡의 배포 절차는
 [배포 요청 문서](../docs/meetings/2026-09-04-realtime-latest-deployment-handoff.md)를 따른다.
 

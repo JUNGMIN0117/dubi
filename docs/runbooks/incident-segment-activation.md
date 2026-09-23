@@ -68,7 +68,9 @@ python batch/export_bus_road_provisional_mapping.py \
   --output /data/provisional-bus-road.json
 ```
 
-발행 결과를 확인한 뒤 세 서비스에 같은 설정을 전달한다.
+발행 결과를 확인한 뒤 세 서비스에 같은 설정을 전달한다. 기본 배포는 후보 매핑과 최신
+Feature 읽기를 활성화하고, 서버1의 `road-silver`와 서버2의 `road-feature`를 상시 실행한다.
+후보 대응표가 없거나 만료되면 임의 링크로 대체하지 않고 `MAPPING_UNAVAILABLE`로 남는다.
 
 ```env
 ROAD_PROVISIONAL_MAPPING_ENABLED=true
@@ -80,3 +82,7 @@ ML_REDIS_LATEST_FEATURES_ENABLED=true
 보존한다. ML snapshot의 `provenance.mappings.road.status`와 일정 상세 API의
 `roadBlock.mappingStatus`는 `PROVISIONAL`이다. 앱은 이를 `후보 매핑 · 추정 정보`로 표시한다.
 후보 artifact TTL 기본값은 7일이며 다시 발행하지 않으면 자동 만료된다.
+
+`PROVISIONAL` 사건은 일정 상세의 설명과 경로 위험 신호로 사용한다. 후보 매핑만으로 경로를
+통행 불가 처리하지 않는다. 경로의 강제 제외는 정식 `RESOLVED` 매핑과 전체 통제 근거가 모두
+확인된 별도 상태에서만 적용한다.

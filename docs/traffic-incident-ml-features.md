@@ -25,7 +25,9 @@
 
 ## 운영 조건과 한계
 
-- `TRAFFIC_LINK_MASTER_PATH`/SHA와 승인된 버스 도로 매핑이 배포되어야 한다. 후보 매핑이나 단순히 같은 숫자 링크 ID는 사용하지 않는다.
+- 기본 운영은 엄격한 단일 경로 후보를 별도 `PROVISIONAL` 대응표로 사용할 수 있다. 이 값은
+  경로 상태 설명용 추정 근거이며 정식 `RESOLVED`와 구분한다. 대응표가 없거나 만료되면 같은 숫자
+  링크 ID를 임의로 연결하지 않는다.
 - 현재 승인 매핑이 0건이면 `verifiedIncidentCount=null`, `incidentDataAvailable=false`가 정상이다. 실데이터 연결률을 측정하고 매핑을 승인해야 수치가 채워진다.
 - 링크를 확인하지 못한 돌발이 남아 있으면 `verifiedIncidentCount`는 전체 영향 건수의 **하한**일 수 있다. ML 학습에는 `incidentUnmatchedCount`, `incidentDataAvailable`을 함께 넣고, 이 수만으로 지연 여부를 단정하지 않는다.
 - `bus-segment-feature-v3`는 현재시점 온라인 특성 계약이다. 설명문 GMS 추출값은 추출시각이 `asOf` 이후면 사용하지 않는다. 기존 학습 행 v1이나 배포 모델에 자동으로 입력되지 않는다. 과거 시점의 완전한 수집 회차와 당시 승인 매핑으로 같은 규칙의 학습 행을 만든 뒤 모델을 재학습해야 한다.

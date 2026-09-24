@@ -30,10 +30,7 @@ def _windows(raw: str) -> list[tuple[int, int]]:
 
 
 def _inside(minute: int, windows: list[tuple[int, int]]) -> bool:
-    return any(
-        start <= minute < end if start < end else minute >= start or minute < end
-        for start, end in windows
-    )
+    return any(start <= minute < end if start < end else minute >= start or minute < end for start, end in windows)
 
 
 def _positive(extra: dict[str, str], name: str, default: int) -> int:

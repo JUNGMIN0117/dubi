@@ -248,11 +248,7 @@ def collect(name, settings: Settings, client):
         targets = module.select_city_areas(areas, requested.split(",") if requested else None)
     expected = len(targets) if targets else (2 if name == "subway_arrival" else 1)
     planned_interval = (
-        bus_plan.interval_seconds
-        if bus_plan
-        else topis_plan.interval_seconds
-        if topis_plan
-        else default_interval
+        bus_plan.interval_seconds if bus_plan else topis_plan.interval_seconds if topis_plan else default_interval
     )
     interval = max(planned_interval, settings.interval_seconds or 0)
     if bus_candidates:
@@ -373,15 +369,9 @@ def collect(name, settings: Settings, client):
                 result.get("pageSize") or len(result.get("items", [])),
             )
         reported_complete = result.get("isComplete")
-        complete = name == "topis_notice" or (
-            not bool(result.get("hasMore")) and reported_complete is not False
-        )
+        complete = name == "topis_notice" or (not bool(result.get("hasMore")) and reported_complete is not False)
         status = "SUCCESS" if complete else "PARTIAL"
-        scope_key = (
-            f"{topis_plan.scope}:recent-{result.get('pageSize', 100)}"
-            if topis_plan
-            else "all-current"
-        )
+        scope_key = f"{topis_plan.scope}:recent-{result.get('pageSize', 100)}" if topis_plan else "all-current"
         batch = PollBatch(
             [to_record(name, row) for row in result["items"]],
             status=status,

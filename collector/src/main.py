@@ -310,11 +310,7 @@ def main() -> int:
                 # a 100-route bus scan must not add the full interval again after
                 # that work completes.
                 wait_seconds = max(1, interval - (time.monotonic() - cycle_started))
-            if (
-                settings.source == "bus_location"
-                and not waiting_for_retry
-                and not pooled_bus
-            ):
+            if settings.source == "bus_location" and not waiting_for_retry and not pooled_bus:
                 # After either regular/retry completion, keep the original 8h deadline.
                 try:
                     slot, key = bus_key_candidates(settings, "bus_location")[0]

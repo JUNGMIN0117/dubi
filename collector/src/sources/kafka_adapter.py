@@ -75,9 +75,7 @@ def _bus_key_candidates(settings: Settings, fallback_name: str) -> list[tuple[st
 
 
 def _bus_budget_limit(name: str, settings: Settings) -> int:
-    variable = (
-        "BUS_ARRIVAL_DAILY_BUDGET_PER_KEY" if name == "bus_arrival" else "BUS_LOCATION_DAILY_BUDGET_PER_KEY"
-    )
+    variable = "BUS_ARRIVAL_DAILY_BUDGET_PER_KEY" if name == "bus_arrival" else "BUS_LOCATION_DAILY_BUDGET_PER_KEY"
     return int(settings.extra.get(variable, settings.extra.get("API_DAILY_LIMIT", "900")))
 
 
@@ -89,9 +87,7 @@ def _claim_bus_budget(name, settings, candidates, interval, expected, allow_retr
     default_pool = "data-go-kr:15000314" if name == "bus_arrival" else "data-go-kr:15000332"
     pool = settings.extra.get(pool_variable, default_pool)
     limit = _bus_budget_limit(name, settings)
-    budgets = [
-        (slot, key, RequestBudget(path, key, limit, namespace=f"{pool}:{slot}")) for slot, key in candidates
-    ]
+    budgets = [(slot, key, RequestBudget(path, key, limit, namespace=f"{pool}:{slot}")) for slot, key in candidates]
     if len(budgets) > 1:
         # Cadence belongs to the dataset, not to either credential. A shared
         # schedule prevents A/B calls from bunching when the time window changes.

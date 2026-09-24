@@ -15,9 +15,15 @@ class BusCollectionPolicyTest(unittest.TestCase):
 
     def test_arrival_uses_peak_offpeak_and_overnight_cadence(self):
         monday = datetime(2026, 9, 21, tzinfo=KST)
-        self.assertEqual(plan_bus_collection("bus_arrival", self.targets, monday.replace(hour=7), {}).interval_seconds, 300)
-        self.assertEqual(plan_bus_collection("bus_arrival", self.targets, monday.replace(hour=12), {}).interval_seconds, 900)
-        self.assertEqual(plan_bus_collection("bus_arrival", self.targets, monday.replace(hour=2), {}).interval_seconds, 1800)
+        self.assertEqual(
+            plan_bus_collection("bus_arrival", self.targets, monday.replace(hour=7), {}).interval_seconds, 300
+        )
+        self.assertEqual(
+            plan_bus_collection("bus_arrival", self.targets, monday.replace(hour=12), {}).interval_seconds, 900
+        )
+        self.assertEqual(
+            plan_bus_collection("bus_arrival", self.targets, monday.replace(hour=2), {}).interval_seconds, 1800
+        )
 
     def test_location_rotates_dense_panel_and_includes_sparse_panel_every_ten_minutes(self):
         monday = datetime(2026, 9, 21, 7, 2, tzinfo=KST)

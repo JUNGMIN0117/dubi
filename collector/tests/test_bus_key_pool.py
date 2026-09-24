@@ -45,9 +45,7 @@ class BusKeyPoolTest(unittest.TestCase):
 
             with patch("sources.kafka_adapter.RequestBudget", side_effect=budget_factory):
                 with patch("sources.bus_arrival.fetch_all_bus_arrivals", side_effect=fetch):
-                    with httpx.Client(
-                        transport=httpx.MockTransport(lambda request: httpx.Response(200))
-                    ) as client:
+                    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as client:
                         collect("bus_arrival", settings, client)
                         clock[0] += 1
                         collect("bus_arrival", settings, client)

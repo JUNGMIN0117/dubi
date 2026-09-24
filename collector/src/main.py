@@ -316,9 +316,11 @@ def main() -> int:
                         wait_seconds = next_at - time.time()
                 except Exception:
                     log.warning("Could not read bus regular deadline; using normal polling interval")
-            if settings.source != "bus_location" and not waiting_for_retry and wait_seconds == interval:
+            if not settings.source.startswith("bus_") and not waiting_for_retry and wait_seconds == interval:
                 # 정상 수집이든 쉬는 시간이라 건너뛴 것이든, 다음 허용 시각까지만 기다린다.
                 # 멈춤 시간대·재시도처럼 따로 정한 대기(wait_seconds != interval)는 건드리지 않는다.
+                # 버스는 키 풀별 이름표(namespace)로 호출 기록을 따로 남겨 이 조회로는 다음 시각을 읽을 수 없다.
+                # 버스 대기는 위의 키 풀 규칙이 정한다.
                 wait_seconds = resume_wait(_next_cycle_at(settings), time.time(), wait_seconds)
             stop.wait(wait_seconds)
 

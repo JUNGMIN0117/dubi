@@ -217,7 +217,7 @@ def main() -> int:
         if topis_dynamic
         else 300
         if settings.source == "bus_arrival" and pooled_bus
-        else 120
+        else int(settings.extra.get("BUS_LOCATION_DENSE_INTERVAL_SECONDS", "150"))
         if pooled_bus
         else spec.default_interval_seconds
     )

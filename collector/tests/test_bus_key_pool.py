@@ -19,7 +19,7 @@ class BusKeyPoolTest(unittest.TestCase):
             settings = Settings(
                 source="bus_arrival",
                 kafka_bootstrap_servers="unused",
-                api_keys={"BUS_ARRIVAL_API_KEY_A": "key-a", "BUS_ARRIVAL_API_KEY_B": "key-b"},
+                api_keys={"BUS_API_KEY_A": "key-a", "BUS_API_KEY_B": "key-b"},
                 extra={
                     "API_BUDGET_PATH": str(Path(directory) / "budget.db"),
                     "BUS_ROUTE_IDS": "100100118",
@@ -55,19 +55,20 @@ class BusKeyPoolTest(unittest.TestCase):
             self.assertEqual([item[0] for item in used], ["key-a", "key-b"])
             self.assertEqual(used[0][1], used[1][1])
 
-    def test_arrival_and_location_pools_are_isolated(self):
+    def test_arrival_and_location_share_the_same_pool(self):
         settings = Settings(
             source="bus_location",
             kafka_bootstrap_servers="unused",
             api_keys={
-                "BUS_ARRIVAL_API_KEY_A": "arrival-a",
-                "BUS_ARRIVAL_API_KEY_B": "arrival-b",
-                "BUS_LOCATION_API_KEY_A": "location-a",
+                "BUS_API_KEY_A": "shared-a",
+                "BUS_API_KEY_B": "shared-b",
             },
         )
 
-        self.assertEqual(bus_key_candidates(settings, "bus_location"), [("A", "location-a")])
-        self.assertFalse(bus_dense_policy_enabled(settings, "bus_location"))
+        expected = [("A", "shared-a"), ("B", "shared-b")]
+        self.assertEqual(bus_key_candidates(settings, "bus_location"), expected)
+        self.assertEqual(bus_key_candidates(settings, "bus_arrival"), expected)
+        self.assertTrue(bus_dense_policy_enabled(settings, "bus_location"))
         self.assertTrue(bus_dense_policy_enabled(settings, "bus_arrival"))
 
     def test_duplicate_pool_credentials_do_not_enable_dense_policy(self):
@@ -75,12 +76,22 @@ class BusKeyPoolTest(unittest.TestCase):
             source="bus_location",
             kafka_bootstrap_servers="unused",
             api_keys={
-                "BUS_LOCATION_API_KEY_A": "same-key",
-                "BUS_LOCATION_API_KEY_B": "same-key",
+                "BUS_API_KEY_A": "same-key",
+                "BUS_API_KEY_B": "same-key",
             },
         )
 
         self.assertEqual(bus_key_candidates(settings, "bus_location"), [("A", "same-key")])
+        self.assertFalse(bus_dense_policy_enabled(settings, "bus_location"))
+
+    def test_encoding_and_decoding_forms_count_as_one_credential(self):
+        settings = Settings(
+            source="bus_location",
+            kafka_bootstrap_servers="unused",
+            api_keys={"BUS_API_KEY_A": "abc%2Bdef%3D", "BUS_API_KEY_B": "abc+def="},
+        )
+
+        self.assertEqual(bus_key_candidates(settings, "bus_location"), [("A", "abc%2Bdef%3D")])
         self.assertFalse(bus_dense_policy_enabled(settings, "bus_location"))
 
 

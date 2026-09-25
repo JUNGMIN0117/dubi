@@ -1,13 +1,12 @@
-"""Source-specific credential pools for Seoul bus APIs."""
+"""Shared credential pool for Seoul bus arrival and location APIs."""
 
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 from config import Settings
 
-POOL_KEY_NAMES = {
-    "bus_arrival": ("BUS_ARRIVAL_API_KEY_A", "BUS_ARRIVAL_API_KEY_B"),
-    "bus_location": ("BUS_LOCATION_API_KEY_A", "BUS_LOCATION_API_KEY_B"),
-}
+POOL_KEY_NAMES = ("BUS_API_KEY_A", "BUS_API_KEY_B")
 
 LEGACY_KEY_NAMES = {
     "bus_arrival": "BUS_ARRIVAL_API_KEY",
@@ -16,18 +15,18 @@ LEGACY_KEY_NAMES = {
 
 
 def configured_bus_pool(settings: Settings, source: str) -> list[tuple[str, str]]:
-    """Return distinct A/B credentials configured for one bus dataset only."""
+    """Return distinct A/B credentials shared by both Seoul bus datasets."""
 
-    try:
-        names = POOL_KEY_NAMES[source]
-    except KeyError as exc:
-        raise ValueError(f"unsupported bus source: {source}") from exc
+    if source not in LEGACY_KEY_NAMES:
+        raise ValueError(f"unsupported bus source: {source}")
 
     credentials = []
     seen = set()
-    for slot, name in zip(("A", "B"), names, strict=True):
+    for slot, name in zip(("A", "B"), POOL_KEY_NAMES, strict=True):
         key = settings.api_keys.get(name)
-        normalized = key.strip() if key else ""
+        # Encoding/Decoding 표기는 같은 인증키다. URL decode 후 비교해야
+        # 같은 키를 A/B 두 개로 잘못 세어 고빈도 정책을 켜지 않는다.
+        normalized = unquote(key.strip()) if key else ""
         if normalized and normalized not in seen:
             credentials.append((slot, key))
             seen.add(normalized)
@@ -44,6 +43,6 @@ def bus_key_candidates(settings: Settings, source: str) -> list[tuple[str, str]]
 
 
 def bus_dense_policy_enabled(settings: Settings, source: str) -> bool:
-    """Dense collection requires two distinct approved keys for that dataset."""
+    """Dense collection requires two distinct keys approved for both datasets."""
 
     return len(configured_bus_pool(settings, source)) == 2

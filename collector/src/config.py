@@ -38,10 +38,8 @@ class Settings:
         "INCHEON_API_KEY",
         "KMA_API_KEY",  # weather (우선)
         "DATA_GO_KR_API_KEY",  # weather (KMA 없을 때)
-        "BUS_ARRIVAL_API_KEY_A",  # bus_arrival short-term pool A
-        "BUS_ARRIVAL_API_KEY_B",  # bus_arrival short-term pool B
-        "BUS_LOCATION_API_KEY_A",  # bus_location short-term pool A
-        "BUS_LOCATION_API_KEY_B",  # bus_location short-term pool B
+        "BUS_API_KEY_A",  # bus_arrival/bus_location shared pool A
+        "BUS_API_KEY_B",  # bus_arrival/bus_location shared pool B
         "BUS_ARRIVAL_API_KEY",  # bus_arrival
         "BUS_LOCATION_API_KEY",  # bus_location
         "SUBWAY_API_KEY",  # subway_arrival, subway_location

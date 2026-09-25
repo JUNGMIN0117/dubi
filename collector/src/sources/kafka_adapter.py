@@ -30,7 +30,7 @@ POLICIES = {
     "subway_arrival": ("SUBWAY_API_KEY", "subway.arrival", 360, "transport"),
     "subway_location": ("SUBWAY_API_KEY", "subway.position", 3600, "transport"),
     "subway_alert": ("SUBWAY_ALERT_API_KEY", "subway.alert", 900, "transport"),
-    "city_realtime": ("CITY_REALTIME_API_KEY", "city.realtime", 21600, "city"),
+    "city_realtime": ("CITY_REALTIME_API_KEY", "city.realtime", 300, "city"),
     "topis_notice": ("TOPIS_NOTICE_API_KEY", "topis.notice", 900, "city"),
     "traffic_incident": ("TRAFFIC_INCIDENT_API_KEY", "traffic.incident", 900, "city"),
 }
@@ -106,6 +106,23 @@ def _claim_bus_budget(name, settings, candidates, interval, expected, allow_retr
     if len(exceeded) == len(budgets):
         raise BudgetExceeded(f"All credentials exhausted for {pool}")
     return None, None
+
+
+def make_request_budget(name: str, settings: Settings, key: str) -> RequestBudget:
+    """소스별 호출 한도와 quota namespace를 동일하게 생성한다."""
+    path = settings.extra.get(
+        "API_BUDGET_PATH", str(Path(__file__).resolve().parents[2] / "data" / "request_budget.sqlite3")
+    )
+    if name == "city_realtime":
+        limit = int(settings.extra.get("CITY_REALTIME_DAILY_BUDGET", "40000"))
+        namespace = settings.extra.get("CITY_REALTIME_QUOTA_POOL", "seoul-open-data:OA-21285")
+    elif name == "topis_notice":
+        limit = int(settings.extra.get("TOPIS_NOTICE_DAILY_BUDGET", "500"))
+        namespace = settings.extra.get("TOPIS_NOTICE_QUOTA_POOL", "seoul-open-data:OA-22861")
+    else:
+        limit = int(settings.extra.get("API_DAILY_LIMIT", "900"))
+        namespace = ""
+    return RequestBudget(path, key, limit, namespace=namespace)
 
 
 def _time(value, fallback):
@@ -267,22 +284,7 @@ def collect(name, settings: Settings, client):
             return PollBatch(status="RATE_LIMITED", scope_key=name, error_code="POLL_COOLDOWN")
     else:
         key = settings.api_key(key_name)
-        budget = RequestBudget(
-            settings.extra.get(
-                "API_BUDGET_PATH", str(Path(__file__).resolve().parents[2] / "data" / "request_budget.sqlite3")
-            ),
-            key,
-            int(
-                settings.extra.get("TOPIS_NOTICE_DAILY_BUDGET", "500")
-                if name == "topis_notice"
-                else settings.extra.get("API_DAILY_LIMIT", "900")
-            ),
-            namespace=(
-                settings.extra.get("TOPIS_NOTICE_QUOTA_POOL", "seoul-open-data:OA-22861")
-                if name == "topis_notice"
-                else ""
-            ),
-        )
+        budget = make_request_budget(name, settings, key)
     if not bus_candidates and not budget.claim_cycle(name, interval, expected, allow_retry=name == "bus_location"):
         log.info("source=%s cooldown active; no API request", name)
         return PollBatch(status="RATE_LIMITED", scope_key=name, error_code="POLL_COOLDOWN")

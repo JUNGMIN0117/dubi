@@ -17,7 +17,7 @@ from config import Settings
 from main import load_source, run_cycle
 from publisher import Publisher
 from request_budget import BudgetExceeded, RequestBudget
-from sources.kafka_adapter import POLICIES, _limit_bus_targets, to_record
+from sources.kafka_adapter import POLICIES, _limit_bus_targets, make_request_budget, to_record
 from test_bus_arrival import SAMPLE_JSON as BUS_ARRIVAL
 from test_bus_location import SAMPLE_JSON as BUS_LOCATION
 from test_city_realtime import SAMPLE_RESPONSE as CITY
@@ -246,7 +246,13 @@ class KafkaSourceTest(unittest.TestCase):
     def test_default_shared_key_planned_counts(self):
         self.assertEqual(2 * (86400 // POLICIES["bus_arrival"][2]) * 100, 600)
         self.assertEqual(86400 // POLICIES["subway_arrival"][2] * 2 + 86400 // POLICIES["subway_location"][2] * 16, 864)
-        self.assertEqual(86400 // POLICIES["city_realtime"][2] * 121 + 3 * (86400 // 900), 772)
+        self.assertEqual(86400 // POLICIES["city_realtime"][2] * 121, 34848)
+
+    def test_city_realtime_uses_dedicated_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            settings = settings_for("city_realtime", Path(directory) / "budget.db")
+            budget = make_request_budget("city_realtime", settings, "test-secret")
+        self.assertEqual(budget.limit, 40000)
 
 
 @unittest.skipUnless(os.getenv("KAFKA_PROTOCOL_TEST") == "1", "requires local TCP sockets")

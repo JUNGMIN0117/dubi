@@ -29,7 +29,7 @@ Kafka: transport.raw / city.raw
 | 지하철 도착 | `subway_arrival` | 서울 전체 역의 열차 도착예정 | 전체 역 | 6분 | 최대 480 | `transport.raw` |
 | 지하철 위치 | `subway_location` | 현재 운행 중인 열차 위치 | 16개 호선 | 1시간 | 384 | `transport.raw` |
 | 지하철 알림 | `subway_alert` | 지연·무정차·운행 변경 알림 | 최근 1,000행 | 15분 | 96 | `transport.raw` |
-| 실시간 도시 | `city_realtime` | 인구·교통·주차·따릉이·기상·행사 | 장소 121개 | 6시간 | 484 | `city.raw` |
+| 실시간 도시 | `city_realtime` | 인구·교통·주차·따릉이·기상·행사 | 장소 121개 | 5분 | 34,848 | `city.raw` |
 | 교통 돌발 | `traffic_incident` | 사고·공사·도로 통제 | 서울시 전역 | 15분 | 보통 96 | `city.raw` |
 | TOPIS 공지 | `topis_notice` | 교통통제·버스 우회·교통 공지 | 최근 100행 | 평일 첨두 5분, 그 외 주간 10분, 야간 1시간 | 평일 158, 주말 119 | `city.raw` |
 | 날씨 | `weather` | 기온·강수·습도·바람 등 초단기실황 | 서울 격자 14개 | 10분 | 2,016 | `city.raw` |
@@ -69,12 +69,10 @@ TOPIS 공지는 KST 평일 06:30~09:30·16:30~20:00에 5분, 05:00~24:00의 나�
 시간과 주말 주간에는 10분, 00:00~05:00에는 1시간마다 최근 100건을 조회한다. 기존
 SQLite 발행 원장으로 동일 공지는 생략하고 신규·수정 공지만 Kafka에 발행한다.
 
-서울 일반키를 공유할 때 현재 기본 주기의 호출량은 도시데이터 484회, 지하철 알림 96회,
-TOPIS 공지 96회, 돌발정보 최소 96회로 **하루 최소 772회**다. 돌발정보가 1,000행을 넘으면
-추가 페이지마다 호출이 늘어난다. 프로젝트의 `API_DAILY_LIMIT=900`은 실제 키 값별 최근
-24시간 내부 보호 한도이며 서울시가 AccInfo에 공지한 일 한도가 아니다. 실시간 지하철
-도착·위치는 별도 `SUBWAY_API_KEY`를 쓴다. 운영 주기를 줄이기 전에는 같은 키의 다른
-수집기, 실제 페이지 수와 사용량을 확인한다.
+실시간 도시데이터는 121개 장소를 5분마다 호출하므로 하루 34,848회다.
+`CITY_REALTIME_DAILY_BUDGET=40000`은 이 호출량에 운영 여유를 둔 프로젝트 내부 보호 한도이며,
+서울시가 공지한 일일 한도가 아니다. `CITY_REALTIME_QUOTA_POOL`로 다른 서울 API의 내부 예산과
+분리한다. 실시간 지하철 도착·위치는 별도 `SUBWAY_API_KEY`를 쓴다.
 
 ### 공통 설정
 
@@ -85,6 +83,8 @@ TOPIS 공지 96회, 돌발정보 최소 96회로 **하루 최소 772회**다. �
 | `COLLECTOR_RUN_ONCE` | `true`면 한 사이클만 실행 | `false` |
 | `COLLECTOR_INTERVAL_SECONDS` | 수집 주기 재정의 | 수집기별 기본값 |
 | `API_DAILY_LIMIT` | 비기상 인증키별 최근 24시간 호출 한도 | `900` |
+| `CITY_REALTIME_DAILY_BUDGET` | 도시데이터 전용 최근 24시간 내부 호출 한도 | `40000` |
+| `CITY_REALTIME_QUOTA_POOL` | 도시데이터 호출 예산 구분자 | `seoul-open-data:OA-21285` |
 | `BUS_ARRIVAL_DAILY_BUDGET_PER_KEY` | 도착 데이터셋·키별 내부 24시간 예산 | `9000` |
 | `BUS_LOCATION_DAILY_BUDGET_PER_KEY` | 위치 데이터셋·키별 내부 24시간 예산 | `9000` |
 | `API_BUDGET_PATH` | 호출량 기록 SQLite 경로 | `data/request_budget.sqlite3` |

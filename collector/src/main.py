@@ -60,20 +60,13 @@ def resume_wait(next_at: float | None, now: float, wait_seconds: float) -> float
 
 def _next_cycle_at(settings: Settings) -> float | None:
     """호출 한도 기록에 남은 이 수집기의 다음 수집 허용 시각. 한도를 쓰지 않는 수집기면 None."""
-    from sources.kafka_adapter import POLICIES
+    from sources.kafka_adapter import POLICIES, make_request_budget
 
     policy = POLICIES.get(settings.source)
     if policy is None:
         return None
     try:
-        budget = RequestBudget(
-            settings.extra.get(
-                "API_BUDGET_PATH",
-                str(Path(__file__).resolve().parents[1] / "data" / "request_budget.sqlite3"),
-            ),
-            settings.api_key(policy[0]),
-            int(settings.extra.get("API_DAILY_LIMIT", "900")),
-        )
+        budget = make_request_budget(settings.source, settings, settings.api_key(policy[0]))
         return budget.next_cycle_at(settings.source)
     except Exception:
         log.warning("source=%s could not read cycle deadline; using normal polling interval", settings.source)

@@ -37,6 +37,26 @@ Flutter Android/Web → Nginx → Spring Boot → MySQL / Redis
                                       └→ Kafka → Notification → FCM
 ```
 
+## 화면
+
+Android 에뮬레이터(Galaxy S10, 1440×3040) 기준 전체 화면 캡처입니다. 개별 화면 44장은 [docs/screenshots](docs/screenshots/README.md)에 있습니다.
+
+### 온보딩 · 로그인
+
+![온보딩과 로그인 화면](docs/screenshots/00_overview_01_onboarding_auth.png)
+
+### 일정
+
+![일정 화면](docs/screenshots/00_overview_02_schedule.png)
+
+### 반복 일정 · 더보기 · 설정
+
+![반복 일정과 더보기, 설정 화면](docs/screenshots/00_overview_03_settings.png)
+
+### 경로 · 안내
+
+![경로 탐색과 이동 안내 화면](docs/screenshots/00_overview_04_route_navigation.png)
+
 ## 현재 상태
 
 이 커밋 전 구조는 팀 검토를 위한 초기 스캐폴드입니다.

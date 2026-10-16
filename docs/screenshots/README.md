@@ -1,0 +1,59 @@
+# DDUBI master 에뮬레이터 화면 캡처
+- 기준: origin/master `ded0053f`
+- 기기: Android Galaxy S10 에뮬레이터 (1440×3040)
+- 일정 예시: `[시연] 출근`, 멀티캠퍼스 역삼 → 서울숲, 07:00 출발 / 09:00 도착 희망
+- `40~44`는 화면 확인을 위해 Mock 경로 데이터를 사용한 캡처입니다.
+- `24`, `34`, `36`, `37`, `39`는 백엔드 미연결 상태에서 앱이 표시하는 실패 화면입니다.
+- `00_overview_*.png`는 아래 개별 화면을 주제별로 모아 놓은 요약 이미지입니다.
+
+## 요약
+- `00_overview_01_onboarding_auth.png` — 온보딩 · 로그인 · 계정 찾기 · 회원가입 · 소셜 로그인 (01~12)
+- `00_overview_02_schedule.png` — 홈 · 일정 목록 · 일정 등록/수정 · 알림 (13~27)
+- `00_overview_03_settings.png` — 반복 일정 · 더보기 · 계정 관리 · 브리핑 시간 · 저장 장소 · 이동 기록 (28~37)
+- `00_overview_04_route_navigation.png` — 경로 탐색 · 추천 결과 · 지도 · 이동 안내 · 도착 (38~44)
+
+## 파일
+- `01_onboarding_1.png`
+- `02_onboarding_2.png`
+- `03_onboarding_3.png`
+- `04_onboarding_4.png`
+- `05_login.png`
+- `06_account_recovery_id.png`
+- `07_account_recovery_password.png`
+- `08_signup.png`
+- `09_kakao_login_intro.png`
+- `10_google_login_intro.png`
+- `11_naver_login_intro.png`
+- `12_login_returned.png`
+- `13_home.png`
+- `14_schedule_list.png`
+- `15_route_search.png`
+- `16_notifications.png`
+- `17_more.png`
+- `18_schedule_form_empty.png`
+- `19_place_picker_departure.png`
+- `20_schedule_form_filled.png`
+- `21_schedule_form_options.png`
+- `22_schedule_after_save.png`
+- `23_time_picker.png`
+- `24_schedule_saved_result.png`
+- `25_schedule_detail_bottom.png`
+- `26_schedule_edit.png`
+- `27_schedule_list_created.png`
+- `28_repeat_schedule_list.png`
+- `29_repeat_schedule_options.png`
+- `30_more_current.png`
+- `31_account_management.png`
+- `32_morning_briefing_picker.png`
+- `33_night_briefing_picker.png`
+- `34_schedule_traffic_overview.png`
+- `35_more_bottom.png`
+- `36_saved_places.png`
+- `37_travel_records.png`
+- `38_route_search_filled.png`
+- `39_route_results.png`
+- `40_route_results_success.png`
+- `41_route_map.png`
+- `42_navigation_started.png`
+- `43_navigation_in_progress.png`
+- `44_arrival_confirmation.png`
